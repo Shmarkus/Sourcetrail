@@ -18,7 +18,7 @@ namespace utility
 std::vector<std::wstring> getRequiredJarNames()
 {
 	return {
-		L"gradle-tooling-api-6.7.1.jar",
+		L"gradle-tooling-api-7.3.jar",
 		L"java-indexer.jar",
 		L"org.eclipse.core.commands-3.9.800.jar",
 		L"org.eclipse.core.contenttype-3.7.800.jar",
@@ -34,8 +34,8 @@ std::vector<std::wstring> getRequiredJarNames()
 		L"org.eclipse.jdt.core-3.24.0.jar",
 		L"org.eclipse.osgi-3.16.100.jar",
 		L"org.eclipse.text-3.10.400.jar",
-		L"slf4j-api-1.7.28.jar",
-		L"slf4j-simple-1.7.30.jar"};
+		L"slf4j-api-2.0.6.jar",
+		L"slf4j-simple-2.0.6.jar"};
 }
 
 std::string prepareJavaEnvironment()

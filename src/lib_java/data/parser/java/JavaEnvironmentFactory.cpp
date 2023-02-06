@@ -66,7 +66,7 @@ void JavaEnvironmentFactory::createInstance(std::string classPath, std::string& 
 	// = const_cast<char*>("-Dcom.sun.management.jmxremote.authenticate=false");
 	// options[6].optionString = const_cast<char*>("-Dcom.sun.management.jmxremote.ssl=false");
 
-	vm_args.version = JNI_VERSION_1_8;
+	vm_args.version = JNI_VERSION_10;
 	vm_args.nOptions = optionCount;
 	vm_args.options = options;
 	vm_args.ignoreUnrecognized = false;	   // invalid options make the JVM init fail

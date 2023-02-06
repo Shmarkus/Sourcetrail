@@ -7,5 +7,6 @@ Malte Langkabel (@mlangkabel) <mlangkabel@coati.io>
 Manuel Dobusch
 Viktoria Pfausler
 Louis St-Amour (@LouisStAmour) <LouisStAmour@gmail.com>
+Markus Karileet (@Shmarkus) <markuskarileet@hotmail.com>
 
 Note: (@user) means a github user name.

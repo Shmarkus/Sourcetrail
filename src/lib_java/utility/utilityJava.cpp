@@ -17,27 +17,28 @@ namespace utility
 {
 std::vector<std::wstring> getRequiredJarNames()
 {
+//TODO: gwt rid of this list either by including jars in java-indexer or some other way.
 	return {
-		L"gradle-tooling-api-8.6.jar",
-		L"java-indexer.jar",
-		L"org.eclipse.core.commands_3.11.200.v20231108-1058.jar",
-		L"org.eclipse.core.contenttype_3.9.200.v20230914-0751.jar",
-		L"org.eclipse.core.expressions_3.9.200.v20230921-0857.jar",
-		L"org.eclipse.core.filesystem_1.10.200.v20231102-0934.jar",
-		L"org.eclipse.core.jobs_3.15.100.v20230930-1207.jar",
-		L"org.eclipse.core.resources_3.20.0.v20231102-0934.jar",
-		L"org.eclipse.core.runtime_3.30.0.v20231102-0719.jar",
-		L"org.eclipse.equinox.app_1.6.400.v20231103-0807.jar",
-		L"org.eclipse.equinox.common_3.18.200.v20231106-1826.jar",
-		L"org.eclipse.equinox.preferences_3.10.400.v20231102-2218.jar",
-		L"org.eclipse.equinox.registry_3.11.400.v20231102-2218.jar",
-		L"org.eclipse.jdt.core_3.36.0.v20231115-1055.jar",
-		L"org.eclipse.osgi_3.18.600.v20231110-1900.jar",
-		L"org.eclipse.text_3.13.100.v20230801-1334.jar",
-		L"org.osgi.service.prefs_1.1.2.202109301733.jar",
-		L"ecj-3.36.0.jar",
-		L"slf4j-api-2.0.12.jar",
-		L"slf4j-simple-2.0.12.jar"};
+		L"gradle-tooling-api-8.6",
+		L"java-indexer",
+		L"org.eclipse.core.commands-3.11.200",
+		L"org.eclipse.core.contenttype-3.9.200",
+		L"org.eclipse.core.expressions-3.9.200",
+		L"org.eclipse.core.filesystem-1.10.200",
+		L"org.eclipse.core.jobs-3.15.100",
+		L"org.eclipse.core.resources-3.20.0",
+		L"org.eclipse.core.runtime-3.30.0",
+		L"org.eclipse.equinox.app-1.6.400",
+		L"org.eclipse.equinox.common-3.18.200",
+		L"org.eclipse.equinox.preferences-3.10.400",
+		L"org.eclipse.equinox.registry-3.11.400",
+		L"org.eclipse.jdt.core-3.36.0",
+		L"org.eclipse.osgi-3.18.600",
+		L"org.eclipse.text-3.13.100",
+		L"org.osgi.service.prefs-1.1.2",
+		L"ecj-3.36.0",
+		L"slf4j-api-2.0.7",
+		L"slf4j-simple-2.0.7"};
 }
 
 std::string prepareJavaEnvironment()
@@ -62,7 +63,7 @@ std::string prepareJavaEnvironment()
 					classPath += separator;
 				}
 				classPath +=
-					ResourcePaths::getJavaDirectoryPath().concatenate(L"lib/" + jarNames[i]).str();
+					ResourcePaths::getJavaDirectoryPath().concatenate(L"lib/" + jarNames[i] + L".jar").str();
 			}
 		}
 

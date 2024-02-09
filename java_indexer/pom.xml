@@ -21,19 +21,37 @@
 					<target>${java.version}</target>
 				</configuration>
 			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>copy-dependencies</id>
+						<phase>prepare-package</phase>
+						<goals>
+							<goal>copy-dependencies</goal>
+						</goals>
+						<configuration>
+							<outputDirectory>
+								${project.build.directory}/lib
+							</outputDirectory>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
     </build>
 	
 	<repositories>
 		<repository>
-			<id>mvnrepository</id>
-			<name>mvnrepository</name>
-			<url>https://www.mvnrepository.com</url>
-		</repository>
-		<repository>
 			<id>repo_gradle</id>
 			<name>repo_gradle</name>
-			<url>https://repo.gradle.org/gradle/libs-releases-local</url>
+			<url>https://repo.gradle.org/gradle/libs-releases</url>
+		</repository>
+		<repository>
+			<id>repo_eclipse</id>
+			<name>repo_eclipse</name>
+			<url>https://repo.eclipse.org/content/groups/eclipse/</url>
 		</repository>
 	</repositories>
 	
@@ -42,134 +60,116 @@
 			<groupId>org.gradle</groupId>
 			<artifactId>gradle-tooling-api</artifactId>
 			<version>8.6</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/gradle-tooling-api-8.6.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.commands</artifactId>
 			<version>3.11.200</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.commands_3.11.200.v20231108-1058.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.contenttype</artifactId>
 			<version>3.9.200</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.contenttype_3.9.200.v20230914-0751.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.expressions</artifactId>
 			<version>3.9.200</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.expressions_3.9.200.v20230921-0857.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 				<artifactId>org.eclipse.core.filesystem</artifactId>
 			<version>1.10.200</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.filesystem_1.10.200.v20231102-0934.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.jobs</artifactId>
 			<version>3.15.100</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.jobs_3.15.100.v20230930-1207.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.resources</artifactId>
 			<version>3.20.0</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.resources_3.20.0.v20231102-0934.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.core</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.runtime</artifactId>
 			<version>3.30.0</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.core.runtime_3.30.0.v20231102-0719.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.equinox</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.app</artifactId>
 			<version>1.6.400</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.equinox.app_1.6.400.v20231103-0807.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.equinox</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.common</artifactId>
 			<version>3.18.200</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.equinox.common_3.18.200.v20231106-1826.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.equinox</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.preferences</artifactId>
 			<version>3.10.400</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.equinox.preferences_3.10.400.v20231102-2218.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse.equinox</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.registry</artifactId>
 			<version>3.11.400</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.equinox.registry_3.11.400.v20231102-2218.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jdt</groupId>
-			<artifactId>core</artifactId>
+			<artifactId>org.eclipse.jdt.core</artifactId>
 			<version>3.36.0</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.jdt.core_3.36.0.v20231115-1055.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jdt</groupId>
 			<artifactId>ecj</artifactId>
 			<version>3.36.0</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/ecj-3.36.0.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.osgi</artifactId>
 			<version>3.18.600</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.osgi_3.18.600.v20231110-1900.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.eclipse</groupId>
+			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.text</artifactId>
 			<version>3.13.100</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.eclipse.text_3.13.100.v20230801-1334.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
+
 		<dependency>
 			<groupId>org.osgi</groupId>
 			<artifactId>org.osgi.service.prefs</artifactId>
 			<version>1.1.2</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/org.osgi.service.prefs_1.1.2.202109301733.jar</systemPath>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
-			<version>2.0.12</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/slf4j-api-2.0.12.jar</systemPath>
+			<version>2.0.7</version>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-simple</artifactId>
-			<version>2.0.12</version>
-			<scope>system</scope>
-			<systemPath>${basedir}/lib/slf4j-simple-2.0.12.jar</systemPath>
+			<version>2.0.7</version>
+			<scope>compile</scope>
 		</dependency>
 	</dependencies>
 </project>

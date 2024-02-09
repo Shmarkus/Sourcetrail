@@ -53,4 +53,4 @@ echo -e $INFO "copy jars"
 mkdir -p bin/app/data/java/lib/
 rm -rf bin/app/data/java/lib/*
 cp -r java_indexer/target/java-indexer-1.0.jar bin/app/data/java/lib/java-indexer.jar
-cp -r java_indexer/lib/*.jar bin/app/data/java/lib
+cp -r java_indexer/target/lib/*.jar bin/app/data/java/lib

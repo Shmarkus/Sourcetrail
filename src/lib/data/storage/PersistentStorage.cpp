@@ -2519,6 +2519,9 @@ void PersistentStorage::buildFilePathMaps() {
     m_fileNodeComplete.emplace(file.id, file.complete);
     m_fileNodeIndexed.emplace(file.id, file.indexed);
     m_fileNodeLanguage.emplace(file.id, file.languageIdentifier);
+    if (!m_hasJavaFiles && path.extension() == L".java") {
+        m_hasJavaFiles = true;
+	}
   });
 
   m_sqliteIndexStorage.forEach<StorageSymbol>(
@@ -2603,6 +2606,9 @@ void PersistentStorage::buildFullTextSearchIndex() const {
 }
 
 void PersistentStorage::buildMemberEdgeIdOrderMap() {
+  if (!m_hasJavaFiles) {
+    return;
+  }
   std::vector<Id> childNodeIds;
   std::unordered_map<Id, Id> childIdToMemberEdgeIdMap;
 
@@ -2624,6 +2630,19 @@ void PersistentStorage::buildMemberEdgeIdOrderMap() {
     const LocationType locType = intToLocationType(location.type);
     if(locType != LOCATION_TOKEN) {
       continue;
+    }
+
+    const FilePath path(m_fileNodePaths[location.fileNodeId]);
+    if (path.extension() == L".java") {
+        collection.addSourceLocation(
+            intToLocationType(location.type),
+            location.id,
+            std::vector<Id>(),
+            FilePath(std::to_wstring(location.fileNodeId)),
+            location.startLine,
+            location.startCol,
+            location.endLine,
+            location.endCol);
     }
   }
 

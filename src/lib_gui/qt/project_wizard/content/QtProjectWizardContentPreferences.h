@@ -43,12 +43,19 @@ public:
 
 private slots:
   void colorSchemeChanged(int index);
+	void javaPathDetectionClicked();
+	void jreSystemLibraryPathsDetectionClicked();
+	void mavenPathDetectionClicked();
   void loggingEnabledChanged();
   void indexerThreadsChanges(int index);
   void uiAutoScalingChanges(int index);
   void uiScaleFactorChanges(int index);
 
 private:
+	void addJavaPathDetection(QGridLayout* layout, int& row);
+	void addJreSystemLibraryPathsDetection(QGridLayout* layout, int& row);
+	void addMavenPathDetection(QGridLayout* layout, int& row);
+
   void addTitle(const QString& title, QGridLayout* layout, int& row);
   void addLabel(const QString& label, QGridLayout* layout, int row);
   void addWidget(QWidget* widget, QGridLayout* layout, int row, Qt::Alignment widgetAlignment = Qt::Alignment());
@@ -101,6 +108,19 @@ private:
   QLabel* m_threadsInfoLabel;
 
   QCheckBox* m_multiProcessIndexing;
+
+	std::shared_ptr<CombinedPathDetector> m_javaPathDetector;
+	std::shared_ptr<CombinedPathDetector> m_jreSystemLibraryPathsDetector;
+	std::shared_ptr<CombinedPathDetector> m_mavenPathDetector;
+
+	QComboBox* m_javaPathDetectorBox;
+	QComboBox* m_jreSystemLibraryPathsDetectorBox;
+	QComboBox* m_mavenPathDetectorBox;
+	QtLocationPicker* m_javaPath;
+	QtPathListBox* m_jreSystemLibraryPaths;
+	QtLocationPicker* m_mavenPath;
+
+	QCheckBox* m_pythonPostProcessing;
 };
 
 #endif    // QT_PROJECT_WIZARD_CONTENT_PREFERENCES_H

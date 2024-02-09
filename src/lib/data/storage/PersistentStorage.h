@@ -321,4 +321,6 @@ private:
   std::map<Id, Id> m_memberEdgeIdOrderMap;
 
   HierarchyCache m_hierarchyCache;
+
+  bool m_hasJavaFiles = false;
 };

@@ -27,6 +27,25 @@ FilePath ResourcePaths::getLicenseDirectoryPath() {
   return AppPath::getSharedDataDirectoryPath().concatenate(L"data/license/");
 }
 
+FilePath ResourcePaths::getJavaDirectoryPath()
+{
+	return AppPath::getSharedDataDirectoryPath().concatenate(L"data/java/");
+}
+
+FilePath ResourcePaths::getPythonDirectoryPath()
+{
+	return AppPath::getSharedDataDirectoryPath().concatenate(L"data/python/");
+}
+
 FilePath ResourcePaths::getCxxCompilerHeaderDirectoryPath() {
   return AppPath::getSharedDataDirectoryPath().concatenate(L"data/cxx/include/").getCanonical();
+}
+
+FilePath ResourcePaths::getPythonIndexerFilePath()
+{
+	if (utility::getOsType() == OS_WINDOWS)
+	{
+		return getPythonDirectoryPath().concatenate(L"SourcetrailPythonIndexer.exe");
+	}
+	return getPythonDirectoryPath().concatenate(L"SourcetrailPythonIndexer");
 }

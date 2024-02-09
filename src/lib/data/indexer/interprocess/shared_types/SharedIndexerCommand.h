@@ -44,6 +44,15 @@ public:
 
   void setCompilerFlags(const std::vector<std::wstring>& compilerFlags);
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+
+	std::wstring getLanguageStandard() const;
+	void setLanguageStandard(const std::wstring& languageStandard);
+
+	std::vector<FilePath> getClassPaths() const;
+	void setClassPaths(const std::vector<FilePath>& classPaths);
+
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
 
 private:
   enum Type {
@@ -51,6 +60,12 @@ private:
 #if BUILD_CXX_LANGUAGE_PACKAGE
     CXX,
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+		JAVA,
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+		PYTHON,
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
   };
 
   Type getType() const;
@@ -68,5 +83,9 @@ private:
   SharedMemory::Vector<SharedMemory::String> m_includeFilters;
   SharedMemory::String m_workingDirectory;
   SharedMemory::Vector<SharedMemory::String> m_compilerFlags;
-#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#endif	  // BUILD_CXX_LANGUAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+	SharedMemory::String m_lang
+	SharedMemory::Vector<Shared
+#endif	  // BUILD_JAVA_LANGUAG
 };

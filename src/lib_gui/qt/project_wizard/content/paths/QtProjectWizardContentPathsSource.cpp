@@ -14,6 +14,16 @@
 #  include "SourceGroupSettingsWithCxxPathsAndFlags.h"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#	include "SourceGroupJavaEmpty.h"
+#	include "SourceGroupSettingsJavaEmpty.h"
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+#	include "SourceGroupPythonEmpty.h"
+#	include "SourceGroupSettingsPythonEmpty.h"
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
+
 QtProjectWizardContentPathsSource::QtProjectWizardContentPathsSource(std::shared_ptr<SourceGroupSettings> settings,
                                                                      QtProjectWizardWindow* window)
     : QtProjectWizardContentPaths(settings, window, QtPathListBox::SELECTION_POLICY_FILES_AND_DIRECTORIES, true) {
@@ -78,6 +88,19 @@ std::vector<FilePath> QtProjectWizardContentPathsSource::getFilePaths() const {
   }
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  if (std::shared_ptr<SourceGroupSettingsJavaEmpty> settings = std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(
+          m_settings)) {
+    allSourceFilePaths = SourceGroupJavaEmpty(settings).getAllSourceFilePaths();
+  }
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+  if (std::shared_ptr<SourceGroupSettingsPythonEmpty> settings = std::dynamic_pointer_cast<SourceGroupSettingsPythonEmpty>(
+          m_settings)) {
+    allSourceFilePaths = SourceGroupPythonEmpty(settings).getAllSourceFilePaths();
+  }
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
   if(std::shared_ptr<SourceGroupSettingsCustomCommand> settings = std::dynamic_pointer_cast<SourceGroupSettingsCustomCommand>(
          m_settings)) {
     allSourceFilePaths = SourceGroupCustomCommand(settings).getAllSourceFilePaths();

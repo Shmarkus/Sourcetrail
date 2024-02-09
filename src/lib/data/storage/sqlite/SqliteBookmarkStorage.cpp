@@ -21,11 +21,24 @@ void SqliteBookmarkStorage::migrateIfNecessary() {
   migrator.addMigration(
       2, std::make_shared<SqliteStorageMigrationLambda>([](const SqliteStorageMigration* migration, SqliteStorage* storage) {
         std::string separator = "::";
-        if(Application::getInstance()) {
-          std::shared_ptr<const Project> currentProject = Application::getInstance()->getCurrentProject();
-          {
+		if (Application::getInstance()) {
+					std::shared_ptr<const Project> currentProject =
+						Application::getInstance()->getCurrentProject();
+					{
             [[maybe_unused]] LanguageType currentLanguage = ProjectSettings::getLanguageOfProject(
                 currentProject->getProjectSettingsFilePath());
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+						if (currentLanguage == LANGUAGE_JAVA)
+						{
+							separator = ".";
+						}
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+						if (currentLanguage == LANGUAGE_PYTHON)
+						{
+							separator = ".";
+						}
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
           }
         }
         migration->executeStatementInStorage(
@@ -249,8 +262,12 @@ std::vector<StorageBookmark> SqliteBookmarkStorage::doGetAll<StorageBookmark>(co
     const Id categoryId = q.getIntField(4, 0);
 
     if(id != 0 && name != "" && timestamp != "") {
-      bookmarks.push_back(
-          StorageBookmark(id, utility::decodeFromUtf8(name), utility::decodeFromUtf8(comment), timestamp, categoryId));
+			bookmarks.push_back(StorageBookmark(
+				id,
+				utility::decodeFromUtf8(name),
+				utility::decodeFromUtf8(comment),
+				timestamp,
+				categoryId));
     }
 
     q.nextRow();

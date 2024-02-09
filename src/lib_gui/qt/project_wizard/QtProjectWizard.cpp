@@ -57,6 +57,22 @@
 #  include "SourceGroupSettingsCxxCodeblocks.h"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#	include "QtProjectWizardContentJavaStandard.h"
+#	include "QtProjectWizardContentPathSettingsMaven.h"
+#	include "QtProjectWizardContentPathSourceGradle.h"
+#	include "QtProjectWizardContentPathSourceMaven.h"
+#	include "QtProjectWizardContentPathsClassJava.h"
+#	include "SourceGroupSettingsJavaEmpty.h"
+#	include "SourceGroupSettingsJavaGradle.h"
+#	include "SourceGroupSettingsJavaMaven.h"
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+#	include "QtProjectWizardContentPathPythonEnvironment.h"
+#	include "SourceGroupSettingsPythonEmpty.h"
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
+
 namespace {
 #if BUILD_CXX_LANGUAGE_PACKAGE
 
@@ -207,6 +223,67 @@ void addSourceGroupContents<SourceGroupSettingsCxxCodeblocks>(QtProjectWizardCon
 }
 
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsJavaEmpty>(
+	QtProjectWizardContentGroup* group,
+	std::shared_ptr<SourceGroupSettingsJavaEmpty> settings,
+	QtProjectWizardWindow* window)
+{
+	group->addContent(new QtProjectWizardContentJavaStandard(settings, window));
+	group->addSpace();
+	group->addContent(new QtProjectWizardContentPathsSource(settings, window));
+	group->addContent(new QtProjectWizardContentPathsExclude(settings, window));
+	group->addContent(new QtProjectWizardContentExtensions(settings, window));
+	group->addSpace();
+	group->addContent(new QtProjectWizardContentPathsClassJava(settings, window));
+}
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsJavaMaven>(
+	QtProjectWizardContentGroup* group,
+	std::shared_ptr<SourceGroupSettingsJavaMaven> settings,
+	QtProjectWizardWindow* window)
+{
+	group->addContent(new QtProjectWizardContentJavaStandard(settings, window));
+	group->addContent(new QtProjectWizardContentPathSourceMaven(settings, window));
+	group->addContent(new QtProjectWizardContentPathSettingsMaven(settings, window));
+	group->addSpace();
+	group->addContent(new QtProjectWizardContentPathsExclude(settings, window));
+	group->addContent(new QtProjectWizardContentExtensions(settings, window));
+}
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsJavaGradle>(
+	QtProjectWizardContentGroup* group,
+	std::shared_ptr<SourceGroupSettingsJavaGradle> settings,
+	QtProjectWizardWindow* window)
+{
+	group->addContent(new QtProjectWizardContentJavaStandard(settings, window));
+	group->addContent(new QtProjectWizardContentPathSourceGradle(settings, window));
+	group->addSpace();
+	group->addContent(new QtProjectWizardContentPathsExclude(settings, window));
+	group->addContent(new QtProjectWizardContentExtensions(settings, window));
+}
+
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsPythonEmpty>(
+	QtProjectWizardContentGroup* group,
+	std::shared_ptr<SourceGroupSettingsPythonEmpty> settings,
+	QtProjectWizardWindow* window)
+{
+	group->addContent(new QtProjectWizardContentPathPythonEnvironment(settings, window));
+	group->addContent(new QtProjectWizardContentPathsSource(settings, window));
+	group->addContent(new QtProjectWizardContentPathsExclude(settings, window));
+	group->addContent(new QtProjectWizardContentExtensions(settings, window));
+}
+
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
 
 template <>
 void addSourceGroupContents<SourceGroupSettingsCustomCommand>(QtProjectWizardContentGroup* group,
@@ -535,6 +612,34 @@ void QtProjectWizard::selectedSourceGroupChanged(int index) {
     addSourceGroupContents(summary, CxxCodeblocks, this);
   }
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+	else if (
+		std::shared_ptr<SourceGroupSettingsJavaEmpty> settings =
+			std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(group))
+	{
+		addSourceGroupContents(summary, settings, this);
+	}
+	else if (
+		std::shared_ptr<SourceGroupSettingsJavaMaven> settings =
+			std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(group))
+	{
+		addSourceGroupContents(summary, settings, this);
+	}
+	else if (
+		std::shared_ptr<SourceGroupSettingsJavaGradle> settings =
+			std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group))
+	{
+		addSourceGroupContents(summary, settings, this);
+	}
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+	else if (
+		std::shared_ptr<SourceGroupSettingsPythonEmpty> settings =
+			std::dynamic_pointer_cast<SourceGroupSettingsPythonEmpty>(group))
+	{
+		addSourceGroupContents(summary, settings, this);
+	}
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
 
   summary->addSpace();
   summary->addContent(new QtProjectWizardContentRequiredLabel(this));
@@ -735,6 +840,28 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
     newSourceGroupFromVS();
     return;
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+	case SOURCE_GROUP_JAVA_EMPTY:
+		settings = std::make_shared<SourceGroupSettingsJavaEmpty>(
+			sourceGroupId, m_projectSettings.get());
+		break;
+	case SOURCE_GROUP_JAVA_MAVEN:
+		settings = std::make_shared<SourceGroupSettingsJavaMaven>(
+			sourceGroupId, m_projectSettings.get());
+		break;
+	case SOURCE_GROUP_JAVA_GRADLE:
+		settings = std::make_shared<SourceGroupSettingsJavaGradle>(
+			sourceGroupId, m_projectSettings.get());
+		break;
+#endif	  // BUILD_JAVA_LANGUAGE_PACKAGE
+
+#if BUILD_PYTHON_LANGUAGE_PACKAGE
+	case SOURCE_GROUP_PYTHON_EMPTY:
+		settings = std::make_shared<SourceGroupSettingsPythonEmpty>(
+			sourceGroupId, m_projectSettings.get());
+		break;
+#endif	  // BUILD_PYTHON_LANGUAGE_PACKAGE
 
   case SOURCE_GROUP_CUSTOM_COMMAND:
     settings = std::make_shared<SourceGroupSettingsCustomCommand>(sourceGroupId, m_projectSettings.get());

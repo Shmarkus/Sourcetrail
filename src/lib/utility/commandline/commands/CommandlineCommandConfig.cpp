@@ -69,6 +69,9 @@ void CommandlineCommandConfig::setup() {
     ("use-processes,p",                   po::value<bool>(), "Enable C/C++ Indexer threads to run in different processes. <true/false>")
     ("logging-enabled,l",                 po::value<bool>(), "Enable file/console logging <true/false>")
     ("verbose-indexer-logging-enabled,L", po::value<bool>(), "Enable additional log of abstract syntax tree during the indexing. <true/false> WARNING Slows down indexing speed")
+    ("jvm-path,j", po::value<std::string>(), "Path to the location of the jvm library")
+    ("maven-path,m", po::value<std::string>(), "Path to the maven binary")
+    ("jre-system-library-paths,J", po::value<std::vector<std::string>>(), "paths to the jars of the JRE system library. These jars can be found inside your JRE install directory (once per path or comma separated)")
     ("global-header-search-paths,g",      po::value<std::vector<std::string>>(), "Global include paths (once per path or comma separated)")
     ("global-framework-search-paths,F",   po::value<std::vector<std::string>>(), "Global include paths (once per path or comma separated)")
     ("show,s", "displays all settings");
@@ -107,9 +110,12 @@ CommandlineCommand::ReturnStatus CommandlineCommandConfig::parse(std::vector<std
               << "\n  indexer-threads: " << settings->getIndexerThreadCount()
               << "\n  use-processes: " << settings->getMultiProcessIndexingEnabled()
               << "\n  logging-enabled: " << settings->getLoggingEnabled()
-              << "\n  verbose-indexer-logging-enabled: " << settings->getVerboseIndexerLoggingEnabled();
+              << "\n  verbose-indexer-logging-enabled: " << settings->getVerboseIndexerLoggingEnabled()
+              << "\n  jvm-path: " << settings->getJavaPath().str()
+              << "\n  maven-path: " << settings->getMavenPath().str();
     printVector("global-header-search-paths", settings->getHeaderSearchPaths());
     printVector("global-framework-search-paths", settings->getFrameworkSearchPaths());
+    printVector("jre-system-library-paths", settings->getJreSystemLibraryPaths());
     return ReturnStatus::CMD_QUIT;
   }
 
@@ -118,6 +124,9 @@ CommandlineCommand::ReturnStatus CommandlineCommandConfig::parse(std::vector<std
   parseAndSetValue(&ApplicationSettings::setLoggingEnabled,               "logging-enabled",                 settings, variablesMap);
   parseAndSetValue(&ApplicationSettings::setVerboseIndexerLoggingEnabled, "verbose-indexer-logging-enabled", settings, variablesMap);
   parseAndSetValue(&ApplicationSettings::setIndexerThreadCount,           "indexer-threads",                 settings, variablesMap);
+  parseAndSetValue(&ApplicationSettings::setMavenPath, "maven-path", settings, vm);
+  parseAndSetValue(&ApplicationSettings::setJavaPath, "jvm-path", settings, vm);
+  parseAndSetValue(&ApplicationSettings::setJreSystemLibraryPaths, "jre-system-library-paths", settings, vm);
   parseAndSetValue(&ApplicationSettings::setHeaderSearchPaths,            "global-header-search-paths",      settings, variablesMap);
   parseAndSetValue(&ApplicationSettings::setFrameworkSearchPaths,         "global-framework-search-paths",   settings, variablesMap);
   // clang-format on

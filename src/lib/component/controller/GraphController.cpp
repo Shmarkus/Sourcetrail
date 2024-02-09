@@ -2051,6 +2051,11 @@ void GraphController::createLegendGraph() {
     y += 10;
     i += 1;
 
+    Node* genericNode = addNode(NODE_TYPE, L"JavaGenericType<ParameterType>", Vec2i(x, y + dy * ++i));
+    Node* genericParameterNode = addNode(NODE_TYPE_PARAMETER, L"ParameterType", Vec2i());
+    addMember(genericNode, genericParameterNode, ACCESS_TYPE_PARAMETER);
+    i += 2;
+
     y += 10;
 
     auto pGroupNode = std::make_shared<DummyNode>(DummyNode::DUMMY_GROUP);

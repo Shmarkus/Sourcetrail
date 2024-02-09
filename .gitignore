@@ -72,3 +72,4 @@ CMakeLists.txt.user*
 /deployment/windows/wixSetup/CustomActions/.vs
 /deployment/windows/wixSetup/Setup/build/Setup/Release
 /deployment/windows/wixSetup/Setup/build/Setup/x64
+/java_indexer/java_indexer.iml

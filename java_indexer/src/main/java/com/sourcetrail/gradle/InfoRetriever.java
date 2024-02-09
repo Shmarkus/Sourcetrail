@@ -9,13 +9,17 @@ import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+
 import org.gradle.api.GradleException;
 import org.gradle.tooling.BuildLauncher;
 import org.gradle.tooling.GradleConnector;
 import org.gradle.tooling.ProjectConnection;
+import org.slf4j.Logger;
 
 public class InfoRetriever
 {
+	public static final Logger logger = org.slf4j.LoggerFactory.getLogger(InfoRetriever.class);
 	public static String getMainSrcDirs(String projectRootPath, String initScriptPath)
 	{
 		try
@@ -36,6 +40,7 @@ public class InfoRetriever
 		}
 		catch (GradleException e)
 		{
+			logger.error("Error getting main source directories", e);
 			return "[ERROR] " + e.getMessage();
 		}
 	}
@@ -60,6 +65,7 @@ public class InfoRetriever
 		}
 		catch (GradleException e)
 		{
+			logger.error("Error getting test source directories", e);
 			return "[ERROR] " + e.getMessage();
 		}
 	}
@@ -98,7 +104,7 @@ public class InfoRetriever
 		}
 		catch (IOException e)
 		{
-			// TODO: LOGERROR
+			logger.error("Error reading output from Gradle task", e);
 		}
 
 		return paths;
@@ -108,8 +114,9 @@ public class InfoRetriever
 		String taskName, String projectRootPath, String initScriptPath, List<String> additionalArguments)
 		throws GradleException
 	{
+		String gradleVersion = Optional.ofNullable(System.getenv("GRADLE_VERSION")).orElse("8.6");
 		ProjectConnection connection =
-			GradleConnector.newConnector().forProjectDirectory(new File(projectRootPath)).connect();
+			GradleConnector.newConnector().useGradleVersion(gradleVersion).forProjectDirectory(new File(projectRootPath)).connect();
 
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		ByteArrayOutputStream errorStream = new ByteArrayOutputStream();
@@ -136,7 +143,7 @@ public class InfoRetriever
 		}
 		catch (Exception e)
 		{
-			// TODO: LOGERROR
+			logger.error("Error executing Gradle task", e);
 		}
 		finally
 		{

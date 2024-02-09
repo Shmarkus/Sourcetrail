@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
 		QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
 	}
 
-	Version version(VERSION_YEAR, VERSION_MINOR, VERSION_COMMIT, GIT_COMMIT_HASH);
+	Version version(2024, 1, 1, "e9f5b144");
 	QApplication::setApplicationVersion(version.toDisplayString().c_str());
 
 	MessageStatus(

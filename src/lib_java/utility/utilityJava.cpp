@@ -18,24 +18,26 @@ namespace utility
 std::vector<std::wstring> getRequiredJarNames()
 {
 	return {
-		L"gradle-tooling-api-7.3.jar",
+		L"gradle-tooling-api-8.6.jar",
 		L"java-indexer.jar",
-		L"org.eclipse.core.commands-3.9.800.jar",
-		L"org.eclipse.core.contenttype-3.7.800.jar",
-		L"org.eclipse.core.expressions-3.7.0.jar",
-		L"org.eclipse.core.filesystem-1.7.700.jar",
-		L"org.eclipse.core.jobs-3.10.1000.jar",
-		L"org.eclipse.core.resources-3.13.900.jar",
-		L"org.eclipse.core.runtime-3.20.0.jar",
-		L"org.eclipse.equinox.app-1.5.0.jar",
-		L"org.eclipse.equinox.common-3.14.0.jar",
-		L"org.eclipse.equinox.preferences-3.8.100.jar",
-		L"org.eclipse.equinox.registry-3.10.0.jar",
-		L"org.eclipse.jdt.core-3.24.0.jar",
-		L"org.eclipse.osgi-3.16.100.jar",
-		L"org.eclipse.text-3.10.400.jar",
-		L"slf4j-api-2.0.6.jar",
-		L"slf4j-simple-2.0.6.jar"};
+		L"org.eclipse.core.commands_3.11.200.v20231108-1058.jar",
+		L"org.eclipse.core.contenttype_3.9.200.v20230914-0751.jar",
+		L"org.eclipse.core.expressions_3.9.200.v20230921-0857.jar",
+		L"org.eclipse.core.filesystem_1.10.200.v20231102-0934.jar",
+		L"org.eclipse.core.jobs_3.15.100.v20230930-1207.jar",
+		L"org.eclipse.core.resources_3.20.0.v20231102-0934.jar",
+		L"org.eclipse.core.runtime_3.30.0.v20231102-0719.jar",
+		L"org.eclipse.equinox.app_1.6.400.v20231103-0807.jar",
+		L"org.eclipse.equinox.common_3.18.200.v20231106-1826.jar",
+		L"org.eclipse.equinox.preferences_3.10.400.v20231102-2218.jar",
+		L"org.eclipse.equinox.registry_3.11.400.v20231102-2218.jar",
+		L"org.eclipse.jdt.core_3.36.0.v20231115-1055.jar",
+		L"org.eclipse.osgi_3.18.600.v20231110-1900.jar",
+		L"org.eclipse.text_3.13.100.v20230801-1334.jar",
+		L"org.osgi.service.prefs_1.1.2.202109301733.jar",
+		L"ecj-3.36.0.jar",
+		L"slf4j-api-2.0.12.jar",
+		L"slf4j-simple-2.0.12.jar"};
 }
 
 std::string prepareJavaEnvironment()

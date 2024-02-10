@@ -81,7 +81,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
     * __Prebuilt Download for Windows__: https://sourceforge.net/projects/boost/files/boost-binaries/
     * __Building for Unix__:
         ```
-        $ ./bootstrap.sh --with-libraries=filesystem,program_options,system,date_time
+        $ ./bootstrap.sh --with-libraries=filesystem,program_options,system,date_time,locale
         $ ./b2 --link=static --variant=release --threading=multi --runtime-link=static --cxxflags=-fPIC
         ```
 

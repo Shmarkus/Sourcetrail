@@ -12,7 +12,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update                                                                                                                                                                                                                                                                                                                                                             
-          sudo apt install -y build-essential cmake qt5-default libboost-all-dev default-jdk maven imagemagick                                                                                                                                                                                                                                                                                                     
+          sudo apt install -y build-essential cmake libboost-all-dev default-jdk maven imagemagick                                                                                                                                                                                                                                                                                                     
           sudo apt install -y qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev                                                                                                                                                                                                                                                                
 
       - name: Configure CMake

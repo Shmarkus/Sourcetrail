@@ -1,44 +1,32 @@
-name: Build
+name: Build and Test
 
-on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-
-env:
-  BUILD_TYPE: Release
+on: [push]
 
 jobs:
   build:
-    name: ${ { matrix.config.name } }
-    runs-on: ${ { matrix.config.os } }
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-        - {
-            name: "Ubuntu Latest GCC", artifact: "Linux.tar.xz",
-            os: ubuntu-latest,
-            build_type: "Release", cc: "gcc", cxx: "g++"
-          }
-        - {
-            name: "Ubuntu Latest Clang", artifact: "macOS.tar.xz",
-            os: ubuntu-latest,
-            build_type: "Release", cc: "clang", cxx: "clang++"
-          }
+    runs-on: ubuntu:latest
 
     steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-    
-    - name: Install dependencies
-      run: sudo apt install -y clang libboost-all-dev qtbase5-dev ninja-build libqt5svg5-dev
+      - uses: actions/checkout@v2
 
-    - name: Configure CMake
-      run: cmake -G Ninja -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      - name: Install dependencies
+        run: |
+          sudo apt update                                                                                                                                                                                                                                                                                                                                                             
+          sudo apt install -y build-essential cmake default-jdk maven git                                                                                                                                                                                                                                                                                                                 
+          sudo apt install -y qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev                                                                                                                                                                                                                                                                
+          sudo apt-get install -y imagemagick
 
-    - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      - name: Configure CMake
+        run: |
+          mkdir -p build/Release                                                                                                                                                                                                                                                                                                                                                                     
+          cd build/Release                                                                                                                                                                                                                                                                                                                                                                        
+          cmake -DCMAKE_BUILD_TYPE="Release" -DBUILD_JAVA_LANGUAGE_PACKAGE=ON -DBUILD_PYTHON_LANGUAGE_PACKAGE=ON ../..
+
+      - name: Build
+        run: |
+          cd build/Release                                                                                                                                                                                                                                                                                                                                                                       
+          make Sourcetrail
+
+      - name: Package
+        run: |
+          ./setup/Linux/createPackages.sh

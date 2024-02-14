@@ -80,7 +80,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
     * __Prebuilt Download__: http://download.qt.io/official_releases/qt/
     * __Building with Unix__:
       ```bash
-        sudo apt install qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev
+        `sudo apt install qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev`
       ```
 
 ### Building

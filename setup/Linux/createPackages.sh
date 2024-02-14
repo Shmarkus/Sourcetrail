@@ -85,8 +85,6 @@ createIcon 48x48
 # Version for filename
 
 VERSION=$(cat build/Release/version.txt)
-VERSION=${VERSION/./_}
-VERSION=${VERSION/./_}
 export VERSION
 
 

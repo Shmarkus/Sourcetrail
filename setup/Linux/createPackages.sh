@@ -81,13 +81,6 @@ createIcon 128x128
 createIcon 64x64
 createIcon 48x48
 
-
-# Version for filename
-
-VERSION=$(cat build/Release/version.txt)
-export VERSION
-
-
 # create .AppImage
 
 linuxdeployqt AppDir/usr/bin/sourcetrail_indexer -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python*
@@ -105,7 +98,7 @@ rename - _ *.AppImage
 mv AppDir/usr/ Sourcetrail
 cp -R setup/Linux/data/package/* Sourcetrail
 
-tar -czvf Sourcetrail_${VERSION}_Linux_64bit.tar.gz Sourcetrail
+tar -czvf Sourcetrail_Linux_64bit.tar.gz Sourcetrail
 
 
 # cleanup

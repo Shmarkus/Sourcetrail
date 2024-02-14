@@ -116,6 +116,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
 
 * Run Sourcetrail from within the build directory. During execution Sourcetrail needs resources from `bin/app/data` and `bin/app/user`. CMake creates symlinks within the build directory that make these directories accessible.
 
+> You can define Gradle version when importing Java Gradle project using `GRADLE_VERSION` environment variable if necessary. Default 86
 
 ## Enable C/C++ Language Support
 

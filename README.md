@@ -67,12 +67,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
     * __Prebuilt Download for Windows__: https://sourceforge.net/projects/boost/files/boost-binaries/
     * __Building for Unix__:
         ```bash
-        wget -O boost_1_67_0.tar.gz https://sourceforge.net/projects/boost/files/boost/1.67.0/boost_1_67_0.tar.gz/download
-        tar xzf boost_1_67_0.tar.gz
-        sudo mv boost_1_67_0 /opt/
-        cd /opt/boost_1_67_0
-        ./bootstrap.sh --with-libraries=filesystem,program_options,system,date_time
-        ./b2 --link=static --variant=release --threading=multi --runtime-link=static --cxxflags=-fPIC
+        sudo apt install libboost-all-dev
         ```
 
 * __Qt 5.12.3__
@@ -105,7 +100,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
     cd Sourcetrail
     mkdir -p build/Release
     cd build/Release
-    cmake -DCMAKE_BUILD_TYPE="Release" -DBOOST_ROOT=/opt/boost_1_67_0 -DQt5_DIR=/usr/lib/qt5/bin ../..
+    cmake -DCMAKE_BUILD_TYPE="Release" ../..
     ```
 * Now start the build with:
     ```bash

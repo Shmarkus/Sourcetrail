@@ -5,21 +5,9 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    container: codehouseou/sourcetrail-builder:latest
     steps:
       - uses: actions/checkout@v2
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v3
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Install dependencies
-        run: |
-          sudo apt update                                                                                                                                                                                                                                                                                                                                                             
-          sudo apt install -y build-essential cmake libboost-all-dev maven imagemagick                                                                                                                                                                                                                                                                                                     
-          sudo apt install -y qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev                                                                                                                                                                                                                                                                
 
       - name: Configure CMake
         run: |
@@ -36,8 +24,22 @@ jobs:
         run: |
           ./setup/Linux/createPackages.sh
 
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: application-artifacts
+          path: ./Sourcetrail_Linux_64bit.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: application-artifacts
+
       - name: Create Release
-        id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,13 +48,3 @@ jobs:
           release_name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./Sourcetrail_Linux_64bit.tar.gz
-          asset_name: Sourcetrail_Linux_64bit.tar.gz
-          asset_content_type: application/gzip

@@ -17,10 +17,6 @@ Sourcetrail is:
 * supporting C, C++, Java and Python
 * offering an SDK ([SourcetrailDB](https://github.com/CoatiSoftware/SourcetrailDB)) to write custom language extensions
 
-## Sourcetrail on Patreon
-
-The open-source development and regular software releases are made possible entirely by the support of [these awesome patrons](SPONSORS.md)!
-
 ## Using Sourcetrail
 
 To set up Sourcetrail on your machine, you can either download the respective build for your operating system from our list of [Releases](https://github.com/OpenSourceSourceTrail/Sourcetrail/releases) and install it on your machine, or use one of the following package managers:

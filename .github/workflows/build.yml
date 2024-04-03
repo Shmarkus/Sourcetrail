@@ -9,16 +9,21 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Configure java
+        run: |
+          curl -s "https://get.sdkman.io" | bash
+          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install java 21.0.2-tem && sdk default java 21.0.2-tem"
+
       - name: Configure CMake
         run: |
           mkdir -p build/Release                                                                                                                                                                                                                                                                                                                                                                     
-          cd build/Release                                                                                                                                                                                                                                                                                                                                                                        
-          cmake -DCMAKE_BUILD_TYPE="Release" -DBUILD_JAVA_LANGUAGE_PACKAGE=ON -DBUILD_PYTHON_LANGUAGE_PACKAGE=ON ../..
+          cd build/Release
+          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && cmake -DCMAKE_BUILD_TYPE=\"Release\" -DBUILD_JAVA_LANGUAGE_PACKAGE=ON -DBUILD_PYTHON_LANGUAGE_PACKAGE=ON ../.."
 
       - name: Build
         run: |
           cd build/Release                                                                                                                                                                                                                                                                                                                                                                       
-          make Sourcetrail
+          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && make Sourcetrail"
 
       - name: Package
         run: |

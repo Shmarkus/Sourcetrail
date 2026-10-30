@@ -25,6 +25,7 @@
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
+#include "StLombok.h"
 #include "StOutput.h"
 #include "StProject.h"
 #include "StorageNode.h"
@@ -634,4 +635,57 @@ TEST_CASE("st locks the canonical project path like the indexer")
 	write(base + "/real/x.srctrlprj");
 	REQUIRE(QFile::link(base + "/real", base + "/link"));
 	REQUIRE(st::projectLockFile(FilePath((base + "/link/x.srctrlprj").toStdWString())) == base + "/real/x.srctrlprj.lock");
+}
+
+TEST_CASE("lombok alignment maps reformatted code to original lines")
+{
+	const std::vector<std::string> generated = {"// header", "package p;", "", "public class A {", "  private final String n;",
+		"  @lombok.Generated", "  public String getN() {", "    return this.n;", "  }", "  void run() {", "    go();", "  }", "}"};
+	const std::vector<std::string> original = {"package p;", "import lombok.Getter;", "@Getter", "public class A {",
+		"    private final String n;", "    void run() {", "        go();", "    }", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	REQUIRE(aligned.size() == generated.size());
+	CHECK(aligned[9] == 5);
+	CHECK(aligned[10] == 6);
+}
+
+TEST_CASE("lombok location without a matching original line stays generated")
+{
+	const std::vector<std::string> generated = {"package p;", "public class A {", "  public String getN() {", "  }", "}"};
+	const std::vector<std::string> original = {"package p;", "@Getter", "public class A {", "}"};
+	CHECK_FALSE(st::alignLines(generated, original)[2].has_value());
+
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/out/delombok/main"), {FilePath(L"/src/main/java")}});
+	const auto read = [&](const FilePath& file) {
+		return file.wstr() == L"/out/delombok/main/p/A.java" ? generated
+			: file.wstr() == L"/src/main/java/p/A.java"	   ? original
+															   : std::vector<std::string>();
+	};
+	const st::ResultLine line{L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 3, "public String getN() {"};
+	const st::ResultLine mapped = st::toOriginal(line, roots, read);
+	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
+	CHECK(mapped.line == 3);
+	CHECK(mapped.kind == L"call (generated)");
+
+	const st::ResultLine kept = st::toOriginal(
+		{L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 2, "public class A {"}, roots, read);
+	CHECK(kept.file.wstr() == L"/src/main/java/p/A.java");
+	CHECK(kept.line == 3);
+	CHECK(kept.source == "public class A {");
+	CHECK(kept.kind == L"call");
+}
+
+TEST_CASE("lombok location of a deleted original stays generated")
+{
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/out/delombok/main"), {FilePath(L"/src/main/java")}});
+	const auto read = [](const FilePath& file) {
+		return file.wstr() == L"/out/delombok/main/p/A.java" ? std::vector<std::string>{"package p;"}
+															   : std::vector<std::string>();
+	};
+	const st::ResultLine mapped =
+		st::toOriginal({L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 1, "package p;"}, roots, read);
+	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
+	CHECK(mapped.kind == L"call (generated)");
 }

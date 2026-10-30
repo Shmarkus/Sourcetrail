@@ -31,6 +31,7 @@
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
+#include "StLombok.h"
 #include "StOutput.h"
 #include "StProject.h"
 #include "StorageStats.h"
@@ -172,7 +173,13 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1));
 	std::cerr << "path: " << chains.size() << '\n';
 	const auto location = [&](const FilePath& file, size_t line) {
-		return utility::encodeToUtf8(st::displayPath(file, options.cwd)) + ':' + std::to_string(line);
+		st::ResultLine mapped{L"", L"", file, line, ""};
+		if (options.mapLocation)
+		{
+			mapped = options.mapLocation(mapped);
+		}
+		return utility::encodeToUtf8(st::displayPath(mapped.file, options.cwd)) + ':' + std::to_string(mapped.line) +
+			utility::encodeToUtf8(mapped.kind);
 	};
 	for (size_t i = 0; i < chains.size() && i < options.limit; i++)
 	{
@@ -435,6 +442,13 @@ int run(QCoreApplication& app)
 	if (const int code = checkIndex(settings))
 	{
 		return code;
+	}
+	const st::LombokRoots lombok = st::lombokRoots(settings);
+	if (!lombok.delombokToOriginalRoots.empty())
+	{
+		options.mapLocation = [&lombok](const st::ResultLine& line) {
+			return st::toOriginal(line, lombok, st::readLinesFromDisk);
+		};
 	}
 	PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
 	if (storage.isEmpty() || storage.isIncompatible())

@@ -46,6 +46,13 @@ std::wstring displayPath(const FilePath& file, const FilePath& cwd)
 
 int printResults(std::vector<ResultLine> lines, const OutputOptions& options, std::ostream& out)
 {
+	if (options.mapLocation)
+	{
+		for (ResultLine& line: lines)
+		{
+			line = options.mapLocation(line);
+		}
+	}
 	std::stable_sort(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) {
 		return std::make_tuple(a.tier, order(a)) < std::make_tuple(b.tier, order(b));
 	});

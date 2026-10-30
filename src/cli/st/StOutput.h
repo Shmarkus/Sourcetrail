@@ -1,6 +1,7 @@
 #ifndef ST_OUTPUT_H
 #define ST_OUTPUT_H
 
+#include <functional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -36,6 +37,8 @@ struct OutputOptions
 	size_t limit = 50;
 	bool showSource = true;
 	FilePath cwd;
+	// Applied to every line before sorting; identity when empty.
+	std::function<ResultLine(const ResultLine&)> mapLocation;
 };
 
 // Keeps the best tiers (then path/line order) under the limit and prints those sorted by path then line; returns EXIT_RESULTS or EXIT_EMPTY.

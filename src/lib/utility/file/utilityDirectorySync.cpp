@@ -55,7 +55,6 @@ bool replaceFile(const FilePath& sourceFile, const FilePath& targetFile)
 		return false;
 	}
 
-	targetFile.recheckExists();
 	return true;
 }
 }	 // namespace
@@ -113,11 +112,19 @@ DirectorySyncResult syncDirectoryContents(
 		result.failed++;
 	}
 
-	std::vector<FilePath> subDirectories = FileSystem::getRecursiveSubDirectories(targetDirectory);
-	for (auto it = subDirectories.rbegin(); it != subDirectories.rend(); ++it)
+	try
 	{
-		// non-recursive remove fails on non-empty directories, which is what we want here
-		FileSystem::remove(*it);
+		std::vector<FilePath> subDirectories = FileSystem::getRecursiveSubDirectories(targetDirectory);
+		for (auto it = subDirectories.rbegin(); it != subDirectories.rend(); ++it)
+		{
+			// non-recursive remove fails on non-empty directories, which is what we want here
+			FileSystem::remove(*it);
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LOG_ERROR_STREAM(<< "Directory cleanup failed: " << e.what());
+		result.failed++;
 	}
 
 	return result;

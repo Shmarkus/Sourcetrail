@@ -689,3 +689,59 @@ TEST_CASE("lombok location of a deleted original stays generated")
 	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
 	CHECK(mapped.kind == L"call (generated)");
 }
+
+TEST_CASE("lombok alignment rejects repeated text matched to the wrong occurrence")
+{
+	const std::vector<std::string> original = {"int x;", "}"};
+	const std::vector<std::string> generated = {"int x;", "int getX() {", "return x;", "}", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	CHECK(aligned[0] == 0);
+	CHECK_FALSE(aligned[3].has_value());
+	CHECK(aligned[4] == 1);
+}
+
+TEST_CASE("lombok alignment keeps a duplicated line only where its neighbours agree")
+{
+	const std::vector<std::string> original = {"class A {", "A(String n) {", "this.n = n;", "}", "}"};
+	const std::vector<std::string> generated = {
+		"class A {", "A(String n) {", "this.n = n;", "}", "void setN(String n) {", "this.n = n;", "}", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	CHECK(aligned[2] == 2);
+	CHECK_FALSE(aligned[5].has_value());
+}
+
+TEST_CASE("lombok location whose path exists under two original roots stays generated")
+{
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back(
+		{FilePath(L"/out/delombok/main"), {FilePath(L"/src/a"), FilePath(L"/src/b")}});
+	const auto read = [](const FilePath& file) {
+		const std::wstring path = file.wstr();
+		return path == L"/out/delombok/main/p/A.java" || path == L"/src/a/p/A.java" || path == L"/src/b/p/A.java"
+			? std::vector<std::string>{"package p;"}
+			: std::vector<std::string>();
+	};
+	const st::ResultLine mapped =
+		st::toOriginal({L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 1, "package p;"}, roots, read);
+	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
+	CHECK(mapped.kind == L"call (generated)");
+}
+
+TEST_CASE("lombok location reached through a symlinked delombok root still maps")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const std::filesystem::path base = std::filesystem::canonical(dir.path().toStdString());
+	std::filesystem::create_directories(base / "real" / "p");
+	std::filesystem::create_symlink(base / "real", base / "link");
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath((base / "real").wstring()), {FilePath(L"/src/main/java")}});
+	const auto read = [](const FilePath& file) {
+		const std::wstring path = file.wstr();
+		return path.find(L"/src/main/java/p/A.java") == 0 ? std::vector<std::string>{"package p;"}
+														  : std::vector<std::string>{"package p;"};
+	};
+	const st::ResultLine mapped =
+		st::toOriginal({L"k", L"call", FilePath((base / "link" / "p" / "A.java").wstring()), 1, "x"}, roots, read);
+	CHECK(mapped.file.wstr() == L"/src/main/java/p/A.java");
+}

@@ -2,6 +2,9 @@
 
 #include <QFile>
 
+#include <algorithm>
+#include <map>
+
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "utilityGradle.h"
@@ -40,6 +43,12 @@ std::optional<std::wstring> relativeTo(const FilePath& file, const FilePath& roo
 	return std::nullopt;
 }
 
+// Resolves symlinks through the existing parent directories, so the file itself may be missing.
+FilePath canonical(const FilePath& file)
+{
+	return file.getParentDirectory().getCanonical().getConcatenated(file.fileName());
+}
+
 ResultLine generated(ResultLine line)
 {
 	line.kind += L" (generated)";
@@ -67,23 +76,43 @@ std::vector<std::optional<size_t>> alignLines(
 	{
 		b.push_back(trimmed(text));
 	}
-	// suffix[i][j] = LCS length of a[i..] and b[j..]; blank lines never match.
+	const auto neighbour = [](const std::vector<std::string>& lines, size_t index, bool forward) -> std::optional<size_t> {
+		for (size_t k = index; forward ? ++k < lines.size() : k-- > 0;)
+		{
+			if (!lines[k].empty())
+			{
+				return k;
+			}
+		}
+		return std::nullopt;
+	};
+	const auto agree = [&](std::optional<size_t> x, std::optional<size_t> y) {
+		return x.has_value() == y.has_value() && (!x || a[*x] == b[*y]);
+	};
+	// Equal text is worth more when the nearest non-blank neighbours repeat as well, which settles repeated lines.
+	const auto weight = [&](size_t i, size_t j) {
+		return 4 + agree(neighbour(a, i, false), neighbour(b, j, false)) + agree(neighbour(a, i, true), neighbour(b, j, true));
+	};
 	std::vector<std::vector<uint16_t>> suffix(n + 1, std::vector<uint16_t>(m + 1, 0));
 	for (size_t i = n; i-- > 0;)
 	{
 		for (size_t j = m; j-- > 0;)
 		{
-			suffix[i][j] = (!a[i].empty() && a[i] == b[j]) ? suffix[i + 1][j + 1] + 1
-														   : std::max(suffix[i + 1][j], suffix[i][j + 1]);
+			suffix[i][j] = std::max(suffix[i + 1][j], suffix[i][j + 1]);
+			if (!a[i].empty() && a[i] == b[j])
+			{
+				suffix[i][j] = std::max<uint16_t>(suffix[i][j], suffix[i + 1][j + 1] + weight(i, j));
+			}
 		}
 	}
+	std::vector<std::optional<size_t>> raw(n);
 	size_t i = 0;
 	size_t j = 0;
 	while (i < n && j < m)
 	{
-		if (!a[i].empty() && a[i] == b[j])
+		if (!a[i].empty() && a[i] == b[j] && suffix[i][j] == suffix[i + 1][j + 1] + weight(i, j))
 		{
-			result[i++] = j++;
+			raw[i++] = j++;
 		}
 		else if (suffix[i + 1][j] >= suffix[i][j + 1])
 		{
@@ -92,6 +121,38 @@ std::vector<std::optional<size_t>> alignLines(
 		else
 		{
 			j++;
+		}
+	}
+
+	std::map<std::string, size_t> inOriginal;
+	std::map<std::string, size_t> inGenerated;
+	for (const std::string& text: b)
+	{
+		inOriginal[text]++;
+	}
+	for (const std::string& text: a)
+	{
+		inGenerated[text]++;
+	}
+	const auto matchedTo = [&](std::optional<size_t> generatedIndex, std::optional<size_t> originalIndex) {
+		return generatedIndex.has_value() == originalIndex.has_value() &&
+			(!generatedIndex || raw[*generatedIndex] == originalIndex);
+	};
+	for (size_t g = 0; g < n; g++)
+	{
+		if (!raw[g])
+		{
+			continue;
+		}
+		const size_t o = *raw[g];
+		const bool contextual = agree(neighbour(a, g, false), neighbour(b, o, false)) ||
+			agree(neighbour(a, g, true), neighbour(b, o, true));
+		const bool unique = inOriginal[b[o]] == 1 && (inGenerated[a[g]] == 1 || contextual);
+		const bool neighboursMatched = matchedTo(neighbour(a, g, false), neighbour(b, o, false)) &&
+			matchedTo(neighbour(a, g, true), neighbour(b, o, true));
+		if (unique || neighboursMatched)
+		{
+			result[g] = o;
 		}
 	}
 	return result;
@@ -136,7 +197,7 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 {
 	for (const auto& entry: roots.delombokToOriginalRoots)
 	{
-		const auto relative = relativeTo(line.file, entry.first);
+		const auto relative = relativeTo(canonical(line.file), entry.first.getCanonical());
 		if (!relative)
 		{
 			continue;
@@ -146,21 +207,26 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 		{
 			FilePath originalFile;
 			std::vector<std::string> original;
+			size_t found = 0;
 			for (const FilePath& root: entry.second)
 			{
 				const FilePath candidate = root.getConcatenated(*relative);
-				original = readLines(candidate);
-				if (!original.empty())
+				std::vector<std::string> lines = readLines(candidate);
+				if (!lines.empty() && found++ == 0)
 				{
 					originalFile = candidate;
-					break;
+					original = std::move(lines);
 				}
 			}
 			std::vector<std::optional<size_t>> alignment;
-			if (!original.empty())
+			if (found == 1)
 			{
 				alignment = alignLines(readLines(line.file), original);
 				roots.originalLines[originalFile.wstr()] = std::move(original);
+			}
+			else
+			{
+				originalFile = FilePath();
 			}
 			cached = roots.alignments.emplace(line.file.wstr(), std::make_pair(originalFile, std::move(alignment))).first;
 		}

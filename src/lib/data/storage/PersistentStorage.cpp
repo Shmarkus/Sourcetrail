@@ -384,6 +384,7 @@ std::set<FilePath> PersistentStorage::getReferencing(const std::set<FilePath>& f
 
 	utility::append(referencing, getReferencingByIncludes(filePaths));
 	utility::append(referencing, getReferencingByImports(filePaths));
+	utility::append(referencing, getReferencingBySymbols(filePaths));
 
 	return referencing;
 }
@@ -1301,6 +1302,8 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 	size_t currentDepth = 0;
 
 	std::vector<Id> nodeIdsToProcess = {*nodeIds.begin()};
+	// Namespace nodes never enter nodeIds, so track queued nodes separately to visit each once.
+	std::set<Id> queuedNodeIds = nodeIds;
 
 	struct TrailNode
 	{
@@ -1418,7 +1421,10 @@ std::shared_ptr<Graph> PersistentStorage::getGraphForTrail(
 							}
 						}
 					}
-					nodeIdsToProcess.push_back(node.id);
+					if (queuedNodeIds.insert(node.id).second)
+					{
+						nodeIdsToProcess.push_back(node.id);
+					}
 
 					if (isTerminatedTrail)
 					{
@@ -2812,6 +2818,20 @@ std::set<FilePath> PersistentStorage::getReferencingByImports(const std::set<Fil
 
 	std::set<FilePath> paths;
 	for (Id id: ids)
+	{
+		paths.insert(getFileNodePath(id));
+	}
+
+	return paths;
+}
+
+std::set<FilePath> PersistentStorage::getReferencingBySymbols(const std::set<FilePath>& filePaths) const
+{
+	// Not transitive: re-indexing a referencing file does not change the symbols it declares.
+	// This catches same-package and wildcard-import references that import edges miss.
+	std::set<FilePath> paths;
+	for (Id id: m_sqliteIndexStorage.getFileIdsReferencingSymbolsDeclaredInFiles(
+			 utility::toVector(getFileNodeIds(filePaths))))
 	{
 		paths.insert(getFileNodePath(id));
 	}

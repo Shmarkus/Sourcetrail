@@ -1,13 +1,43 @@
 #include "catch.hpp"
 
+#include <chrono>
+#include <future>
+#include <thread>
+
 #include "utilityString.h"
 
+#include "DefinitionKind.h"
+#include "Graph.h"
 #include "IntermediateStorage.h"
+#include "LocationType.h"
 #include "ParseLocation.h"
 #include "PersistentStorage.h"
 
 namespace
 {
+Id addJavaSymbol(PersistentStorage& storage, NodeKind kind, const std::wstring& name)
+{
+	const Id id = storage.addNode(StorageNodeData(nodeKindToInt(kind),
+		NameHierarchy::serialize(NameHierarchy(name, NAME_DELIMITER_JAVA)))).first;
+	storage.addSymbol(StorageSymbol(id, definitionKindToInt(DEFINITION_EXPLICIT)));
+	return id;
+}
+
+Id addJavaFile(PersistentStorage& storage, const std::wstring& path)
+{
+	const Id id = storage.addNode(StorageNodeData(nodeKindToInt(NODE_FILE),
+		NameHierarchy::serialize(NameHierarchy(path, NAME_DELIMITER_FILE)))).first;
+	storage.addFile(StorageFile(id, path, L"java", "2026-10-30 12:00:00", true, true));
+	return id;
+}
+
+void addTokenLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t line)
+{
+	const Id locationId = storage.addSourceLocation(
+		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(LOCATION_TOKEN)));
+	storage.addOccurrence(StorageOccurrence(elementId, locationId));
+}
+
 class TestStorage: public PersistentStorage
 {
 public:
@@ -282,4 +312,57 @@ TEST_CASE("storage finds and removes depending file nodes")
 	// TS_ASSERT(!storage.getNodeWithId(id3));
 	// TS_ASSERT(!storage.getEdgeWithId(id4));
 	// TS_ASSERT(!storage.getEdgeWithId(id5));
+}
+
+TEST_CASE("storage trail with unlimited depth terminates when it reaches a package")
+{
+	auto storage = std::make_shared<PersistentStorage>(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage->setup();
+	const Id package = addJavaSymbol(*storage, NODE_PACKAGE, L"example");
+	const Id type = addJavaSymbol(*storage, NODE_CLASS, L"example.Person");
+	storage->addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, type));
+	storage->buildCaches();
+
+	// Run detached so a regression fails this test instead of hanging the suite.
+	auto task = std::make_shared<std::packaged_task<size_t()>>([storage, type]() {
+		return storage
+			->getGraphForTrail(0, type, ~NodeKindMask(0), Edge::EDGE_MEMBER | Edge::EDGE_INHERITANCE, false, 0, true)
+			->getNodeCount();
+	});
+	std::future<size_t> nodeCount = task->get_future();
+	std::thread([task]() { (*task)(); }).detach();
+
+	REQUIRE(nodeCount.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	REQUIRE(nodeCount.get() >= 1);
+}
+
+TEST_CASE("storage finds files referencing symbols declared in changed files without imports")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id declaring = addJavaFile(storage, L"/project/example/Service.java");
+	const Id samePackageCaller = addJavaFile(storage, L"/project/example/ServiceTest.java");
+	const Id unrelated = addJavaFile(storage, L"/project/other/Other.java");
+	const Id library = addJavaFile(storage, L"/project/lib/Clock.java");
+
+	const Id method = addJavaSymbol(storage, NODE_METHOD, L"example.Service.markFailed");
+	const Id test = addJavaSymbol(storage, NODE_METHOD, L"example.ServiceTest.marks");
+	const Id now = addJavaSymbol(storage, NODE_METHOD, L"lib.Clock.now");
+	const Id other = addJavaSymbol(storage, NODE_METHOD, L"other.Other.run");
+	addTokenLocation(storage, method, declaring, 3);
+	addTokenLocation(storage, test, samePackageCaller, 3);
+	addTokenLocation(storage, now, library, 3);
+	addTokenLocation(storage, other, unrelated, 3);
+
+	// ServiceTest calls the changed method; Service and Other only call a method declared elsewhere.
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, test, method)), samePackageCaller, 4);
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, method, now)), declaring, 4);
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, other, now)), unrelated, 4);
+	storage.buildCaches();
+
+	const std::set<FilePath> referencing = storage.getReferencing({FilePath(L"/project/example/Service.java")});
+
+	REQUIRE(referencing.count(FilePath(L"/project/example/ServiceTest.java")) == 1);
+	REQUIRE(referencing.count(FilePath(L"/project/other/Other.java")) == 0);
+	REQUIRE(referencing.count(FilePath(L"/project/lib/Clock.java")) == 0);
 }

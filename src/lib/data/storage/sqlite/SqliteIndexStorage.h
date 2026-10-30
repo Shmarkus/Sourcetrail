@@ -91,6 +91,7 @@ public:
 	std::vector<StorageEdge> getEdgesByTargetId(Id targetId) const;
 	std::vector<StorageEdge> getEdgesByTargetIds(const std::vector<Id>& targetIds) const;
 	std::vector<StorageEdge> getEdgesBySourceOrTargetId(Id id) const;
+	std::vector<Id> getFileIdsReferencingSymbolsDeclaredInFiles(const std::vector<Id>& fileIds) const;
 
 	std::vector<StorageEdge> getEdgesByType(int type) const;
 	std::vector<StorageEdge> getEdgesBySourceType(Id sourceId, int type) const;

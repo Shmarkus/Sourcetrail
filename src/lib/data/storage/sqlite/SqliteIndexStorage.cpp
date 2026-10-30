@@ -721,6 +721,34 @@ std::vector<StorageEdge> SqliteIndexStorage::getEdgesBySourceOrTargetId(Id id) c
 		" OR target_node_id == " + std::to_string(id));
 }
 
+std::vector<Id> SqliteIndexStorage::getFileIdsReferencingSymbolsDeclaredInFiles(
+	const std::vector<Id>& fileIds) const
+{
+	if (fileIds.empty())
+	{
+		return {};
+	}
+
+	// Token locations of nodes are declarations; reference locations belong to the edges.
+	CppSQLite3Query q = executeQuery(
+		"SELECT DISTINCT reference_location.file_node_id FROM source_location AS declaration_location "
+		"JOIN occurrence AS declaration ON declaration.source_location_id = declaration_location.id "
+		"JOIN node ON node.id = declaration.element_id "
+		"JOIN edge ON edge.target_node_id = node.id "
+		"JOIN occurrence AS reference ON reference.element_id = edge.id "
+		"JOIN source_location AS reference_location ON reference_location.id = reference.source_location_id "
+		"WHERE declaration_location.type == " + std::to_string(locationTypeToInt(LOCATION_TOKEN)) +
+		" AND declaration_location.file_node_id IN (" + utility::join(utility::toStrings(fileIds), ',') + ");");
+
+	std::vector<Id> referencingFileIds;
+	while (!q.eof())
+	{
+		referencingFileIds.push_back(q.getIntField(0, 0));
+		q.nextRow();
+	}
+	return referencingFileIds;
+}
+
 std::vector<StorageEdge> SqliteIndexStorage::getEdgesByType(int type) const
 {
 	return doGetAll<StorageEdge>("WHERE type == " + std::to_string(type));

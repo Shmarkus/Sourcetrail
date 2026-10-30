@@ -203,6 +203,18 @@ TEST_CASE("st reads keys from stdin ignoring blanks and carriage returns")
 	REQUIRE(st::readKeys(in) == std::vector<std::wstring>{L"a.B.c()", L"d.E"});
 }
 
+TEST_CASE("st reports the upstream truncation marker it skipped")
+{
+	std::istringstream in("a.B\tclass\nc.D\n+12 more (--limit)\n");
+	size_t truncated = 0;
+	REQUIRE(st::readKeys(in, &truncated) == std::vector<std::wstring>{L"a.B", L"c.D"});
+	REQUIRE(truncated == 12);
+	std::istringstream complete("a.B\n");
+	truncated = 7;
+	st::readKeys(complete, &truncated);
+	REQUIRE(truncated == 0);
+}
+
 TEST_CASE("st relative path keeps spaces and apostrophes")
 {
 	const FilePath cwd(L"/home/u/o'neil/repo");
@@ -581,6 +593,36 @@ TEST_CASE("st freshness counts a vanished source root but not a never-created on
 	REQUIRE(st::checkFreshness(settings, indexedAt, indexed).stale);
 }
 
+TEST_CASE("st freshness is stale when the Gradle source cache is missing")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/build.gradle", "plugins {}");
+	write(repo + "/src/main/java/p/A.java", "class A {}");
+	write(base + "/prj/x.srctrlprj", QString(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+		"<gradle><project_file_path>" + repo + "/build.gradle</project_file_path><should_index_tests>0</should_index_tests></gradle>"
+		"<source_extensions><source_extension>.java</source_extension></source_extensions>"
+		"<status>enabled</status><type>Java Source Group from Gradle</type>"
+		"</source_group_g1></source_groups><version>8</version></config>\n").toUtf8());
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+	const auto past = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+	std::filesystem::last_write_time(repo.toStdString(), past);
+	for (const auto& entry: std::filesystem::recursive_directory_iterator(repo.toStdString()))
+	{
+		std::filesystem::last_write_time(entry.path(), past);
+	}
+	const TimeStamp indexedAt(boost::posix_time::second_clock::local_time() - boost::posix_time::minutes(5));
+	const std::vector<FilePath> indexed = {FilePath((repo + "/src/main/java/p/A.java").toStdWString())};
+
+	const auto freshness = st::checkFreshness(settings, indexedAt, indexed);
+	REQUIRE(freshness.stale);
+	REQUIRE(freshness.reason.find("Gradle source information") != std::string::npos);
+}
+
 TEST_CASE("st remembers its last refresh and the index time it produced")
 {
 	QTemporaryDir dir;
@@ -625,6 +667,34 @@ TEST_CASE("st refs include inheritance and override links")
 	REQUIRE(lineFor(methods, L"p.B.run()") != nullptr);
 	REQUIRE(lineFor(methods, L"p.B.run()")->kind == L"override");
 	REQUIRE(keys(st::references(code.storage, {implRun})).empty());
+}
+
+TEST_CASE("st refs leave out imports")
+{
+	Code code;
+	const Id x = code.type(L"X");
+	const Id y = code.type(L"Y");
+	code.link(Edge::EDGE_IMPORT, code.file(L"X"), y, L"X", {1});
+	code.link(Edge::EDGE_TYPE_USAGE, x, y, L"X", {5});
+	code.storage.buildCaches();
+	const auto lines = st::references(code.storage, {y});
+	REQUIRE(lines.size() == 1);
+	REQUIRE(lines[0].line == 5);
+}
+
+TEST_CASE("st definitions print the declaration line, not the annotation line")
+{
+	Code code;
+	const Id run = add(code.storage, method({L"p", L"A"}, L"run", L"void", L"()"));
+	const Id file = code.file(L"A");
+	code.storage.addOccurrence(StorageOccurrence(run, code.storage.addSourceLocation(
+		StorageSourceLocationData(file, 21, 1, 30, 2, locationTypeToInt(LOCATION_SCOPE)))));
+	code.storage.addOccurrence(StorageOccurrence(run, code.storage.addSourceLocation(
+		StorageSourceLocationData(file, 22, 8, 22, 10, locationTypeToInt(LOCATION_TOKEN)))));
+	code.storage.buildCaches();
+	const auto lines = st::definitionLines(code.storage, run, L"p.A.run()");
+	REQUIRE(lines.size() == 1);
+	REQUIRE(lines[0].line == 22);
 }
 
 TEST_CASE("st locks the canonical project path like the indexer")
@@ -688,6 +758,15 @@ TEST_CASE("lombok location of a deleted original stays generated")
 		st::toOriginal({L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 1, "package p;"}, roots, read);
 	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
 	CHECK(mapped.kind == L"call (generated)");
+}
+
+TEST_CASE("lombok alignment refuses a line whose surroundings repeat in the generated file")
+{
+	const std::vector<std::string> original = {"a();", "X();", "b();"};
+	const std::vector<std::string> generated = {"a();", "X();", "b();", "void m() {", "a();", "X();", "b();", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	CHECK_FALSE(aligned[1].has_value());
+	CHECK_FALSE(aligned[5].has_value());
 }
 
 TEST_CASE("lombok alignment rejects repeated text matched to the wrong occurrence")

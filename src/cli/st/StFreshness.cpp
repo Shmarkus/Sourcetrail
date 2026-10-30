@@ -102,7 +102,16 @@ Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& index
 			gradle->getGradleDependenciesDirectoryPath(), projectDirectory, gradle->getShouldIndexGradleTests());
 		if (!info)
 		{
-			fallback = true;
+			// Indexed files may be delombok copies that only change on refresh; a refresh re-queries Gradle.
+			if (gradle->getGradleProjectFilePathExpandedAndAbsolute().exists())
+			{
+				freshness.changedFiles++;
+				freshness.reason = "Gradle source information missing or outdated; refreshing";
+			}
+			else
+			{
+				fallback = true;
+			}
 			continue;
 		}
 		std::set<std::wstring> extensions;
@@ -120,7 +129,10 @@ Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& index
 	}
 	if (fallback)
 	{
-		freshness.reason = "no Gradle source roots cached; checked indexed files only";
+		if (freshness.reason.empty())
+		{
+			freshness.reason = "no Gradle source roots cached; checked indexed files only";
+		}
 		for (const FilePath& file: indexedFiles)
 		{
 			if (!file.recheckExists() || changedSince(file, indexedAt))

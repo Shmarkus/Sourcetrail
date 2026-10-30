@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <tuple>
 
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
@@ -134,6 +135,19 @@ std::vector<std::optional<size_t>> alignLines(
 	{
 		inGenerated[text]++;
 	}
+	const auto surroundings = [&](size_t g) {
+		const auto before = neighbour(a, g, false);
+		const auto after = neighbour(a, g, true);
+		return std::make_tuple(before ? a[*before] : std::string(), a[g], after ? a[*after] : std::string());
+	};
+	std::map<std::tuple<std::string, std::string, std::string>, size_t> triples;
+	for (size_t g = 0; g < n; g++)
+	{
+		if (!a[g].empty())
+		{
+			triples[surroundings(g)]++;
+		}
+	}
 	const auto matchedTo = [&](std::optional<size_t> generatedIndex, std::optional<size_t> originalIndex) {
 		return generatedIndex.has_value() == originalIndex.has_value() &&
 			(!generatedIndex || raw[*generatedIndex] == originalIndex);
@@ -150,7 +164,7 @@ std::vector<std::optional<size_t>> alignLines(
 		const bool unique = inOriginal[b[o]] == 1 && (inGenerated[a[g]] == 1 || contextual);
 		const bool neighboursMatched = matchedTo(neighbour(a, g, false), neighbour(b, o, false)) &&
 			matchedTo(neighbour(a, g, true), neighbour(b, o, true));
-		if (unique || neighboursMatched)
+		if ((unique || neighboursMatched) && triples[surroundings(g)] == 1)
 		{
 			result[g] = o;
 		}

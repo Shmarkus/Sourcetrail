@@ -299,7 +299,7 @@ int run(QCoreApplication& app)
 	parser.setApplicationDescription(
 		"Agent-facing code navigation over a Sourcetrail index. Results on stdout, progress on stderr.\n"
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
-		"override, inheritance, import, annotation usage, ...");
+		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
 	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted", "[symbol]");
@@ -358,7 +358,12 @@ int run(QCoreApplication& app)
 		}
 		else if (!ST_ISATTY(0))
 		{
-			names = st::readKeys(std::cin);
+			size_t truncated = 0;
+			names = st::readKeys(std::cin, &truncated);
+			if (truncated)
+			{
+				std::cerr << "st: input truncated upstream (+" << truncated << ", raise --limit)\n";
+			}
 		}
 		if (names.empty())
 		{

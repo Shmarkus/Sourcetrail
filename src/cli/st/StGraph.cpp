@@ -226,13 +226,14 @@ std::wstring linkKind(Edge::EdgeType type)
 std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
 {
 	const auto locations = storage.getSourceLocationsForTokenIds({id});
+	// The name's line, not the scope's: a scope starts at the first annotation.
 	const SourceLocation* best = nullptr;
 	locations->forEachSourceLocation([&](SourceLocation* location) {
 		if (!location->isStartLocation())
 		{
 			return;
 		}
-		if (!best || (location->isScopeLocation() && !best->isScopeLocation()))
+		if (!best || (!location->isScopeLocation() && best->isScopeLocation()))
 		{
 			best = location;
 		}
@@ -251,7 +252,7 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 	std::vector<ResultLine> lines;
 	for (const Id id: symbols)
 	{
-		const Edge::TypeMask types = ~Edge::TypeMask(Edge::EDGE_MEMBER);
+		const Edge::TypeMask types = ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT);
 		// A directed trail walks vertical links (inheritance, override) against the search direction.
 		std::map<Id, Edge*> edges;
 		const auto incoming = storage.getGraphForTrail(0, id, ~NodeKindMask(0), types, true, 1, true);
@@ -262,7 +263,7 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 		}
 		for (const auto& [edgeId, edge]: edges)
 		{
-			if (edge->getTo()->getId() != id || edge->isType(Edge::EDGE_MEMBER))
+			if (edge->getTo()->getId() != id || edge->isType(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT))
 			{
 				continue;
 			}

@@ -317,11 +317,11 @@ st path com.acme.Controller.create com.acme.Repo.save
 Planned for Phase 2 and not available yet: `at`, `filter`, `impact`, `symbols-in`.
 
 **Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
-5 index stale (with `--no-refresh`) or project locked past `--wait`, 64 usage error, 70 internal error.
+5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.
 
 **Lombok.** Sourcetrail indexes delombok copies, so `st` maps those locations back to the original
-file and line, matching the generated member to its annotation where that is unambiguous. When no
-mapping is certain the delombok path is printed and the kind column gets `(generated)`.
+file and line, mapping only lines whose text matches the original unambiguously. Generated members
+and reformatted statements keep the delombok path and the kind column gets `(generated)`.
 
 **Auto-refresh.** Before each query `st` compares source (and Gradle build file) times with the last index
 and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The

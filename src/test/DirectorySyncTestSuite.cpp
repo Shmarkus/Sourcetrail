@@ -6,6 +6,10 @@
 #include <sstream>
 #include <string>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "FilePath.h"
 #include "FileSystem.h"
 #include "utilityDirectorySync.h"
@@ -26,6 +30,14 @@ struct SyncFixture
 
 	~SyncFixture()
 	{
+		std::error_code ec;
+		for (const auto& entry: std::filesystem::recursive_directory_iterator(s_root.str(), ec))
+		{
+			if (entry.is_directory(ec))
+			{
+				std::filesystem::permissions(entry.path(), std::filesystem::perms::owner_all, ec);
+			}
+		}
 		std::filesystem::remove_all(s_root.str());
 	}
 
@@ -100,4 +112,31 @@ TEST_CASE("directory sync removes files missing from the source")
 	REQUIRE_FALSE(f.exists(f.target, "old"));
 	REQUIRE(f.exists(f.target, "a/A.java"));
 	REQUIRE(result.removed == 1);
+}
+
+TEST_CASE("directory sync reports files it cannot write")
+{
+	SyncFixture f;
+	f.write(f.source, "a/A.java", "class A { int x; }");
+	f.write(f.target, "a/A.java", "class A {}");
+
+	const std::filesystem::path targetDirectory = std::filesystem::path(f.target.str()) / "a";
+	std::filesystem::permissions(
+		targetDirectory,
+		std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+
+#ifndef _WIN32
+	if (geteuid() == 0)
+	{
+		WARN("running as root, read-only directories are still writable; skipping");
+		return;
+	}
+#endif
+
+	utility::DirectorySyncResult result;
+	REQUIRE_NOTHROW(result = utility::syncDirectoryContents(f.source, f.target));
+
+	REQUIRE(result.failed == 1);
+	REQUIRE(result.written == 0);
+	REQUIRE(f.read(f.target, "a/A.java") == "class A {}");
 }

@@ -218,6 +218,12 @@ bool runDelombok(
 	clearDirectoryContents(temporaryOutputPath);
 	FileSystem::remove(temporaryOutputPath);
 
+	if (syncResult.failed > 0)
+	{
+		LOG_ERROR(L"Failed to sync delombok output into: " + outputDirectoryPath.wstr());
+		return false;
+	}
+
 	return outputDirectoryPath.recheckExists();
 }
 

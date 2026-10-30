@@ -1,12 +1,14 @@
 #include "utilityDirectorySync.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <set>
 
 #include "FilePath.h"
 #include "FileSystem.h"
+#include "logging.h"
 
 namespace utility
 {
@@ -26,6 +28,36 @@ bool hasEqualContent(const FilePath& a, const FilePath& b)
 		std::istreambuf_iterator<char>(),
 		std::istreambuf_iterator<char>(streamB));
 }
+
+// the old target file stays in place until the new content is completely written
+bool replaceFile(const FilePath& sourceFile, const FilePath& targetFile)
+{
+	namespace fs = std::filesystem;
+
+	const fs::path target(targetFile.str());
+	const fs::path temporary = fs::path(target).concat(".sync.tmp");
+	std::error_code ec;
+
+	fs::create_directories(target.parent_path(), ec);
+	if (!ec)
+	{
+		fs::copy_file(fs::path(sourceFile.str()), temporary, fs::copy_options::overwrite_existing, ec);
+	}
+	if (!ec)
+	{
+		fs::rename(temporary, target, ec);
+	}
+	if (ec)
+	{
+		std::error_code ignored;
+		fs::remove(temporary, ignored);
+		LOG_ERROR_STREAM(<< "Failed to write \"" << targetFile.str() << "\": " << ec.message());
+		return false;
+	}
+
+	targetFile.recheckExists();
+	return true;
+}
 }	 // namespace
 
 DirectorySyncResult syncDirectoryContents(
@@ -34,38 +66,51 @@ DirectorySyncResult syncDirectoryContents(
 	DirectorySyncResult result;
 	std::set<std::wstring> sourceRelativePaths;
 
-	FileSystem::createDirectory(targetDirectory);
+	std::error_code ec;
+	std::filesystem::create_directories(targetDirectory.str(), ec);
 
-	for (const FilePath& sourceFile: FileSystem::getFilePathsFromDirectory(sourceDirectory))
+	try
 	{
-		const FilePath relativePath = sourceFile.getRelativeTo(sourceDirectory);
-		sourceRelativePaths.insert(relativePath.wstr());
-
-		const FilePath targetFile = targetDirectory.getConcatenated(relativePath);
-		if (targetFile.recheckExists())
+		for (const FilePath& sourceFile: FileSystem::getFilePathsFromDirectory(sourceDirectory))
 		{
-			if (hasEqualContent(sourceFile, targetFile))
+			const FilePath relativePath = sourceFile.getRelativeTo(sourceDirectory);
+			sourceRelativePaths.insert(relativePath.wstr());
+
+			const FilePath targetFile = targetDirectory.getConcatenated(relativePath);
+			if (targetFile.recheckExists() && hasEqualContent(sourceFile, targetFile))
 			{
 				result.unchanged++;
-				continue;
 			}
-			FileSystem::remove(targetFile);
+			else if (replaceFile(sourceFile, targetFile))
+			{
+				result.written++;
+			}
+			else
+			{
+				result.failed++;
+			}
 		}
 
-		FileSystem::createDirectory(targetFile.getParentDirectory());
-		if (FileSystem::copyFile(sourceFile, targetFile))
+		for (const FilePath& targetFile: FileSystem::getFilePathsFromDirectory(targetDirectory))
 		{
-			result.written++;
+			if (sourceRelativePaths.count(targetFile.getRelativeTo(targetDirectory).wstr()) == 0)
+			{
+				if (FileSystem::remove(targetFile))
+				{
+					result.removed++;
+				}
+				else
+				{
+					LOG_ERROR_STREAM(<< "Failed to remove \"" << targetFile.str() << "\"");
+					result.failed++;
+				}
+			}
 		}
 	}
-
-	for (const FilePath& targetFile: FileSystem::getFilePathsFromDirectory(targetDirectory))
+	catch (const std::exception& e)
 	{
-		if (sourceRelativePaths.count(targetFile.getRelativeTo(targetDirectory).wstr()) == 0 &&
-			FileSystem::remove(targetFile))
-		{
-			result.removed++;
-		}
+		LOG_ERROR_STREAM(<< "Directory sync failed: " << e.what());
+		result.failed++;
 	}
 
 	std::vector<FilePath> subDirectories = FileSystem::getRecursiveSubDirectories(targetDirectory);

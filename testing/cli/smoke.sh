@@ -4,8 +4,9 @@ set -euo pipefail
 # Requires a JDK 21 JAVA_HOME and jq. All writes stay in a disposable project/home.
 cli="$(realpath "$1")"
 root="$(realpath "$(dirname "$0")/../..")"
-test -x "$JAVA_HOME/bin/java"
-command -v jq >/dev/null
+[ -x "${JAVA_HOME:-}/bin/java" ] || { echo "smoke.sh: JAVA_HOME must point to a JDK 21 (no bin/java at '${JAVA_HOME:-}')" >&2; exit 2; }
+[ -x "$cli" ] || { echo "smoke.sh: CLI binary not executable: $cli" >&2; exit 2; }
+command -v jq >/dev/null || { echo "smoke.sh: jq is required" >&2; exit 2; }
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-cli-smoke.XXXXXX")"
 trap 'status=$?; if [ "$status" != 0 ]; then cat "$work/last.stderr" "$work/failure.json" 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
@@ -30,7 +31,7 @@ fail() {
 run --help > "$work/help.txt"
 fail search "$project" getName
 run index "$project" --full > "$work/index.json"
-jq -e '.ok and .result.errors == 0 and .result.completed_files == 3' "$work/index.json" >/dev/null
+jq -e '.ok and .result.errors == 0 and .result.completed_files == 5' "$work/index.json" >/dev/null
 run search "$project" getName > "$work/search.json"
 id="$(jq -er '.result.symbols[] | select(.name == "example.Person.getName") | .id' "$work/search.json")"
 run describe "$project" "$id" > "$work/describe.json"

@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Requires a JDK 21 JAVA_HOME. Usage: st-smoke.sh path/to/st (Sourcetrail_cli must sit next to it).
+die() { echo "st-smoke.sh: $*" >&2; exit 2; }
+[ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"
+st="$(realpath "$1")"
+cli="$(dirname "$st")/Sourcetrail_cli"
+root="$(realpath "$(dirname "$0")/../..")"
+[ -x "${JAVA_HOME:-}/bin/java" ] || die "JAVA_HOME must point to a JDK 21 (no bin/java at '${JAVA_HOME:-}')"
+[ -x "$st" ] || die "st binary not executable: $st"
+[ -x "$cli" ] || die "Sourcetrail_cli not found next to st: $cli"
+work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-st-smoke.XXXXXX")"
+trap 'status=$?; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
+export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
+export HOME="$work/home"
+export SOURCETRAIL_VIA_SCRIPT=1
+unset DISPLAY GRADLE_VERSION
+mkdir -p "$HOME/.config/sourcetrail"
+cp -R "$root/testing/cli/lombok" "$work/project"
+printf '%s\n' '<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing><java><has_prefilled_java_path>1</has_prefilled_java_path>' \
+    "<java_path>$JAVA_HOME/lib/server/libjvm.so</java_path>" \
+    '</java></indexing></config>' > "$HOME/.config/sourcetrail/ApplicationSettings.xml"
+project="$work/project/project.srctrlprj"
+cd "$work/project"
+
+assert() { echo "ASSERT FAILED: $1" >&2; exit 1; }
+# run <expected exit> <args...>: stdout in $work/out, stderr in $work/err
+run() {
+    local expected="$1" code=0
+    shift
+    "$st" "$@" > "$work/out" 2> "$work/err" || code=$?
+    [ "$code" = "$expected" ] || assert "'st $*' exited $code, expected $expected"
+}
+contains() { grep -qF -- "$1" "$work/$2" || assert "$2 lacks '$1'"; }
+
+# No index yet: exit 4, then build it and register the project with --project.
+run 4 --project "$project" find getName
+"$cli" index "$project" --full > "$work/index.json" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
+run 0 --project "$project" find getName
+run 0 find getName
+[ "$(head -n1 "$work/out" | cut -f1)" = "example.Person.getName()" ] || assert "first find column: $(head -n1 "$work/out")"
+
+run 0 callers 'example.Caller.greeting(example.Person)'
+grep -F 'example.Welcome.welcome(example.Person)' "$work/out" | grep -qF 'method via example.Greeter.greeting(example.Person)' \
+    || assert "interface-dispatch caller missing"
+
+run 0 find getName
+"$st" find getName 2> /dev/null | "$st" callers > "$work/out" 2> "$work/err" || assert "find | callers failed"
+line="$(grep -F 'example.Caller.greeting(example.Person)' "$work/out" | head -n1)"
+[ -n "$line" ] || assert "piped callers lacks Caller.greeting"
+expected_line="$(grep -n 'getName()' src/main/java/example/Caller.java | head -n1 | cut -d: -f1)"
+grep -F 'example.Caller.greeting(example.Person)' "$work/out" | grep -qF "src/main/java/example/Caller.java:$expected_line" \
+    || assert "expected src/main/java/example/Caller.java:$expected_line in: $line"
+
+run 0 path example.Welcome 'example.Person.getName()'
+grep -q '^1\. example.Welcome.welcome(example.Person)' "$work/out" || assert "path chain start: $(head -n1 "$work/out")"
+
+# Edit a file: next query refreshes, the one after does not.
+cat > src/main/java/example/Caller.java.new <<'J'
+package example;
+
+public class Caller implements Greeter {
+    @Override
+    public String greeting(Person person) {
+        return person.getName();
+    }
+
+    public String greeting(Person person, String salutation) {
+        return salutation + person.getName().length();
+    }
+
+    public String shout(Person person) {
+        return person.getName().toUpperCase();
+    }
+}
+J
+mv src/main/java/example/Caller.java.new src/main/java/example/Caller.java
+# Timestamps have 1s resolution and a file written in the same second a refresh starts is conservatively
+# refreshed once more, so let the edit settle first.
+sleep 2
+run 0 callers 'example.Person.getName()'
+contains refreshed err
+contains 'example.Caller.shout(example.Person)' out
+run 0 callers 'example.Person.getName()'
+! grep -q refreshed "$work/err" || assert "second run refreshed again"
+
+# Exit codes.
+run 3 callers nope
+run 2 callers greeting
+printf '' | "$st" callers > "$work/out" 2> "$work/err" && code=0 || code=$?
+[ "$code" = 1 ] || assert "empty stdin exited $code, expected 1"
+printf '%s\nbash\n%s\n' "$$" "$(hostname)" > "$project.lock"
+run 5 --wait 500 callers 'example.Person.getName()'
+rm "$project.lock"
+mkdir "$work/empty"
+cp "$project" "$work/empty/project.srctrlprj"
+run 4 --project "$work/empty/project.srctrlprj" find getName
+
+echo "st smoke passed"

@@ -277,6 +277,65 @@ The smoke test requires Bash, `jq`, and access to Gradle/Maven distributions or
 their caches. It copies its fixture and creates isolated preferences in a temporary
 directory; it does not modify your projects or Java preferences.
 
+## `st`: code navigation for agents
+
+`st` answers "who calls this", "what implements that", "how does A reach B" from an
+existing Sourcetrail index, as plain text lines that pipe into each other. Build it next
+to the other binaries and put it on your `PATH`:
+
+```bash
+cmake --build build/Release --target st Sourcetrail Sourcetrail_cli -j 4
+ln -s "$PWD/build/Release/app/st" ~/.local/bin/st
+```
+
+It needs the adjacent `Sourcetrail`, `sourcetrail_indexer` and data payload, like `Sourcetrail_cli`.
+Create the first index with `Sourcetrail_cli index /abs/project.srctrlprj --full`.
+
+**Project discovery.** `st` looks for a `.srctrlprj` in the current directory and upward. Failing
+that it consults the registry `~/.config/sourcetrail/st-projects.tsv` (source tree to project file).
+Any run with `--project /abs/project.srctrlprj` registers that project for its source tree, so
+afterwards `st` works from anywhere in the tree without the flag.
+
+**Commands:** `find`, `status`, `refs`, `callers`, `callees`, `impls`, `supers`, `path` (see `st --help`).
+The symbol is a name or a full key (`pkg.Class.method(pkg.Arg)`); without one, `st` reads
+keys from stdin, one per line or the first tab-separated column, so commands pipe.
+Ambiguous names exit 2 and list the candidates.
+
+**Output.** One tab-separated line per result: `key`, `kind`, `path:line`, source line
+(`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9`)
+goes to stderr; a `+N more (--limit)` overflow line ends stdout. Calls through an
+interface show as `method via pkg.Iface.method()`. `--limit` (default 50), `--depth`, `--kind` shape results.
+`find` ranks exact, then suffix, then substring matches. External (library) symbols are hidden.
+
+```bash
+st find --kind class OrderService
+st callers 'com.acme.OrderService.place(com.acme.Order)' --depth 3
+st find --kind interface Repository | st impls | st callers --depth 3
+st path com.acme.Controller.create com.acme.Repo.save
+```
+
+Planned for Phase 2 and not available yet: `at`, `filter`, `impact`, `symbols-in`.
+
+**Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
+5 index stale (with `--no-refresh`) or project locked past `--wait`, 64 usage error, 70 internal error.
+
+**Lombok.** Sourcetrail indexes delombok copies, so `st` maps those locations back to the original
+file and line, matching the generated member to its annotation where that is unambiguous. When no
+mapping is certain the delombok path is printed and the kind column gets `(generated)`.
+
+**Auto-refresh.** Before each query `st` compares source (and Gradle build file) times with the last index
+and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The
+`<project>.srctrlst` marker beside the project file records the last refresh so edits made during one are not lost.
+`--no-refresh` skips this and exits 5 when stale; `--wait <ms>` bounds the wait for the project lock (default 30000).
+Timestamps have one-second resolution, so a file saved in the same second a refresh started is refreshed once more.
+
+Tests for `st`: `ctest --test-dir build/Release -R cli.st` for the unit tests, and an end-to-end smoke test
+(isolated home, copied fixture, JDK 21):
+
+```bash
+JAVA_HOME=/path/to/jdk-21 bash testing/cli/st-smoke.sh build/Release/app/st
+```
+
 ## Existing application test suite
 
 The automated test suite of Sourcetrail is powered by [Catch2](https://github.com/catchorg/Catch2). To run the tests, simply execute the `Sourcetrail_test` binary. Before executing, please make sure to set the working directory to `./bin/test`.

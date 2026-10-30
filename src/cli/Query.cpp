@@ -146,8 +146,18 @@ QJsonObject status(PersistentStorage& storage)
 		{"freshness", "last_completed_index; source changes require reindexing"}};
 }
 
-void reindex(const QString& project, bool full, int timeoutMs)
+void reindex(const QString& project, bool full, int timeoutMs, std::string* log)
 {
+	const auto output = [&](const QByteArray& text) {
+		if (log)
+		{
+			log->append(text.constData(), static_cast<size_t>(text.size()));
+		}
+		else
+		{
+			std::cerr << text.constData() << std::flush;
+		}
+	};
 	QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
 #ifdef _WIN32
 	executable += ".exe";
@@ -170,8 +180,8 @@ void reindex(const QString& project, bool full, int timeoutMs)
 	timer.start();
 	while (process.state() != QProcess::NotRunning)
 	{
-		process.waitForReadyRead(1000);
-		std::cerr << process.readAll().constData() << std::flush;
+		process.waitForReadyRead(100);
+		output(process.readAll());
 		if (timer.elapsed() > timeoutMs)
 		{
 			process.terminate();
@@ -183,7 +193,7 @@ void reindex(const QString& project, bool full, int timeoutMs)
 			throw std::runtime_error("Indexing timed out; inspect logs before retrying");
 		}
 	}
-	std::cerr << process.readAll().constData();
+	output(process.readAll());
 	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
 	{
 		throw std::runtime_error("Indexing failed; see stderr for Gradle, delombok or indexer diagnostics");

@@ -1,10 +1,14 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QLockFile>
 
+#include <algorithm>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <stdexcept>
 
@@ -19,16 +23,17 @@
 #include "CppSQLite3.h"
 #include "NodeType.h"
 #include "NodeTypeSet.h"
+#include "FileInfo.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
-#include "SourceLocation.h"
-#include "SourceLocationCollection.h"
+#include "Query.h"
+#include "StFreshness.h"
+#include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
 #include "StOutput.h"
 #include "StProject.h"
 #include "StorageStats.h"
-#include "TextAccess.h"
 #include "utilityString.h"
 
 namespace
@@ -94,35 +99,6 @@ NodeKindMask kindMask(const QCommandLineParser& parser)
 	return kind;
 }
 
-// Scope location when there is one, else the first token location.
-std::vector<st::ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
-{
-	const auto locations = storage.getSourceLocationsForTokenIds({id});
-	const SourceLocation* best = nullptr;
-	locations->forEachSourceLocation([&](SourceLocation* location) {
-		if (!location->isStartLocation())
-		{
-			return;
-		}
-		if (!best || (location->isScopeLocation() && !best->isScopeLocation()))
-		{
-			best = location;
-		}
-	});
-	if (!best)
-	{
-		return {};
-	}
-	std::string source;
-	const auto content = storage.getFileContent(best->getFilePath(), false);
-	if (content && best->getLineNumber() >= 1 && best->getLineNumber() <= content->getLineCount())
-	{
-		source = content->getLine(static_cast<unsigned int>(best->getLineNumber()));
-	}
-	return {{key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), best->getFilePath(),
-		best->getLineNumber(), source}};
-}
-
 int find(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
 	const st::OutputOptions& options)
 {
@@ -131,7 +107,7 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 	{
 		for (const auto& symbol: st::rankSymbols(storage, name, kinds))
 		{
-			for (auto& line: definitionLines(storage, symbol.id, st::symbolKey(storage.getNameHierarchyForNodeId(symbol.id))))
+			for (auto& line: st::definitionLines(storage, symbol.id, st::symbolKey(storage.getNameHierarchyForNodeId(symbol.id))))
 			{
 				line.tier = symbol.tier;
 				lines.push_back(std::move(line));
@@ -142,26 +118,159 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
-int status(PersistentStorage& storage)
+const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path"};
+
+// Resolves every name; ambiguous names list their candidates on stderr.
+int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
+	const st::OutputOptions& options, std::vector<Id>* ids)
+{
+	std::vector<st::ResultLine> candidates;
+	for (const std::wstring& name: names)
+	{
+		const st::Resolved resolved = st::resolveSymbol(storage, name, kinds);
+		if (resolved.status == st::Resolution::NotFound)
+		{
+			std::cerr << "st: symbol not found: " << utility::encodeToUtf8(name) << '\n';
+		}
+		else if (resolved.status == st::Resolution::Ambiguous)
+		{
+			std::cerr << "st: ambiguous: " << utility::encodeToUtf8(name) << '\n';
+			for (const Id id: resolved.ids)
+			{
+				for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id))))
+				{
+					candidates.push_back(std::move(line));
+				}
+			}
+		}
+		else
+		{
+			ids->insert(ids->end(), resolved.ids.begin(), resolved.ids.end());
+		}
+	}
+	if (!candidates.empty())
+	{
+		st::OutputOptions all = options;
+		all.limit = candidates.size();
+		st::printResults(std::move(candidates), all, std::cerr);
+		return st::EXIT_AMBIGUOUS;
+	}
+	return ids->empty() ? st::EXIT_NOT_FOUND : st::EXIT_RESULTS;
+}
+
+int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vector<Id>& to, size_t depth,
+	const st::OutputOptions& options)
+{
+	const std::vector<Id> origins = st::expandClasses(storage, from);
+	const std::vector<Id> targets = st::expandClasses(storage, to);
+	if (origins.size() * targets.size() > 200)
+	{
+		std::cerr << "st: path searches only the first 200 of " << origins.size() * targets.size()
+				  << " symbol pairs\n";
+	}
+	const size_t found = 1000;
+	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1));
+	std::cerr << "path: " << chains.size() << '\n';
+	const auto location = [&](const FilePath& file, size_t line) {
+		return utility::encodeToUtf8(st::displayPath(file, options.cwd)) + ':' + std::to_string(line);
+	};
+	for (size_t i = 0; i < chains.size() && i < options.limit; i++)
+	{
+		const Id start = chains[i].front().from;
+		const std::wstring startKey = st::symbolKey(storage.getNameHierarchyForNodeId(start));
+		std::cout << i + 1 << ". " << utility::encodeToUtf8(startKey);
+		for (const auto& line: st::definitionLines(storage, start, startKey))
+		{
+			std::cout << '\t' << location(line.file, line.line);
+		}
+		std::cout << '\n';
+		for (const st::PathHop& hop: chains[i])
+		{
+			std::cout << "   -" << utility::encodeToUtf8(st::linkKind(hop.type)) << "-> "
+					  << utility::encodeToUtf8(st::symbolKey(storage.getNameHierarchyForNodeId(hop.to))) << '\t'
+					  << location(hop.file, hop.line) << '\n';
+		}
+	}
+	if (chains.size() > options.limit)
+	{
+		std::cout << "(+" << chains.size() - options.limit << " more paths, --limit)\n";
+	}
+	return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
+}
+
+int graph(PersistentStorage& storage, const QString& command, const std::vector<Id>& ids, size_t depth,
+	const st::OutputOptions& options)
+{
+	std::vector<st::ResultLine> lines;
+	if (command == "refs")
+	{
+		lines = st::references(storage, ids);
+	}
+	else if (command == "callers" || command == "callees")
+	{
+		lines = st::calls(storage, st::expandClasses(storage, ids),
+			command == "callers" ? st::Direction::Incoming : st::Direction::Outgoing, depth);
+	}
+	else
+	{
+		lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing);
+	}
+	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
+	return st::printResults(std::move(lines), options, std::cout);
+}
+
+int status(PersistentStorage& storage, const st::Freshness& freshness)
 {
 	const StorageStats stats = storage.getStorageStats();
 	std::cout << "indexed_at\t" << stats.timestamp.toString() << '\n'
 			  << "files\t" << stats.fileCount << '\n'
 			  << "errors\t" << storage.getErrorCount().total << '\n'
-			  << "stale_files\tunknown\n";
+			  << "stale_files\t" << freshness.changedFiles << '\n';
+	return st::EXIT_RESULTS;
+}
+
+std::unique_ptr<QLockFile> lockProject(const QString& project, size_t wait)
+{
+	auto lock = std::make_unique<QLockFile>(project + ".lock");
+	lock->setStaleLockTime(0);
+	if (!lock->tryLock(static_cast<int>(wait)))
+	{
+		std::cerr << "st: project is busy; gave up after " << wait << " ms (see --wait)\n";
+		return nullptr;
+	}
+	return lock;
+}
+
+// EXIT_RESULTS when the index can be opened for queries.
+int checkIndex(const ProjectSettings& settings)
+{
+	if (settings.getTempDBFilePath().exists())
+	{
+		std::cerr << "st: an unfinished index exists; reindex the project\n";
+		return st::EXIT_NO_INDEX;
+	}
+	if (!settings.getDBFilePath().exists())
+	{
+		std::cerr << "st: project has no index; index it first\n";
+		return st::EXIT_NO_INDEX;
+	}
 	return st::EXIT_RESULTS;
 }
 
 int run(QCoreApplication& app)
 {
 	QCommandLineParser parser;
-	parser.setApplicationDescription("Agent-facing code navigation over a Sourcetrail index. Results on stdout, progress on stderr.");
+	parser.setApplicationDescription(
+		"Agent-facing code navigation over a Sourcetrail index. Results on stdout, progress on stderr.\n"
+		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
+		"override, inheritance, import, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted", "[symbol]");
+	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
 	parser.addOption({"project", "Project file (.srctrlprj); registers it for later use from its source tree", "file"});
 	parser.addOption({"limit", "Maximum result lines (default 50)", "count"});
-	parser.addOption({"depth", "Traversal depth for graph commands", "n"});
+	parser.addOption({"depth", "Call levels for callers/callees (default 1) and links for path (default 6); 0 = unlimited", "n"});
 	parser.addOption({"kind", "Only symbols of this kind, e.g. class, method", "kind"});
 	parser.addOption({"no-source", "Omit the source line column"});
 	parser.addOption({"no-refresh", "Do not refresh a stale index before querying"});
@@ -176,25 +285,40 @@ int run(QCoreApplication& app)
 		return st::EXIT_RESULTS;
 	}
 	const QStringList args = parser.positionalArguments();
-	if (args.isEmpty() || (args[0] != "find" && args[0] != "status") || args.size() > 2 ||
-		(args[0] == "status" && args.size() != 1))
+	const QString command = args.isEmpty() ? QString() : args[0];
+	const bool isGraph = GRAPH_COMMANDS.contains(command);
+	if ((command != "find" && command != "status" && !isGraph) || args.size() > (command == "path" ? 3 : 2) ||
+		(command == "status" && args.size() != 1))
 	{
-		throw UsageError("Usage: st <find|status> [symbol] [--project P] [--limit N] [--kind K] [--no-source]; see --help");
+		throw UsageError(
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path> [symbol] [target] [--project P] "
+			"[--limit N] [--depth N] [--kind K] [--no-source] [--no-refresh]; see --help");
 	}
-	const QString command = args[0];
 	st::OutputOptions options;
 	options.limit = number(parser, "limit", options.limit);
 	options.showSource = !parser.isSet("no-source");
 	options.cwd = FilePath(QDir::currentPath().toStdWString());
 	const size_t wait = number(parser, "wait", 30000);
+	const size_t depth = number(parser, "depth", command == "path" ? 6 : 1);
 	const NodeKindMask kinds = kindMask(parser);
 
+	// path reads its origins from stdin when given only the target.
 	std::vector<std::wstring> names;
-	if (command == "find")
+	std::vector<std::wstring> targets;
+	if (command != "status")
 	{
-		if (args.size() == 2)
+		const int named = args.size() - 1;
+		if (command == "path" && named >= 1)
+		{
+			targets.push_back(args.last().toStdWString());
+		}
+		if (named == (command == "path" ? 2 : 1))
 		{
 			names.push_back(args[1].toStdWString());
+		}
+		else if (command == "path" && named == 0)
+		{
+			throw UsageError("path needs a target: st path <from> <to>, or <keys> | st path <to>");
 		}
 		else if (!ST_ISATTY(0))
 		{
@@ -202,7 +326,11 @@ int run(QCoreApplication& app)
 		}
 		if (names.empty())
 		{
-			return args.size() == 2 ? st::EXIT_USAGE : st::EXIT_EMPTY;
+			return named > (command == "path" ? 1 : 0) ? st::EXIT_USAGE : st::EXIT_EMPTY;
+		}
+		if (std::count(names.begin(), names.end(), L"") || std::count(targets.begin(), targets.end(), L""))
+		{
+			throw UsageError("Symbol names must not be empty");
 		}
 	}
 
@@ -213,22 +341,76 @@ int run(QCoreApplication& app)
 		throw UsageError("Unable to load project settings");
 	}
 	const QString project = QString::fromStdWString(projectFile.wstr());
-	QLockFile lock(project + ".lock");
-	lock.setStaleLockTime(0);
-	if (!lock.tryLock(static_cast<int>(wait)))
+
+	// Freshness needs the index time; never hold the lock while Sourcetrail refreshes.
+	st::Freshness freshness;
 	{
-		std::cerr << "st: project is busy; gave up after " << wait << " ms (see --wait)\n";
+		const auto lock = lockProject(project, wait);
+		if (!lock)
+		{
+			return st::EXIT_STALE;
+		}
+		if (const int code = checkIndex(settings))
+		{
+			return code;
+		}
+		PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
+		if (storage.isEmpty() || storage.isIncompatible())
+		{
+			std::cerr << "st: index is empty or incompatible; reindex with --full\n";
+			return st::EXIT_NO_INDEX;
+		}
+		std::vector<FilePath> indexedFiles;
+		for (const FileInfo& file: storage.getFileInfoForAllFiles())
+		{
+			indexedFiles.push_back(file.path);
+		}
+		TimeStamp indexedAt = storage.getStorageStats().timestamp;
+		const TimeStamp refreshedAt = st::lastRefresh(settings);
+		if (refreshedAt.isValid() && indexedAt < refreshedAt)
+		{
+			indexedAt = refreshedAt;
+		}
+		freshness = st::checkFreshness(settings, indexedAt, indexedFiles);
+	}
+	if (!freshness.reason.empty())
+	{
+		std::cerr << "st: " << freshness.reason << '\n';
+	}
+	if (freshness.stale && command != "status")
+	{
+		if (parser.isSet("no-refresh"))
+		{
+			std::cerr << "st: index is out of date (" << freshness.changedFiles << " changed files); refresh turned off\n";
+			return st::EXIT_STALE;
+		}
+		QElapsedTimer timer;
+		timer.start();
+		const TimeStamp started = TimeStamp::now();
+		std::string log;
+		try
+		{
+			cli::reindex(project, false, 600000, &log);
+		}
+		catch (const std::exception& error)
+		{
+			std::cerr << log << "st: refresh failed: " << error.what() << '\n';
+			return st::EXIT_STALE;
+		}
+		st::recordRefresh(settings, started);
+		std::cerr << "refreshed " << freshness.changedFiles << " files in " << std::fixed << std::setprecision(1)
+				  << timer.elapsed() / 1000.0 << "s\n";
+		freshness = st::Freshness();
+	}
+
+	const auto lock = lockProject(project, wait);
+	if (!lock)
+	{
 		return st::EXIT_STALE;
 	}
-	if (settings.getTempDBFilePath().exists())
+	if (const int code = checkIndex(settings))
 	{
-		std::cerr << "st: an unfinished index exists; reindex the project\n";
-		return st::EXIT_NO_INDEX;
-	}
-	if (!settings.getDBFilePath().exists())
-	{
-		std::cerr << "st: project has no index; index it first\n";
-		return st::EXIT_NO_INDEX;
+		return code;
 	}
 	PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
 	if (storage.isEmpty() || storage.isIncompatible())
@@ -237,7 +419,29 @@ int run(QCoreApplication& app)
 		return st::EXIT_NO_INDEX;
 	}
 	storage.buildCaches();
-	return command == "find" ? find(storage, names, kinds, options) : status(storage);
+	if (command == "status")
+	{
+		return status(storage, freshness);
+	}
+	if (command == "find")
+	{
+		return find(storage, names, kinds, options);
+	}
+	std::vector<Id> ids;
+	if (const int code = resolve(storage, names, kinds, options, &ids))
+	{
+		return code;
+	}
+	if (command != "path")
+	{
+		return graph(storage, command, ids, depth, options);
+	}
+	std::vector<Id> targetIds;
+	if (const int code = resolve(storage, targets, ~0, options, &targetIds))
+	{
+		return code;
+	}
+	return path(storage, ids, targetIds, depth, options);
 }
 }
 

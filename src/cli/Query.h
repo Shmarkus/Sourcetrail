@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QString>
 
+#include <string>
+
 #include "types.h"
 
 class PersistentStorage;
@@ -17,7 +19,8 @@ QJsonObject describe(PersistentStorage& storage, Id id, int limit);
 QJsonObject references(PersistentStorage& storage, Id id, const QString& kind, int limit);
 QJsonObject readSource(PersistentStorage& storage, const QString& path, int start, int end);
 QJsonObject status(PersistentStorage& storage);
-void reindex(const QString& project, bool full, int timeoutMs);
+// Streams the indexer's output to stderr, or collects it into `log` when given.
+void reindex(const QString& project, bool full, int timeoutMs, std::string* log = nullptr);
 QJsonArray locations(PersistentStorage& storage, Id id, int limit);
 }
 

@@ -56,6 +56,13 @@ public:
 		std::string& ret,
 		const std::string& arg1,
 		const std::string& arg2);
+	bool callStaticStringMethod(
+		std::string className,
+		std::string methodName,
+		std::string& ret,
+		const std::string& arg1,
+		const std::string& arg2,
+		const std::string& arg3);
 
 	std::string toStdString(jstring s);
 	jstring toJString(std::string s);

@@ -120,6 +120,37 @@ bool JavaEnvironment::callStaticStringMethod(
 	return false;
 }
 
+bool JavaEnvironment::callStaticStringMethod(
+	std::string className,
+	std::string methodName,
+	std::string& ret,
+	const std::string& arg1,
+	const std::string& arg2,
+	const std::string& arg3)
+{
+	jclass javaClass = getJavaClass(className);
+	jmethodID javaMethodId = getJavaStaticMethod(
+		javaClass,
+		methodName,
+		"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+	if (javaMethodId != nullptr)
+	{
+		jstring jarg1 = m_env->NewStringUTF(arg1.c_str());
+		jstring jarg2 = m_env->NewStringUTF(arg2.c_str());
+		jstring jarg3 = m_env->NewStringUTF(arg3.c_str());
+		jstring jret =
+			(jstring)m_env->CallStaticObjectMethod(javaClass, javaMethodId, jarg1, jarg2, jarg3);
+		if (jret)
+		{
+			const char* buffer = m_env->GetStringUTFChars(jret, JNI_FALSE);
+			ret = std::string(buffer);
+			m_env->ReleaseStringUTFChars(jret, buffer);
+			return true;
+		}
+	}
+	return false;
+}
+
 std::string JavaEnvironment::toStdString(jstring s)
 {
 	const char* nativeString = m_env->GetStringUTFChars(s, 0);

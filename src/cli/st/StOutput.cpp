@@ -1,6 +1,7 @@
 #include "StOutput.h"
 
 #include <algorithm>
+#include <set>
 #include <tuple>
 
 #include "utilityString.h"
@@ -46,21 +47,21 @@ std::wstring displayPath(const FilePath& file, const FilePath& cwd)
 int printResults(std::vector<ResultLine> lines, const OutputOptions& options, std::ostream& out)
 {
 	std::stable_sort(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) {
-		return order(a) < order(b);
+		return std::make_tuple(a.tier, order(a)) < std::make_tuple(b.tier, order(b));
 	});
-	lines.erase(
-		std::unique(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) {
-			return order(a) == order(b);
-		}),
+	std::set<std::tuple<std::wstring, size_t, std::wstring, std::wstring>> seen;
+	lines.erase(std::remove_if(lines.begin(), lines.end(), [&](const ResultLine& line) { return !seen.insert(order(line)).second; }),
 		lines.end());
 	if (lines.empty())
 	{
 		return EXIT_EMPTY;
 	}
 	const size_t shown = std::min(lines.size(), options.limit);
-	for (size_t i = 0; i < shown; i++)
+	const size_t overflow = lines.size() - shown;
+	lines.resize(shown);
+	std::sort(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) { return order(a) < order(b); });
+	for (const ResultLine& line: lines)
 	{
-		const ResultLine& line = lines[i];
 		out << utility::encodeToUtf8(line.key) << '\t' << utility::encodeToUtf8(line.kind) << '\t'
 			<< utility::encodeToUtf8(displayPath(line.file, options.cwd)) << ':' << line.line;
 		if (options.showSource)
@@ -69,9 +70,9 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 		}
 		out << '\n';
 	}
-	if (shown < lines.size())
+	if (overflow)
 	{
-		out << '+' << lines.size() - shown << " more (--limit)\n";
+		out << '+' << overflow << " more (--limit)\n";
 	}
 	return EXIT_RESULTS;
 }

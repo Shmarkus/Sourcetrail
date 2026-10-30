@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <set>
 
+#include "DefinitionKind.h"
+
 #include "NodeType.h"
 #include "NodeTypeSet.h"
 #include "PersistentStorage.h"
@@ -54,7 +56,8 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 	{
 		for (Id id: match.tokenIds)
 		{
-			if (!seen.insert(id).second || !(storage.getNodeTypeForNodeWithId(id).getKind() & kinds))
+			if (!seen.insert(id).second || storage.getDefinitionKindForNodeId(id) == DEFINITION_NONE ||
+				!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds))
 			{
 				continue;
 			}
@@ -111,5 +114,53 @@ Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, Nod
 		resolved = pick(collect(storage, text, kinds), text);
 	}
 	return resolved;
+}
+}
+
+namespace st
+{
+std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds)
+{
+	auto lower = [](std::wstring s) {
+		std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+		return s;
+	};
+	const std::wstring needle = lower(text);
+	std::vector<std::pair<int, Id>> ranked;
+	for (const Candidate& candidate: collect(storage, text, kinds))
+	{
+		if (lower(candidate.qualified).find(needle) == std::wstring::npos)
+		{
+			continue;
+		}
+		int tier = 2;
+		if (candidate.qualified == text || storage.getNameHierarchyForNodeId(candidate.id).back().getName() == text)
+		{
+			tier = 0;
+		}
+		else if (endsWithName(candidate.qualified, text, candidate.delimiter) ||
+			endsWithName(candidate.key, text, candidate.delimiter))
+		{
+			tier = 1;
+		}
+		ranked.emplace_back(tier, candidate.id);
+	}
+	std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+	std::vector<RankedSymbol> result;
+	for (const auto& entry: ranked)
+	{
+		result.push_back({entry.second, entry.first});
+	}
+	return result;
+}
+
+std::vector<Id> findSymbols(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds)
+{
+	std::vector<Id> ids;
+	for (const auto& symbol: rankSymbols(storage, text, kinds))
+	{
+		ids.push_back(symbol.id);
+	}
+	return ids;
 }
 }

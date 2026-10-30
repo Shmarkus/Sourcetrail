@@ -30,6 +30,18 @@ std::wstring symbolKey(const NameHierarchy& name);
 
 // Exact key, then exact qualified name (overloads are ambiguous), then suffix match.
 Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
+
+struct RankedSymbol
+{
+	Id id;
+	int tier;	// 0 exact, 1 suffix, 2 other substring
+};
+
+// Defined (non-external) symbols whose qualified name contains `text` case-insensitively,
+// ordered exact, then suffix, then other substring matches.
+std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
+std::vector<Id> findSymbols(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
+
 }
 
 #endif

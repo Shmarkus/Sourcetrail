@@ -21,7 +21,6 @@
 #include "NodeTypeSet.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
-#include "SearchMatch.h"
 #include "SourceLocation.h"
 #include "SourceLocationCollection.h"
 #include "StInput.h"
@@ -95,11 +94,6 @@ NodeKindMask kindMask(const QCommandLineParser& parser)
 	return kind;
 }
 
-bool isIndexed(const SearchMatch& match)
-{
-	return match.typeName.compare(0, 12, L"non-indexed ") != 0;
-}
-
 // Scope location when there is one, else the first token location.
 std::vector<st::ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
 {
@@ -135,27 +129,12 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 	std::vector<st::ResultLine> lines;
 	for (const std::wstring& name: names)
 	{
-		for (const auto& match: storage.getAutocompletionSymbolMatches(name, NodeTypeSet::all(), 1000, 0))
+		for (const auto& symbol: st::rankSymbols(storage, name, kinds))
 		{
-			if (!isIndexed(match))
+			for (auto& line: definitionLines(storage, symbol.id, st::symbolKey(storage.getNameHierarchyForNodeId(symbol.id))))
 			{
-				continue;
-			}
-			for (Id id: match.tokenIds)
-			{
-				if (!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds))
-				{
-					continue;
-				}
-				const NameHierarchy hierarchy = storage.getNameHierarchyForNodeId(id);
-				if (hierarchy.size() == 0)
-				{
-					continue;
-				}
-				for (auto& line: definitionLines(storage, id, st::symbolKey(hierarchy)))
-				{
-					lines.push_back(std::move(line));
-				}
+				line.tier = symbol.tier;
+				lines.push_back(std::move(line));
 			}
 		}
 	}
@@ -283,5 +262,5 @@ int main(int argc, char** argv)
 	{
 		std::cerr << "st: " << error.what() << '\n';
 	}
-	return st::EXIT_NO_INDEX;
+	return st::EXIT_INTERNAL;
 }

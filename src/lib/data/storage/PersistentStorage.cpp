@@ -583,6 +583,12 @@ NodeType PersistentStorage::getNodeTypeForNodeWithId(Id nodeId) const
 	return NodeType(intToNodeKind(m_sqliteIndexStorage.getFirstById<StorageNode>(nodeId).type));
 }
 
+DefinitionKind PersistentStorage::getDefinitionKindForNodeId(Id nodeId) const
+{
+	const auto it = m_symbolDefinitionKinds.find(nodeId);
+	return it == m_symbolDefinitionKinds.end() ? DEFINITION_NONE : it->second;
+}
+
 StorageEdge PersistentStorage::getEdgeById(Id edgeId) const
 {
 	return m_sqliteIndexStorage.getEdgeById(edgeId);

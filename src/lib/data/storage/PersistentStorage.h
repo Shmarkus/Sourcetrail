@@ -106,6 +106,7 @@ public:
 		const std::vector<Id>& nodeIds) const override;
 
 	NodeType getNodeTypeForNodeWithId(Id nodeId) const override;
+	DefinitionKind getDefinitionKindForNodeId(Id nodeId) const;
 
 	StorageEdge getEdgeById(Id edgeId) const override;
 

@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
+#include <QSaveFile>
 #include <QStringList>
 #include <QTextStream>
 
@@ -49,36 +51,35 @@ QStringList readLines(const FilePath& file)
 
 FilePath findProject(const FilePath& cwd, const FilePath& registryFile)
 {
-	const QString start = normalized(toQt(cwd));
-	for (QDir dir(start); ; )
+	std::vector<std::pair<QString, QString>> registered;
+	for (const QString& line: readLines(registryFile))
+	{
+		const QStringList columns = line.trimmed().split('\t');
+		if (columns.size() == 2)
+		{
+			registered.emplace_back(normalized(columns[0]), columns[1]);
+		}
+	}
+	for (QDir dir(normalized(toQt(cwd))); ; )
 	{
 		const QStringList projects = dir.entryList({"*.srctrlprj"}, QDir::Files, QDir::Name);
 		if (!projects.isEmpty())
 		{
 			return fromQt(dir.absoluteFilePath(projects.first()));
 		}
+		for (const auto& [root, project]: registered)
+		{
+			if (root == dir.path() && QFile::exists(project))
+			{
+				return fromQt(project);
+			}
+		}
 		if (!dir.cdUp())
 		{
 			break;
 		}
 	}
-	QString best;
-	QString bestRoot;
-	for (const QString& line: readLines(registryFile))
-	{
-		const QStringList columns = line.trimmed().split('\t');
-		if (columns.size() != 2)
-		{
-			continue;
-		}
-		const QString root = normalized(columns[0]);
-		if (isBelow(start, root) && root.size() > bestRoot.size() && QFile::exists(columns[1]))
-		{
-			best = columns[1];
-			bestRoot = root;
-		}
-	}
-	return best.isEmpty() ? FilePath() : fromQt(best);
+	return FilePath();
 }
 
 void registerProject(const FilePath& registryFile, const FilePath& project)
@@ -107,25 +108,37 @@ void registerProject(const FilePath& registryFile, const FilePath& project)
 		return;
 	}
 	const QString projectPath = toQt(project.getAbsolute());
-	QStringList lines;
-	for (const QString& line: readLines(registryFile))
+	QDir().mkpath(QFileInfo(toQt(registryFile)).absolutePath());
+	QLockFile lock(toQt(registryFile) + ".lock");
+	if (!lock.tryLock(10000))
 	{
-		if (!roots.contains(normalized(line.split('\t').first())))
+		std::cerr << "st: cannot lock " << registryFile.str() << '\n';
+		return;
+	}
+	const QStringList existing = readLines(registryFile);
+	QStringList lines;
+	for (const QString& line: existing)
+	{
+		const QString root = normalized(line.split('\t').first());
+		if (!roots.contains(root) || line == root + '\t' + projectPath)
 		{
 			lines << line;
 		}
 	}
 	for (const QString& root: roots)
 	{
-		lines << root + '\t' + projectPath;
+		const QString entry = root + '\t' + projectPath;
+		if (!lines.contains(entry))
+		{
+			lines << entry;
+		}
 	}
-	QDir().mkpath(QFileInfo(toQt(registryFile)).absolutePath());
-	QFile out(toQt(registryFile));
-	if (out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+	if (lines == existing)
 	{
-		out.write((lines.join('\n') + '\n').toUtf8());
+		return;
 	}
-	else
+	QSaveFile out(toQt(registryFile));
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Text) || out.write((lines.join('\n') + '\n').toUtf8()) < 0 || !out.commit())
 	{
 		std::cerr << "st: cannot write " << registryFile.str() << '\n';
 	}

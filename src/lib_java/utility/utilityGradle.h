@@ -8,6 +8,8 @@ class FilePath;
 
 namespace utility
 {
+FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const std::wstring& sourceSetName);
+
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath,
 	const FilePath& outputDirectoryPath,

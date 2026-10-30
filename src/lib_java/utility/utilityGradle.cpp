@@ -1,6 +1,7 @@
 #include "utilityGradle.h"
 
 #include <map>
+#include <optional>
 #include <set>
 
 #include "Application.h"
@@ -15,6 +16,7 @@
 #include "utility.h"
 #include "utilityApp.h"
 #include "utilityDirectorySync.h"
+#include "utilityGradleCache.h"
 #include "utilityJava.h"
 #include "utilityString.h"
 
@@ -76,7 +78,7 @@ std::string callGradleStringMethod(
 	return output;
 }
 
-LombokInfo getLombokInfo(const FilePath& projectDirectoryPath)
+std::optional<LombokInfo> getLombokInfo(const FilePath& projectDirectoryPath)
 {
 	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
 	const std::string output = callGradleStringMethod(
@@ -84,7 +86,7 @@ LombokInfo getLombokInfo(const FilePath& projectDirectoryPath)
 
 	if (showGradleErrorIfNeeded(output))
 	{
-		return LombokInfo();
+		return std::nullopt;
 	}
 
 	LombokInfo info;
@@ -116,11 +118,6 @@ LombokInfo getLombokInfo(const FilePath& projectDirectoryPath)
 	}
 
 	return info;
-}
-
-FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const std::wstring& sourceSetName)
-{
-	return outputDirectoryPath.getConcatenated(L"delombok").getConcatenated(sourceSetName);
 }
 
 bool clearDirectoryContents(const FilePath& directoryPath)
@@ -227,7 +224,7 @@ bool runDelombok(
 	return outputDirectoryPath.recheckExists();
 }
 
-std::map<std::wstring, std::vector<FilePath>> getSourceDirectoriesBySourceSet(
+std::optional<std::map<std::wstring, std::vector<FilePath>>> getSourceDirectoriesBySourceSet(
 	const FilePath& projectDirectoryPath,
 	const FilePath& gradleInitScriptPath,
 	bool addTestDirectories)
@@ -239,7 +236,7 @@ std::map<std::wstring, std::vector<FilePath>> getSourceDirectoriesBySourceSet(
 		javaEnvironment, "getMainSrcDirs", projectDirectoryPath, gradleInitScriptPath);
 	if (showGradleErrorIfNeeded(mainOutput))
 	{
-		return {};
+		return std::nullopt;
 	}
 
 	for (const std::string& mainSrcDir: utility::splitToVector(mainOutput, ";"))
@@ -257,7 +254,7 @@ std::map<std::wstring, std::vector<FilePath>> getSourceDirectoriesBySourceSet(
 			javaEnvironment, "getTestSrcDirs", projectDirectoryPath, gradleInitScriptPath);
 		if (showGradleErrorIfNeeded(testOutput))
 		{
-			return {};
+			return std::nullopt;
 		}
 
 		for (const std::string& testSrcDir: utility::splitToVector(testOutput, ";"))
@@ -272,11 +269,69 @@ std::map<std::wstring, std::vector<FilePath>> getSourceDirectoriesBySourceSet(
 
 	return directories;
 }
+bool outputDirectoryHoldsJars(const FilePath& outputDirectoryPath)
+{
+	return outputDirectoryPath.recheckExists() &&
+		!FileSystem::getFilePathsFromDirectory(outputDirectoryPath, {L".jar"}).empty();
+}
+
+// Asks Gradle for lombok and source directory info. Only stores it when both calls succeeded.
+GradleProjectInfo queryGradleProjectInfo(
+	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool includesTests)
+{
+	GradleProjectInfo info;
+	info.fingerprint = gradleBuildFingerprint(projectDirectoryPath);
+	info.includesTests = includesTests;
+
+	const std::optional<LombokInfo> lombokInfo = getLombokInfo(projectDirectoryPath);
+	if (!lombokInfo)
+	{
+		return info;
+	}
+	info.mainHasLombok = lombokInfo->mainHasLombok;
+	info.testHasLombok = lombokInfo->testHasLombok;
+	info.mainLombokJar = lombokInfo->mainJarPath;
+	info.testLombokJar = lombokInfo->testJarPath;
+
+	const auto sourceDirectories =
+		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), includesTests);
+	if (!sourceDirectories)
+	{
+		return info;
+	}
+	info.sourceDirectories = *sourceDirectories;
+
+	saveGradleProjectInfo(outputDirectoryPath, info);
+	return info;
+}
+
+GradleProjectInfo getGradleProjectInfo(
+	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool includesTests)
+{
+	if (const std::optional<GradleProjectInfo> cached =
+			loadGradleProjectInfo(outputDirectoryPath, projectDirectoryPath, includesTests))
+	{
+		return *cached;
+	}
+	return queryGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, includesTests);
+}
 } // namespace
+
+FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const std::wstring& sourceSetName)
+{
+	return outputDirectoryPath.getConcatenated(L"delombok").getConcatenated(sourceSetName);
+}
 
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool addTestDependencies)
 {
+	if (loadGradleProjectInfo(outputDirectoryPath, projectDirectoryPath, addTestDependencies) &&
+		outputDirectoryHoldsJars(outputDirectoryPath))
+	{
+		LOG_INFO("Gradle build files unchanged, reusing exported dependencies.");
+		return true;
+	}
+
 	const FilePath gradleInitScriptPath = getGradleInitScriptPath();
 	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
 	bool success = javaEnvironment->callStaticVoidMethod(
@@ -296,6 +351,12 @@ bool gradleCopyDependencies(
 			utility::encodeToUtf8(outputDirectoryPath.wstr()));
 	}
 
+	if (success)
+	{
+		// refresh the cached info next to the freshly exported jars
+		queryGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestDependencies);
+	}
+
 	return success;
 }
 
@@ -304,22 +365,21 @@ bool gradlePrepareLombokSources(
 	const FilePath& outputDirectoryPath,
 	bool addTestSources)
 {
-	const LombokInfo lombokInfo = getLombokInfo(projectDirectoryPath);
-	if (!lombokInfo.mainHasLombok && !(addTestSources && lombokInfo.testHasLombok))
+	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestSources);
+	if (!info.mainHasLombok && !(addTestSources && info.testHasLombok))
 	{
 		return true;
 	}
 
-	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
-		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), addTestSources);
+	const std::map<std::wstring, std::vector<FilePath>>& sourceDirectoriesBySourceSet = info.sourceDirectories;
 
-	if (lombokInfo.mainHasLombok)
+	if (info.mainHasLombok)
 	{
 		const auto it = sourceDirectoriesBySourceSet.find(L"main");
 		if (it != sourceDirectoriesBySourceSet.end() &&
 			!runDelombok(
 				projectDirectoryPath,
-				lombokInfo.mainJarPath,
+				info.mainLombokJar,
 				it->second,
 				getDelombokOutputDirectory(outputDirectoryPath, L"main")))
 		{
@@ -327,13 +387,13 @@ bool gradlePrepareLombokSources(
 		}
 	}
 
-	if (addTestSources && lombokInfo.testHasLombok)
+	if (addTestSources && info.testHasLombok)
 	{
 		const auto it = sourceDirectoriesBySourceSet.find(L"test");
 		if (it != sourceDirectoriesBySourceSet.end() &&
 			!runDelombok(
 				projectDirectoryPath,
-				lombokInfo.testJarPath,
+				info.testLombokJar,
 				it->second,
 				getDelombokOutputDirectory(outputDirectoryPath, L"test")))
 		{
@@ -349,13 +409,12 @@ std::vector<FilePath> gradleGetAllSourceDirectories(
 	const FilePath& outputDirectoryPath,
 	bool addTestDirectories)
 {
-	const LombokInfo lombokInfo = getLombokInfo(projectDirectoryPath);
-	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
-		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), addTestDirectories);
+	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestDirectories);
+	const std::map<std::wstring, std::vector<FilePath>>& sourceDirectoriesBySourceSet = info.sourceDirectories;
 
 	std::vector<FilePath> directories;
 	const auto mainIt = sourceDirectoriesBySourceSet.find(L"main");
-	if (lombokInfo.mainHasLombok)
+	if (info.mainHasLombok)
 	{
 		const FilePath delombokMainDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"main");
 		if (delombokMainDirectory.exists())
@@ -371,7 +430,7 @@ std::vector<FilePath> gradleGetAllSourceDirectories(
 	if (addTestDirectories)
 	{
 		const auto testIt = sourceDirectoriesBySourceSet.find(L"test");
-		if (lombokInfo.testHasLombok)
+		if (info.testHasLombok)
 		{
 			const FilePath delombokTestDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"test");
 			if (delombokTestDirectory.exists())

@@ -17,6 +17,7 @@ add_files(
 	FilePathFilterTestSuite.cpp
 	FilePathTestSuite.cpp
 	FileSystemTestSuite.cpp
+	GradleCacheTestSuite.cpp
 	GraphTestSuite.cpp
 	HierarchyCacheTestSuite.cpp
 	JavaIndexSampleProjectsTestSuite.cpp

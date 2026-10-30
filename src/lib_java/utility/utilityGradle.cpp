@@ -14,6 +14,7 @@
 #include "logging.h"
 #include "utility.h"
 #include "utilityApp.h"
+#include "utilityDirectorySync.h"
 #include "utilityJava.h"
 #include "utilityString.h"
 
@@ -161,10 +162,11 @@ bool runDelombok(
 		return true;
 	}
 
-	FileSystem::createDirectory(outputDirectoryPath);
-	if (!clearDirectoryContents(outputDirectoryPath))
+	const FilePath temporaryOutputPath(outputDirectoryPath.wstr() + L".tmp");
+	FileSystem::createDirectory(temporaryOutputPath);
+	if (!clearDirectoryContents(temporaryOutputPath))
 	{
-		LOG_ERROR(L"Failed to clear delombok output directory: " + outputDirectoryPath.wstr());
+		LOG_ERROR(L"Failed to clear delombok temporary directory: " + temporaryOutputPath.wstr());
 		return false;
 	}
 
@@ -191,8 +193,10 @@ bool runDelombok(
 	{
 		args.push_back(sourceDirectory.wstr());
 	}
+	args.push_back(L"-f");
+	args.push_back(L"generateDelombokComment:skip");
 	args.push_back(L"-d");
-	args.push_back(outputDirectoryPath.wstr());
+	args.push_back(temporaryOutputPath.wstr());
 
 	const utility::ProcessOutput output =
 		utility::executeProcess(javaExecutablePath.wstr(), args, projectDirectoryPath, true, 60000, true);
@@ -204,6 +208,15 @@ bool runDelombok(
 			<< utility::encodeToUtf8(output.output));
 		return false;
 	}
+
+	// only touch files whose delombok output changed, so refreshes re-index just those
+	const DirectorySyncResult syncResult = syncDirectoryContents(temporaryOutputPath, outputDirectoryPath);
+	LOG_INFO_STREAM(
+		<< "Delombok output synced: " << syncResult.written << " written, " << syncResult.unchanged
+		<< " unchanged, " << syncResult.removed << " removed");
+
+	clearDirectoryContents(temporaryOutputPath);
+	FileSystem::remove(temporaryOutputPath);
 
 	return outputDirectoryPath.recheckExists();
 }

@@ -405,6 +405,8 @@ add_files(
 	utility/file/FileSystem.h
 	utility/file/FileTree.cpp
 	utility/file/FileTree.h
+	utility/file/utilityDirectorySync.cpp
+	utility/file/utilityDirectorySync.h
 	utility/file/utilityFile.cpp
 	utility/file/utilityFile.h
 

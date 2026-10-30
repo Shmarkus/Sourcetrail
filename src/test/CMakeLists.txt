@@ -12,6 +12,7 @@ add_files(
 	CxxIncludeProcessingTestSuite.cpp
 	CxxParserTestSuite.cpp
 	CxxTypeNameTestSuite.cpp
+	DirectorySyncTestSuite.cpp
 	FileManagerTestSuite.cpp
 	FilePathFilterTestSuite.cpp
 	FilePathTestSuite.cpp

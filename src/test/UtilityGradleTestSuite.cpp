@@ -7,6 +7,7 @@
 
 #		include "FilePath.h"
 #		include "FileSystem.h"
+#		include "TextAccess.h"
 #		include "utility.h"
 #		include "utilityGradle.h"
 
@@ -27,7 +28,7 @@ void cleanup()
 TEST_CASE("gradle wrapper detects source directories of simple projects")
 {
 	std::vector<FilePath> result = utility::gradleGetAllSourceDirectories(
-		FilePath(L"data/UtilityGradleTestSuite/simple_gradle_project"), false);
+		FilePath(L"data/UtilityGradleTestSuite/simple_gradle_project"), tmpFolder.makeAbsolute(), false);
 
 	REQUIRE(utility::containsElement<FilePath>(
 		result,
@@ -41,7 +42,7 @@ TEST_CASE("gradle wrapper detects source directories of simple projects")
 TEST_CASE("gradle wrapper detects source and test directories of simple projects")
 {
 	std::vector<FilePath> result = utility::gradleGetAllSourceDirectories(
-		FilePath(L"data/UtilityGradleTestSuite/simple_gradle_project"), true);
+		FilePath(L"data/UtilityGradleTestSuite/simple_gradle_project"), tmpFolder.makeAbsolute(), true);
 
 	REQUIRE(utility::containsElement<FilePath>(
 		result,
@@ -50,6 +51,39 @@ TEST_CASE("gradle wrapper detects source and test directories of simple projects
 	REQUIRE(utility::containsElement<FilePath>(
 		result,
 		FilePath(L"data/UtilityGradleTestSuite/simple_gradle_project/src/test/java").makeAbsolute()));
+}
+
+TEST_CASE("gradle wrapper prepares lombok sources and replaces source directories")
+{
+	const FilePath projectPath(L"data/UtilityGradleTestSuite/delombok_gradle_project");
+	const FilePath generatedDirectory =
+		tmpFolder.makeAbsolute().getConcatenated(L"delombok").getConcatenated(L"main");
+	const FilePath generatedFile = generatedDirectory.getConcatenated(L"hello/Greeter.java");
+
+	cleanup();
+	if (generatedDirectory.recheckExists())
+	{
+		const std::vector<FilePath> subDirectories = FileSystem::getRecursiveSubDirectories(generatedDirectory);
+		for (auto it = subDirectories.rbegin(); it != subDirectories.rend(); ++it)
+		{
+			FileSystem::remove(*it);
+		}
+		FileSystem::remove(generatedDirectory);
+	}
+
+	REQUIRE(utility::gradlePrepareLombokSources(projectPath, tmpFolder.makeAbsolute(), false));
+	REQUIRE(generatedFile.recheckExists());
+
+	const std::shared_ptr<TextAccess> generatedGreeter = TextAccess::createFromFile(generatedFile);
+	REQUIRE(generatedGreeter->getText().find("getGreeting") != std::string::npos);
+
+	const std::vector<FilePath> sourceDirectories =
+		utility::gradleGetAllSourceDirectories(projectPath, tmpFolder.makeAbsolute(), false);
+	REQUIRE(utility::containsElement<FilePath>(sourceDirectories, generatedDirectory));
+	REQUIRE(!utility::containsElement<FilePath>(
+		sourceDirectories,
+		FilePath(L"data/UtilityGradleTestSuite/delombok_gradle_project/src/main/java").makeAbsolute()));
+	cleanup();
 }
 
 TEST_CASE("gradle wrapper detects source dependencies of simple projects")

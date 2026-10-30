@@ -86,6 +86,16 @@ bool SourceGroupJavaGradle::prepareGradleData()
 			m_settings->getGradleDependenciesDirectoryPath(),
 			m_settings->getShouldIndexGradleTests());
 
+		if (success)
+		{
+			dialogView->showUnknownProgressDialog(
+				L"Preparing Project", L"Gradle\nPreparing Lombok Sources");
+			success = utility::gradlePrepareLombokSources(
+				projectRootPath,
+				m_settings->getGradleDependenciesDirectoryPath(),
+				m_settings->getShouldIndexGradleTests());
+		}
+
 		return success;
 	}
 
@@ -105,7 +115,9 @@ std::vector<FilePath> SourceGroupJavaGradle::doGetAllSourcePaths() const
 		const FilePath projectRootPath =
 			m_settings->getGradleProjectFilePathExpandedAndAbsolute().getParentDirectory();
 		sourcePaths = utility::gradleGetAllSourceDirectories(
-			projectRootPath, m_settings->getShouldIndexGradleTests());
+			projectRootPath,
+			m_settings->getGradleDependenciesDirectoryPath(),
+			m_settings->getShouldIndexGradleTests());
 
 		dialogView->hideUnknownProgressDialog();
 	}

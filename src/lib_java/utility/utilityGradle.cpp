@@ -1,30 +1,265 @@
 #include "utilityGradle.h"
 
+#include <map>
 #include <set>
 
 #include "Application.h"
 #include "ApplicationSettings.h"
+#include "FileSystem.h"
 #include "JavaEnvironment.h"
 #include "JavaEnvironmentFactory.h"
 #include "MessageStatus.h"
 #include "ResourcePaths.h"
+#include "TextAccess.h"
 #include "logging.h"
+#include "utility.h"
+#include "utilityApp.h"
 #include "utilityJava.h"
 #include "utilityString.h"
 
 namespace utility
 {
+namespace
+{
+struct LombokInfo
+{
+	bool mainHasLombok = false;
+	bool testHasLombok = false;
+	FilePath mainJarPath;
+	FilePath testJarPath;
+};
+
+FilePath getGradleInitScriptPath()
+{
+	return ResourcePaths::getJavaDirectoryPath().concatenate(L"gradle/init.gradle");
+}
+
+std::shared_ptr<JavaEnvironment> createPreparedJavaEnvironment()
+{
+	utility::setJavaHomeVariableIfNotExists();
+	utility::prepareJavaEnvironment();
+	return JavaEnvironmentFactory::getInstance()->createEnvironment();
+}
+
+bool showGradleErrorIfNeeded(const std::string& output)
+{
+	if (!utility::isPrefix<std::string>("[ERROR]", utility::trim(output)))
+	{
+		return false;
+	}
+
+	const std::wstring dialogMessage =
+		L"The following error occurred while executing a Gradle command:\n\n" +
+		utility::decodeFromUtf8(utility::replace(output, "\r\n", "\n"));
+	MessageStatus(dialogMessage, true, false).dispatch();
+	if (Application::getInstance())
+	{
+		Application::getInstance()->handleDialog(dialogMessage);
+	}
+	return true;
+}
+
+std::string callGradleStringMethod(
+	std::shared_ptr<JavaEnvironment> javaEnvironment,
+	const std::string& methodName,
+	const FilePath& projectDirectoryPath,
+	const FilePath& gradleInitScriptPath)
+{
+	std::string output = "";
+	javaEnvironment->callStaticStringMethod(
+		"com/sourcetrail/gradle/InfoRetriever",
+		methodName,
+		output,
+		utility::encodeToUtf8(projectDirectoryPath.wstr()),
+		utility::encodeToUtf8(gradleInitScriptPath.wstr()));
+	return output;
+}
+
+LombokInfo getLombokInfo(const FilePath& projectDirectoryPath)
+{
+	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
+	const std::string output = callGradleStringMethod(
+		javaEnvironment, "getLombokInfo", projectDirectoryPath, getGradleInitScriptPath());
+
+	if (showGradleErrorIfNeeded(output))
+	{
+		return LombokInfo();
+	}
+
+	LombokInfo info;
+	for (const std::string& line: utility::splitToVector(output, "\n"))
+	{
+		const std::string trimmedLine = utility::trim(line);
+		if (trimmedLine.empty())
+		{
+			continue;
+		}
+
+		const std::vector<std::string> parts = utility::splitToVector(trimmedLine, "|");
+		if (parts.size() != 2)
+		{
+			continue;
+		}
+
+		const FilePath jarPath(utility::decodeFromUtf8(parts[1]));
+		if (parts[0] == "main")
+		{
+			info.mainHasLombok = true;
+			info.mainJarPath = jarPath;
+		}
+		else if (parts[0] == "test")
+		{
+			info.testHasLombok = true;
+			info.testJarPath = jarPath;
+		}
+	}
+
+	return info;
+}
+
+FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const std::wstring& sourceSetName)
+{
+	return outputDirectoryPath.getConcatenated(L"delombok").getConcatenated(sourceSetName);
+}
+
+bool clearDirectoryContents(const FilePath& directoryPath)
+{
+	if (!directoryPath.recheckExists() || !directoryPath.isDirectory())
+	{
+		return true;
+	}
+
+	const std::vector<FilePath> files = FileSystem::getFilePathsFromDirectory(directoryPath);
+	for (const FilePath& file: files)
+	{
+		if (!FileSystem::remove(file))
+		{
+			return false;
+		}
+	}
+
+	std::vector<FilePath> subDirectories = FileSystem::getRecursiveSubDirectories(directoryPath);
+	for (auto it = subDirectories.rbegin(); it != subDirectories.rend(); ++it)
+	{
+		if (!FileSystem::remove(*it))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool runDelombok(
+	const FilePath& projectDirectoryPath,
+	const FilePath& lombokJarPath,
+	const std::vector<FilePath>& sourceDirectories,
+	const FilePath& outputDirectoryPath)
+{
+	if (sourceDirectories.empty())
+	{
+		return true;
+	}
+
+	FileSystem::createDirectory(outputDirectoryPath);
+	if (!clearDirectoryContents(outputDirectoryPath))
+	{
+		LOG_ERROR(L"Failed to clear delombok output directory: " + outputDirectoryPath.wstr());
+		return false;
+	}
+
+	const FilePath javaPath = ApplicationSettings::getInstance()->getJavaPath();
+	if (javaPath.empty())
+	{
+		LOG_ERROR("Cannot run delombok because configured Java path is empty.");
+		return false;
+	}
+
+	FilePath javaExecutablePath = javaPath.getParentDirectory().getParentDirectory().getParentDirectory();
+	javaExecutablePath = javaExecutablePath.getConcatenated(L"bin/java");
+	if (!javaExecutablePath.exists())
+	{
+		LOG_ERROR(L"Cannot run delombok because Java executable is missing at \"" + javaExecutablePath.wstr() + L"\".");
+		return false;
+	}
+
+	std::vector<std::wstring> args;
+	args.push_back(L"-jar");
+	args.push_back(lombokJarPath.wstr());
+	args.push_back(L"delombok");
+	for (const FilePath& sourceDirectory: sourceDirectories)
+	{
+		args.push_back(sourceDirectory.wstr());
+	}
+	args.push_back(L"-d");
+	args.push_back(outputDirectoryPath.wstr());
+
+	const utility::ProcessOutput output =
+		utility::executeProcess(javaExecutablePath.wstr(), args, projectDirectoryPath, true, 60000, true);
+
+	if (output.exitCode != 0)
+	{
+		LOG_ERROR_STREAM(
+			<< "Delombok failed with exit code " << output.exitCode << ": "
+			<< utility::encodeToUtf8(output.output));
+		return false;
+	}
+
+	return outputDirectoryPath.recheckExists();
+}
+
+std::map<std::wstring, std::vector<FilePath>> getSourceDirectoriesBySourceSet(
+	const FilePath& projectDirectoryPath,
+	const FilePath& gradleInitScriptPath,
+	bool addTestDirectories)
+{
+	std::map<std::wstring, std::vector<FilePath>> directories;
+	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
+
+	const std::string mainOutput = callGradleStringMethod(
+		javaEnvironment, "getMainSrcDirs", projectDirectoryPath, gradleInitScriptPath);
+	if (showGradleErrorIfNeeded(mainOutput))
+	{
+		return {};
+	}
+
+	for (const std::string& mainSrcDir: utility::splitToVector(mainOutput, ";"))
+	{
+		FilePath path(utility::decodeFromUtf8(mainSrcDir));
+		if (path.exists())
+		{
+			directories[L"main"].push_back(path);
+		}
+	}
+
+	if (addTestDirectories)
+	{
+		const std::string testOutput = callGradleStringMethod(
+			javaEnvironment, "getTestSrcDirs", projectDirectoryPath, gradleInitScriptPath);
+		if (showGradleErrorIfNeeded(testOutput))
+		{
+			return {};
+		}
+
+		for (const std::string& testSrcDir: utility::splitToVector(testOutput, ";"))
+		{
+			FilePath path(utility::decodeFromUtf8(testSrcDir));
+			if (path.exists())
+			{
+				directories[L"test"].push_back(path);
+			}
+		}
+	}
+
+	return directories;
+}
+} // namespace
+
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool addTestDependencies)
 {
-	const FilePath gradleInitScriptPath = ResourcePaths::getJavaDirectoryPath().concatenate(
-		L"gradle/init.gradle");
-
-	utility::setJavaHomeVariableIfNotExists();
-	utility::prepareJavaEnvironment();
-
-	std::shared_ptr<JavaEnvironment> javaEnvironment =
-		JavaEnvironmentFactory::getInstance()->createEnvironment();
+	const FilePath gradleInitScriptPath = getGradleInitScriptPath();
+	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
 	bool success = javaEnvironment->callStaticVoidMethod(
 		"com/sourcetrail/gradle/InfoRetriever",
 		"copyCompileLibs",
@@ -45,91 +280,93 @@ bool gradleCopyDependencies(
 	return success;
 }
 
-std::vector<FilePath> gradleGetAllSourceDirectories(
-	const FilePath& projectDirectoryPath, bool addTestDirectories)
+bool gradlePrepareLombokSources(
+	const FilePath& projectDirectoryPath,
+	const FilePath& outputDirectoryPath,
+	bool addTestSources)
 {
-	const FilePath gradleInitScriptPath = ResourcePaths::getJavaDirectoryPath().concatenate(
-		L"gradle/init.gradle");
-
-	utility::setJavaHomeVariableIfNotExists();
-	utility::prepareJavaEnvironment();
-
-	std::set<std::wstring> uncheckedDirectories;
+	const LombokInfo lombokInfo = getLombokInfo(projectDirectoryPath);
+	if (!lombokInfo.mainHasLombok && !(addTestSources && lombokInfo.testHasLombok))
 	{
-		std::shared_ptr<JavaEnvironment> javaEnvironment =
-			JavaEnvironmentFactory::getInstance()->createEnvironment();
+		return true;
+	}
+
+	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
+		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), addTestSources);
+
+	if (lombokInfo.mainHasLombok)
+	{
+		const auto it = sourceDirectoriesBySourceSet.find(L"main");
+		if (it != sourceDirectoriesBySourceSet.end() &&
+			!runDelombok(
+				projectDirectoryPath,
+				lombokInfo.mainJarPath,
+				it->second,
+				getDelombokOutputDirectory(outputDirectoryPath, L"main")))
 		{
-			std::string output = "";
-			javaEnvironment->callStaticStringMethod(
-				"com/sourcetrail/gradle/InfoRetriever",
-				"getMainSrcDirs",
-				output,
-				utility::encodeToUtf8(projectDirectoryPath.wstr()),
-				utility::encodeToUtf8(gradleInitScriptPath.wstr()));
-
-			if (utility::isPrefix<std::string>("[ERROR]", utility::trim(output)))
-			{
-				// TODO: move error handling to caller of this function
-				const std::wstring dialogMessage =
-					L"The following error occurred while executing a Gradle command:\n\n" +
-					utility::decodeFromUtf8(utility::replace(output, "\r\n", "\n"));
-				MessageStatus(dialogMessage, true, false).dispatch();
-				if (Application::getInstance())
-				{
-					Application::getInstance()->handleDialog(dialogMessage);
-				}
-				return std::vector<FilePath>();
-			}
-
-			for (const std::string mainSrcDir: utility::splitToVector(output, ";"))
-			{
-				uncheckedDirectories.insert(utility::decodeFromUtf8(mainSrcDir));
-			}
-		}
-
-		if (addTestDirectories)
-		{
-			std::string output = "";
-			javaEnvironment->callStaticStringMethod(
-				"com/sourcetrail/gradle/InfoRetriever",
-				"getTestSrcDirs",
-				output,
-				utility::encodeToUtf8(projectDirectoryPath.wstr()),
-				utility::encodeToUtf8(gradleInitScriptPath.wstr()));
-
-			if (utility::isPrefix<std::string>("[ERROR]", utility::trim(output)))
-			{
-				// TODO: move error handling to caller of this function
-				const std::wstring dialogMessage =
-					L"The following error occurred while executing a Gradle command:\n\n" +
-					utility::decodeFromUtf8(utility::replace(output, "\r\n", "\n"));
-				MessageStatus(dialogMessage, true, false).dispatch();
-				Application::getInstance()->handleDialog(dialogMessage);
-
-				return std::vector<FilePath>();
-			}
-
-			for (const std::string testSrcDir: utility::splitToVector(output, ";"))
-			{
-				uncheckedDirectories.insert(utility::decodeFromUtf8(testSrcDir));
-			}
+			return false;
 		}
 	}
+
+	if (addTestSources && lombokInfo.testHasLombok)
+	{
+		const auto it = sourceDirectoriesBySourceSet.find(L"test");
+		if (it != sourceDirectoriesBySourceSet.end() &&
+			!runDelombok(
+				projectDirectoryPath,
+				lombokInfo.testJarPath,
+				it->second,
+				getDelombokOutputDirectory(outputDirectoryPath, L"test")))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+std::vector<FilePath> gradleGetAllSourceDirectories(
+	const FilePath& projectDirectoryPath,
+	const FilePath& outputDirectoryPath,
+	bool addTestDirectories)
+{
+	const LombokInfo lombokInfo = getLombokInfo(projectDirectoryPath);
+	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
+		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), addTestDirectories);
 
 	std::vector<FilePath> directories;
-	for (const std::wstring& uncheckedDirectory: uncheckedDirectories)
+	const auto mainIt = sourceDirectoriesBySourceSet.find(L"main");
+	if (lombokInfo.mainHasLombok)
 	{
-		FilePath uncheckedDirectoryPath(uncheckedDirectory);
-		if (uncheckedDirectoryPath.exists())
+		const FilePath delombokMainDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"main");
+		if (delombokMainDirectory.exists())
 		{
-			directories.push_back(uncheckedDirectoryPath);
+			directories.push_back(delombokMainDirectory);
+		}
+	}
+	else if (mainIt != sourceDirectoriesBySourceSet.end())
+	{
+		utility::append(directories, mainIt->second);
+	}
+
+	if (addTestDirectories)
+	{
+		const auto testIt = sourceDirectoriesBySourceSet.find(L"test");
+		if (lombokInfo.testHasLombok)
+		{
+			const FilePath delombokTestDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"test");
+			if (delombokTestDirectory.exists())
+			{
+				directories.push_back(delombokTestDirectory);
+			}
+		}
+		else if (testIt != sourceDirectoriesBySourceSet.end())
+		{
+			utility::append(directories, testIt->second);
 		}
 	}
 
-	LOG_INFO(
-		"Found " + std::to_string(directories.size()) + " of " +
-		std::to_string(uncheckedDirectories.size()) + " directories on system.");
-
+	LOG_INFO("Found " + std::to_string(directories.size()) + " directories on system.");
 	return directories;
 }
-}	 // namespace utility
+} // namespace utility

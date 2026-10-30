@@ -6,6 +6,28 @@ def copyDependencies(source, destination) {
         }
 }
 
+def findLombokJar(project, configurationNames) {
+	for (String configurationName : configurationNames) {
+		def configuration = project.configurations.findByName(configurationName)
+		if (configuration == null) {
+			continue
+		}
+
+		try {
+			def lombokJar = configuration.files.find { file ->
+				file.name ==~ /lombok-\d.*\.jar/
+			}
+			if (lombokJar != null) {
+				return lombokJar
+			}
+		}
+		catch (Exception ignored) {
+		}
+	}
+
+	return null
+}
+
 allprojects { pp ->
 	task printMainSrcDirs {
 		doLast {
@@ -27,6 +49,20 @@ allprojects { pp ->
 						println "${dir}"
 					}
 				}
+			}
+		}
+	}
+
+	task printLombokInfo {
+		doLast {
+			def mainLombokJar = findLombokJar(project, ["annotationProcessor", "compileOnly", "compileClasspath"])
+			if (mainLombokJar != null) {
+				println "main|${mainLombokJar}"
+			}
+
+			def testLombokJar = findLombokJar(project, ["testAnnotationProcessor", "testCompileOnly", "testCompileClasspath"])
+			if (testLombokJar != null) {
+				println "test|${testLombokJar}"
 			}
 		}
 	}

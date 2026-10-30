@@ -9,7 +9,6 @@ import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 
 import org.gradle.api.GradleException;
 import org.gradle.tooling.BuildLauncher;
@@ -88,6 +87,23 @@ public class InfoRetriever
 			Arrays.asList("-Psourcetrail_lib_path=" + targetPath));
 	}
 
+	public static String getLombokInfo(String projectRootPath, String initScriptPath)
+	{
+		try
+		{
+			return executeTask(
+				"printLombokInfo",
+				projectRootPath,
+				initScriptPath,
+				null);
+		}
+		catch (GradleException e)
+		{
+			logger.error("Error reading Lombok dependency information", e);
+			return "[ERROR] " + e.getMessage();
+		}
+	}
+
 	private static List<String> getSrcDirs(String taskName, String projectRootPath, String initScriptPath)
 	{
 		String output = executeTask(taskName, projectRootPath, initScriptPath, null);
@@ -114,9 +130,14 @@ public class InfoRetriever
 		String taskName, String projectRootPath, String initScriptPath, List<String> additionalArguments)
 		throws GradleException
 	{
-		String gradleVersion = Optional.ofNullable(System.getenv("GRADLE_VERSION")).orElse("8.6");
-		ProjectConnection connection =
-			GradleConnector.newConnector().useGradleVersion(gradleVersion).forProjectDirectory(new File(projectRootPath)).connect();
+		GradleConnector connector = GradleConnector.newConnector()
+			.forProjectDirectory(new File(projectRootPath));
+		String gradleVersion = System.getenv("GRADLE_VERSION");
+		if (gradleVersion != null && !gradleVersion.isBlank())
+		{
+			connector.useGradleVersion(gradleVersion.trim());
+		}
+		ProjectConnection connection = connector.connect();
 
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		ByteArrayOutputStream errorStream = new ByteArrayOutputStream();

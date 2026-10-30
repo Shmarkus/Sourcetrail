@@ -29,8 +29,9 @@
 #include "utility.h"
 #include "utilityApp.h"
 
-PersistentStorage::PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath)
-	: m_sqliteIndexStorage(dbPath), m_sqliteBookmarkStorage(bookmarkPath)
+PersistentStorage::PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath, bool readOnly)
+	: m_sqliteIndexStorage(dbPath, readOnly)
+	, m_sqliteBookmarkStorage(readOnly ? FilePath(L":memory:") : bookmarkPath)
 {
 	m_commandIndex.addNode(0, SearchMatch::getCommandName(SearchMatch::COMMAND_ALL));
 	m_commandIndex.addNode(0, SearchMatch::getCommandName(SearchMatch::COMMAND_ERROR));

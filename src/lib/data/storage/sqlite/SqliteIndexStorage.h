@@ -41,7 +41,7 @@ public:
 		STORAGE_MODE_CLEAR = 4
 	};
 
-	SqliteIndexStorage(const FilePath& dbFilePath);
+	SqliteIndexStorage(const FilePath& dbFilePath, bool readOnly = false);
 
 	virtual size_t getStaticVersion() const;
 

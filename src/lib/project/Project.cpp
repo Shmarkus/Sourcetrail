@@ -1,4 +1,8 @@
 #include "Project.h"
+#include "ScopedFunctor.h"
+
+#include <QLockFile>
+#include <stdexcept>
 
 #include "ApplicationSettings.h"
 #include "CombinedIndexerCommandProvider.h"
@@ -58,6 +62,9 @@ Project::Project(
 	, m_appUUID(appUUID)
 	, m_hasGUI(hasGUI)
 {
+	m_indexLock = std::make_unique<QLockFile>(
+		QString::fromStdWString(settings->getFilePath().getCanonical().wstr()) + ".lock");
+	m_indexLock->setStaleLockTime(0);
 }
 
 Project::~Project() {}
@@ -109,6 +116,12 @@ void Project::setStateOutdated()
 
 void Project::load(std::shared_ptr<DialogView> dialogView)
 {
+	QLockFile loadLock(QString::fromStdWString(m_settings->getFilePath().getCanonical().wstr()) + ".lock");
+	loadLock.setStaleLockTime(0);
+	if (!loadLock.tryLock())
+	{
+		throw std::runtime_error("Project is busy indexing or being queried");
+	}
 	if (m_refreshStage != RefreshStageType::NONE)
 	{
 		MessageStatus(L"Cannot load another project while indexing.", true, false).dispatch();
@@ -275,6 +288,15 @@ void Project::load(std::shared_ptr<DialogView> dialogView)
 void Project::refresh(
 	std::shared_ptr<DialogView> dialogView, RefreshMode refreshMode, bool shallowIndexingRequested)
 {
+	m_lastRefreshSucceeded = false;
+	if (!m_storage || !m_indexLock->tryLock())
+	{
+		MessageStatus(L"Unable to index: project is unavailable or busy.", true, false).dispatch();
+		return;
+	}
+	ScopedFunctor releaseLock([this]() {
+		if (m_refreshStage == RefreshStageType::NONE) m_indexLock->unlock();
+	});
 	if (m_refreshStage != RefreshStageType::NONE)
 	{
 		return;
@@ -375,6 +397,7 @@ void Project::refresh(
 	{
 		if (sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED && !sourceGroup->prepareIndexing())
 		{
+			MessageStatus(L"Source preparation failed; indexing aborted.", true, false).dispatch();
 			m_refreshStage = RefreshStageType::NONE;
 			return;
 		}
@@ -418,7 +441,10 @@ void Project::refresh(
 			allowsShallowIndexing,
 			useShallowIndexing,
 			[this, dialogView](const RefreshInfo& info) { buildIndex(info, dialogView); },
-			[this]() { m_refreshStage = RefreshStageType::NONE; });
+			[this]() {
+				m_refreshStage = RefreshStageType::NONE;
+				m_indexLock->unlock();
+			});
 	}
 	else
 	{
@@ -449,6 +475,9 @@ RefreshInfo Project::getRefreshInfo(RefreshMode mode) const
 
 void Project::buildIndex(RefreshInfo info, std::shared_ptr<DialogView> dialogView)
 {
+	ScopedFunctor releaseLock([this]() {
+		if (m_refreshStage == RefreshStageType::NONE) m_indexLock->unlock();
+	});
 	if (m_refreshStage == RefreshStageType::INDEXING)
 	{
 		MessageStatus(L"Cannot refresh project while indexing.", true, false).dispatch();
@@ -468,6 +497,7 @@ void Project::buildIndex(RefreshInfo info, std::shared_ptr<DialogView> dialogVie
 
 		if (!message.empty())
 		{
+			m_lastRefreshSucceeded = !m_sourceGroups.empty();
 			if (m_hasGUI)
 			{
 				dialogView->clearDialogs();
@@ -750,6 +780,8 @@ void Project::buildIndex(RefreshInfo info, std::shared_ptr<DialogView> dialogVie
 
 	taskSequential->addTask(std::make_shared<TaskLambda>([dialogView, this]() {
 		m_refreshStage = RefreshStageType::NONE;
+		m_lastRefreshSucceeded = true;
+		m_indexLock->unlock();
 		MessageIndexingFinished().dispatch();
 	}));
 

@@ -12,7 +12,7 @@ class TimeStamp;
 class SqliteStorage
 {
 public:
-	SqliteStorage(const FilePath& dbFilePath);
+	SqliteStorage(const FilePath& dbFilePath, bool readOnly = false);
 	virtual ~SqliteStorage();
 
 	void setup();

@@ -17,7 +17,7 @@ class PersistentStorage
 	, public StorageAccess
 {
 public:
-	PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath);
+	PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath, bool readOnly = false);
 
 	std::pair<Id, bool> addNode(const StorageNodeData& data) override;
 	std::vector<Id> addNodes(const std::vector<StorageNode>& nodes) override;

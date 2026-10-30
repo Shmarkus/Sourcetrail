@@ -758,6 +758,30 @@ endif ()
 
 add_dependencies(${APP_PROJECT_NAME} ${APP_INDEXER_NAME})
 
+# Headless CLI: queries use the same storage APIs as the GUI; indexing delegates
+# to the application's existing headless Project::refresh lifecycle.
+get_target_property(CLI_INCLUDE_PATHS ${APP_PROJECT_NAME} INCLUDE_DIRECTORIES)
+get_target_property(CLI_LINK_LIBRARIES ${APP_PROJECT_NAME} LINK_LIBRARIES)
+add_library(Sourcetrail_cli_queries STATIC src/cli/Query.cpp src/cli/References.cpp)
+target_include_directories(Sourcetrail_cli_queries PUBLIC ${CLI_INCLUDE_PATHS} ${PROJECT_SOURCE_DIR}/src/cli)
+if(UNIX AND NOT APPLE)
+	# The core, GUI and language archives reference each other; the CLI does not
+	# pull them into the link in the same order as the GUI entry point.
+	target_link_libraries(Sourcetrail_cli_queries PUBLIC "-Wl,--start-group" ${CLI_LINK_LIBRARIES} "-Wl,--end-group" Qt5::Core)
+else()
+	target_link_libraries(Sourcetrail_cli_queries PUBLIC ${CLI_LINK_LIBRARIES} Qt5::Core)
+endif()
+add_executable(Sourcetrail_cli src/cli/main.cpp)
+target_link_libraries(Sourcetrail_cli PRIVATE Sourcetrail_cli_queries)
+add_dependencies(Sourcetrail_cli ${APP_PROJECT_NAME})
+
+add_executable(Sourcetrail_cli_test src/cli/QueryTest.cpp)
+target_include_directories(Sourcetrail_cli_test PRIVATE ${PROJECT_SOURCE_DIR}/src/external/catch)
+target_link_libraries(Sourcetrail_cli_test PRIVATE Sourcetrail_cli_queries)
+set_target_properties(Sourcetrail_cli_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+enable_testing()
+add_test(NAME cli.queries COMMAND Sourcetrail_cli_test)
+
 
 # macOS Bundle ----------------------------------------------------------------
 

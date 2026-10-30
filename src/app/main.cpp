@@ -157,12 +157,13 @@ int main(int argc, char* argv[])
 
 		if (commandLineParser.exitApplication())
 		{
-			return 0;
+			return commandLineParser.hasError() ? 1 : 0;
 		}
 
 		if (commandLineParser.hasError())
 		{
 			std::wcout << commandLineParser.getError() << std::endl;
+			return 1;
 		}
 		else
 		{

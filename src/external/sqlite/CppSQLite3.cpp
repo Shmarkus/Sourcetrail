@@ -1205,9 +1205,10 @@ CppSQLite3DB& CppSQLite3DB::operator=(const CppSQLite3DB& db)
 }
 
 
-void CppSQLite3DB::open(const char* szFile)
+void CppSQLite3DB::open(const char* szFile, bool readOnly)
 {
-	int nRet = sqlite3_open(szFile, &mpDB);
+	int nRet = sqlite3_open_v2(szFile, &mpDB,
+		readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0);
 
 	if (nRet != SQLITE_OK)
 	{

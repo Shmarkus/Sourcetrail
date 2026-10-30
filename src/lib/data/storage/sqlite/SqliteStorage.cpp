@@ -5,16 +5,16 @@
 #include "logging.h"
 #include "utilityString.h"
 
-SqliteStorage::SqliteStorage(const FilePath& dbFilePath): m_dbFilePath(dbFilePath.getCanonical())
+SqliteStorage::SqliteStorage(const FilePath& dbFilePath, bool readOnly): m_dbFilePath(dbFilePath.getCanonical())
 {
-	if (!m_dbFilePath.getParentDirectory().empty() && !m_dbFilePath.getParentDirectory().exists())
+	if (!readOnly && !m_dbFilePath.getParentDirectory().empty() && !m_dbFilePath.getParentDirectory().exists())
 	{
 		FileSystem::createDirectory(m_dbFilePath.getParentDirectory());
 	}
 
 	try
 	{
-		m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
+		m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str(), readOnly);
 	}
 	catch (CppSQLite3Exception& e)
 	{

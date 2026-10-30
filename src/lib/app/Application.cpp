@@ -233,7 +233,7 @@ void Application::handleMessage(MessageIndexingFinished* message)
 	{
 		MessageRefreshUI().afterIndexing().dispatch();
 	}
-	else
+	else if (m_project && !m_project->isIndexing())
 	{
 		MessageQuitApplication().dispatch();
 	}
@@ -411,10 +411,10 @@ void Application::refreshProject(RefreshMode refreshMode, bool shallowIndexingRe
 		m_project->refresh(
 			getDialogView(DialogView::UseCase::INDEXING), refreshMode, shallowIndexingRequested);
 
-		if (!m_hasGUI && !m_project->isIndexing())
-		{
-			MessageQuitApplication().dispatch();
-		}
+	}
+	if (!m_hasGUI && (!m_project || !m_project->isIndexing()))
+	{
+		MessageQuitApplication().dispatch();
 	}
 }
 

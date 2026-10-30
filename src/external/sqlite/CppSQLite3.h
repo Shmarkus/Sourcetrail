@@ -281,7 +281,7 @@ public:
 
     virtual ~CppSQLite3DB();
 
-    void open(const char* szFile);
+    void open(const char* szFile, bool readOnly = false);
 
     void close();
 

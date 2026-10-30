@@ -122,6 +122,10 @@ void CommandLineParser::parse()
 			{
 				m_args.erase(m_args.begin());
 				CommandlineCommand::ReturnStatus status = command->parse(m_args);
+				if (status == CommandlineCommand::ReturnStatus::CMD_FAILURE)
+				{
+					m_errorString = L"Command failed; see diagnostics.";
+				}
 
 				if (status != CommandlineCommand::ReturnStatus::CMD_OK)
 				{

@@ -15,6 +15,7 @@ class FilePath;
 class PersistentStorage;
 class ProjectSettings;
 class StorageCache;
+class QLockFile;
 
 class Project
 {
@@ -31,6 +32,7 @@ public:
 
 	bool isLoaded() const;
 	bool isIndexing() const;
+	bool didLastRefreshSucceed() const { return m_lastRefreshSucceeded; }
 
 	bool settingsEqualExceptNameAndLocation(const ProjectSettings& otherSettings) const;
 	void setStateOutdated();
@@ -85,6 +87,8 @@ private:
 
 	std::string m_appUUID;
 	bool m_hasGUI;
+	bool m_lastRefreshSucceeded = false;
+	std::unique_ptr<QLockFile> m_indexLock;
 };
 
 #endif	  // PROJECT_H

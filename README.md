@@ -71,7 +71,7 @@ Building Sourcetrail requires several dependencies to be in place on your machin
     * __Prebuilt Download__: http://download.qt.io/official_releases/qt/
     * __Building with Unix__:
       ```bash
-        `sudo apt install qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev`
+        sudo apt install qt5-qmake libfmt-dev qtbase5-dev qtdeclarative5-dev qt5-image-formats-plugins libqt5svg5-dev
       ```
 
 ### Building
@@ -213,6 +213,71 @@ Run `./setup/Linux/createPackages.sh` from the main directory, which creates bot
 
 
 # How to Run the Tests
+
+## Agent-friendly command-line frontend
+
+Build `Sourcetrail_cli` with the same CMake configuration as the application:
+
+```bash
+cmake --build build/Release --target Sourcetrail_cli -j 4
+```
+
+The executable is `build/Release/app/Sourcetrail_cli`. It requires the adjacent
+`Sourcetrail`, `sourcetrail_indexer`, and application data payload produced by the
+build. No display server, IDE plugin, MCP server, or HTTP service is required.
+
+```bash
+Sourcetrail_cli index /absolute/path/project.srctrlprj --full
+Sourcetrail_cli status /absolute/path/project.srctrlprj
+Sourcetrail_cli search /absolute/path/project.srctrlprj DashboardConfigurationProperties --limit 20
+Sourcetrail_cli describe /absolute/path/project.srctrlprj 123
+Sourcetrail_cli references /absolute/path/project.srctrlprj 123 --kind CALL
+Sourcetrail_cli read-source /absolute/path/project.srctrlprj /indexed/path/File.java --start-line 1 --end-line 80
+```
+
+- Commands emit one JSON object on stdout (`ok`, `command`, `project`, `result`);
+  failures emit `ok: false` and `error`, with a nonzero exit status. Help is text.
+- `index` waits for completion. Omit `--full` to update changed files. It runs the
+  application's existing headless indexing command, including Gradle dependency
+  resolution, Lombok detection/delombok and generated-source selection. Indexing
+  diagnostics go to stderr, not into the JSON. `--timeout` defaults to 600000 ms.
+- Indexing uses the same Java preferences as the GUI. The configured Java path
+  is the JVM library, not `bin/java`. Gradle uses the project's wrapper unless
+  `GRADLE_VERSION` overrides it. A failed preparation, interruption, or an index
+  containing parse errors returns a nonzero exit status.
+- Queries use the GUI's `PersistentStorage` APIs with a read-only index connection;
+  they do not create a bookmark database or automatically reindex. `status` reports
+  the last completed index timestamp and error counts, not a claim that the working
+  tree is current. Symbol IDs are strings and must be looked up again after reindexing.
+- `describe` returns signatures, locations and a definition excerpt (up to 200 lines).
+  Reference kinds include `CALL`, `USAGE`, `TYPE_USAGE`, `MEMBER`, `INHERITANCE`, and
+  `OVERRIDE`. `--limit` bounds results/locations to 1..1000; search/reference responses
+  indicate truncation. `read-source` accepts indexed paths and at most 1000 lines,
+  preferring stored index content and explicitly marking any disk fallback.
+- In a project that uses Lombok, every source file is indexed from its delombok copy
+  under `sourcetrail_dependencies/.../delombok/`, not just the generated members.
+  Delombok rewrites the whole class (adds a header and generated members, removes
+  Lombok imports and annotations), so line numbers from any result do not match the
+  original source file. Read the returned delombok path with `read-source`, or find
+  the code in the original file by its content rather than by line number.
+- A shared project lock excludes CLI queries and GUI/CLI indexing during writes.
+  A busy project or an unfinished temporary index produces an error instead of
+  silently returning a potentially inconsistent result. Restart an already-running
+  GUI after rebuilding so it uses the same locking implementation.
+
+Query/storage tests and a real headless Gradle/Lombok integration smoke test:
+
+```bash
+cmake --build build/Release --target Sourcetrail_cli_test -j 4
+ctest --test-dir build/Release -R cli.queries --output-on-failure
+JAVA_HOME=/path/to/jdk-21 bash testing/cli/smoke.sh build/Release/app/Sourcetrail_cli
+```
+
+The smoke test requires Bash, `jq`, and access to Gradle/Maven distributions or
+their caches. It copies its fixture and creates isolated preferences in a temporary
+directory; it does not modify your projects or Java preferences.
+
+## Existing application test suite
 
 The automated test suite of Sourcetrail is powered by [Catch2](https://github.com/catchorg/Catch2). To run the tests, simply execute the `Sourcetrail_test` binary. Before executing, please make sure to set the working directory to `./bin/test`.
 

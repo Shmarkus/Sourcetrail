@@ -17,6 +17,7 @@ QJsonObject describe(PersistentStorage& storage, Id id, int limit);
 QJsonObject references(PersistentStorage& storage, Id id, const QString& kind, int limit);
 QJsonObject readSource(PersistentStorage& storage, const QString& path, int start, int end);
 QJsonObject status(PersistentStorage& storage);
+void reindex(const QString& project, bool full, int timeoutMs);
 QJsonArray locations(PersistentStorage& storage, Id id, int limit);
 }
 

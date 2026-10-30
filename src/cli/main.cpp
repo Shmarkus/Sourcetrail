@@ -1,10 +1,8 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QLockFile>
-#include <QProcess>
 
 #include <iostream>
 #include <limits>
@@ -42,50 +40,6 @@ Id symbolId(const QString& text)
 		throw std::runtime_error("Symbol id must be a positive integer returned by search");
 	}
 	return static_cast<Id>(result);
-}
-
-void reindex(const QString& project, bool full, int timeout)
-{
-	QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
-#ifdef _WIN32
-	executable += ".exe";
-#endif
-	QProcess process;
-	process.setWorkingDirectory(QCoreApplication::applicationDirPath());
-	process.setProcessChannelMode(QProcess::MergedChannels);
-	QStringList args{"index"};
-	if (full)
-	{
-		args << "--full";
-	}
-	args << project;
-	process.start(executable, args);
-	if (!process.waitForStarted())
-	{
-		throw std::runtime_error("Cannot start adjacent Sourcetrail executable: " + process.errorString().toStdString());
-	}
-	QElapsedTimer timer;
-	timer.start();
-	while (process.state() != QProcess::NotRunning)
-	{
-		process.waitForReadyRead(1000);
-		std::cerr << process.readAll().constData() << std::flush;
-		if (timer.elapsed() > timeout)
-		{
-			process.terminate();
-			if (!process.waitForFinished(5000))
-			{
-				process.kill();
-				process.waitForFinished();
-			}
-			throw std::runtime_error("Indexing timed out; inspect logs before retrying");
-		}
-	}
-	std::cerr << process.readAll().constData();
-	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
-	{
-		throw std::runtime_error("Indexing failed; see stderr for Gradle, delombok or indexer diagnostics");
-	}
 }
 }
 
@@ -137,7 +91,7 @@ int main(int argc, char** argv)
 		}
 		if (args[0] == "index")
 		{
-			reindex(project, parser.isSet("full"), number(parser, "timeout", std::numeric_limits<int>::max()));
+			cli::reindex(project, parser.isSet("full"), number(parser, "timeout", std::numeric_limits<int>::max()));
 		}
 		QLockFile lock(project + ".lock");
 		lock.setStaleLockTime(0);

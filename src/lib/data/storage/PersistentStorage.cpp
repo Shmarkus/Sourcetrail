@@ -2814,8 +2814,17 @@ std::set<FilePath> PersistentStorage::getReferencingByIncludes(const std::set<Fi
 
 std::set<FilePath> PersistentStorage::getReferencingByImports(const std::set<FilePath>& filePaths) const
 {
-	const std::set<Id> ids = getReferencing(
-		getFileNodeIds(filePaths), getFileIdToImportingFileIdMap());
+	// Unlike includes, an import does not pull the imported file's text into the importer, so no closure.
+	const std::unordered_map<Id, std::set<Id>> importingFileIds = getFileIdToImportingFileIdMap();
+	std::set<Id> ids;
+	for (Id fileId: getFileNodeIds(filePaths))
+	{
+		const auto it = importingFileIds.find(fileId);
+		if (it != importingFileIds.end())
+		{
+			ids.insert(it->second.begin(), it->second.end());
+		}
+	}
 
 	std::set<FilePath> paths;
 	for (Id id: ids)

@@ -1,6 +1,7 @@
 #ifndef ST_FRESHNESS_H
 #define ST_FRESHNESS_H
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,20 @@ struct Freshness
 // Source groups without a Gradle preparation cache fall back to the indexed files.
 Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& indexedAt, const std::vector<FilePath>& indexedFiles);
 
-// Start of st's last successful refresh. Sourcetrail keeps the index time when a refresh finds
-// nothing to re-index (e.g. a directory changed by an editor's temporary file), so st remembers it.
-TimeStamp lastRefresh(const ProjectSettings& settings);
-void recordRefresh(const ProjectSettings& settings, const TimeStamp& startedAt);
+// st's last successful refresh: when it started and the index time it left behind.
+struct RefreshRecord
+{
+	TimeStamp startedAt;
+	TimeStamp indexedAt;
+};
+
+std::optional<RefreshRecord> lastRefresh(const ProjectSettings& settings);
+void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record);
+
+// Changes at or after this time are not in the index. Sourcetrail writes the index time when indexing
+// ends and keeps it when a refresh re-indexes nothing, so while the index is still the one st's refresh
+// produced, that refresh's start is the baseline; after anyone else's indexing, the index time is.
+TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last);
 }
 
 #endif

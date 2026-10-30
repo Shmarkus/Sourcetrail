@@ -251,12 +251,20 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 	std::vector<ResultLine> lines;
 	for (const Id id: symbols)
 	{
-		const auto graph = storage.getGraphForTrail(
-			0, id, ~NodeKindMask(0), ~Edge::TypeMask(Edge::EDGE_MEMBER), true, 1, true);
-		graph->forEachEdge([&](Edge* edge) {
+		const Edge::TypeMask types = ~Edge::TypeMask(Edge::EDGE_MEMBER);
+		// A directed trail walks vertical links (inheritance, override) against the search direction.
+		std::map<Id, Edge*> edges;
+		const auto incoming = storage.getGraphForTrail(0, id, ~NodeKindMask(0), types, true, 1, true);
+		const auto vertical = storage.getGraphForTrail(id, 0, ~NodeKindMask(0), types & Edge::LAYOUT_VERTICAL, true, 1, true);
+		for (const auto& graph: {incoming, vertical})
+		{
+			graph->forEachEdge([&](Edge* edge) { edges.emplace(edge->getId(), edge); });
+		}
+		for (const auto& [edgeId, edge]: edges)
+		{
 			if (edge->getTo()->getId() != id || edge->isType(Edge::EDGE_MEMBER))
 			{
-				return;
+				continue;
 			}
 			const std::wstring user = symbolKey(edge->getFrom()->getNameHierarchy());
 			storage.getSourceLocationsForTokenIds({edge->getId()})->forEachSourceLocation([&](SourceLocation* location) {
@@ -266,7 +274,7 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 					lines.push_back({user, linkKind(edge->getType()), site.file, site.line, sourceText(storage, site)});
 				}
 			});
-		});
+		}
 	}
 	return lines;
 }

@@ -539,13 +539,99 @@ TEST_CASE("st freshness detects edits, new files and deletions")
 	REQUIRE(st::checkFreshness(settings, indexedAt, indexed).stale);
 }
 
-TEST_CASE("st remembers a refresh that re-indexed nothing")
+TEST_CASE("st freshness counts a vanished source root but not a never-created one")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/build.gradle", "plugins {}");
+	write(repo + "/src/main/java/p/A.java", "class A {}");
+	write(repo + "/gen/main/java/p/G.java", "class G {}");
+	write(base + "/prj/x.srctrlprj", QString(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+		"<gradle><project_file_path>" + repo + "/build.gradle</project_file_path><should_index_tests>0</should_index_tests></gradle>"
+		"<source_extensions><source_extension>.java</source_extension></source_extensions>"
+		"<status>enabled</status><type>Java Source Group from Gradle</type>"
+		"</source_group_g1></source_groups><version>8</version></config>\n").toUtf8());
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+	const auto past = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+	std::filesystem::last_write_time(repo.toStdString(), past);
+	for (const auto& entry: std::filesystem::recursive_directory_iterator(repo.toStdString()))
+	{
+		std::filesystem::last_write_time(entry.path(), past);
+	}
+	const FilePath project(repo.toStdWString());
+	utility::GradleProjectInfo info;
+	info.fingerprint = utility::gradleBuildFingerprint(project);
+	info.sourceDirectories[L"main"] = {project.getConcatenated(L"src/main/java"), project.getConcatenated(L"gen/main/java"),
+		project.getConcatenated(L"src/never/java")};
+	utility::saveGradleProjectInfo(FilePath((base + "/prj/sourcetrail_dependencies/g1/gradle").toStdWString()), info);
+	const TimeStamp indexedAt(boost::posix_time::second_clock::local_time() - boost::posix_time::minutes(5));
+	const std::vector<FilePath> indexed = {FilePath((repo + "/src/main/java/p/A.java").toStdWString()),
+		FilePath((repo + "/gen/main/java/p/G.java").toStdWString())};
+
+	const auto fresh = st::checkFreshness(settings, indexedAt, indexed);
+	REQUIRE_FALSE(fresh.stale);
+	REQUIRE(fresh.reason.empty());
+	REQUIRE(QDir(repo + "/gen").removeRecursively());
+	std::filesystem::last_write_time(repo.toStdString(), past);
+	REQUIRE(st::checkFreshness(settings, indexedAt, indexed).stale);
+}
+
+TEST_CASE("st remembers its last refresh and the index time it produced")
 {
 	QTemporaryDir dir;
 	REQUIRE(dir.isValid());
 	ProjectSettings settings(FilePath((QDir(dir.path()).canonicalPath() + "/x.srctrlprj").toStdWString()));
-	REQUIRE_FALSE(st::lastRefresh(settings).isValid());
-	const TimeStamp started(std::string("2026-10-30 12:34:56"));
-	st::recordRefresh(settings, started);
-	REQUIRE(st::lastRefresh(settings).toString() == "2026-10-30 12:34:56");
+	REQUIRE_FALSE(st::lastRefresh(settings).has_value());
+	st::recordRefresh(settings, {TimeStamp(std::string("2026-10-30 12:34:56")), TimeStamp(std::string("2026-10-30 12:35:10"))});
+	const auto last = st::lastRefresh(settings);
+	REQUIRE(last.has_value());
+	REQUIRE(last->startedAt.toString() == "2026-10-30 12:34:56");
+	REQUIRE(last->indexedAt.toString() == "2026-10-30 12:35:10");
+}
+
+TEST_CASE("st freshness baseline sees edits made during a refresh")
+{
+	const TimeStamp started(std::string("2026-10-30 12:00:00"));
+	const TimeStamp finished(std::string("2026-10-30 12:00:30"));
+	const TimeStamp later(std::string("2026-10-30 13:00:00"));
+	const st::RefreshRecord last{started, finished};
+	// The index is still the one st's refresh produced: a file edited at 12:00:10 is not in it.
+	REQUIRE(st::freshnessBaseline(finished, last).toString() == "2026-10-30 12:00:00");
+	// Someone else indexed since: their index time is the baseline.
+	REQUIRE(st::freshnessBaseline(later, last).toString() == "2026-10-30 13:00:00");
+	REQUIRE(st::freshnessBaseline(finished, std::nullopt).toString() == "2026-10-30 12:00:30");
+}
+
+TEST_CASE("st refs include inheritance and override links")
+{
+	Code code;
+	const Id a = code.type(L"A", NODE_INTERFACE);
+	const Id b = code.type(L"B");
+	const Id run = code.member(a, L"A", L"run");
+	const Id implRun = code.member(b, L"B", L"run");
+	code.link(Edge::EDGE_INHERITANCE, b, a, L"B", {2});
+	code.link(Edge::EDGE_OVERRIDE, implRun, run, L"B", {5});
+	code.storage.buildCaches();
+	const auto types = st::references(code.storage, {a});
+	REQUIRE(lineFor(types, L"p.B") != nullptr);
+	REQUIRE(lineFor(types, L"p.B")->kind == L"inheritance");
+	REQUIRE(lineFor(types, L"p.B")->line == 2);
+	const auto methods = st::references(code.storage, {run});
+	REQUIRE(lineFor(methods, L"p.B.run()") != nullptr);
+	REQUIRE(lineFor(methods, L"p.B.run()")->kind == L"override");
+	REQUIRE(keys(st::references(code.storage, {implRun})).empty());
+}
+
+TEST_CASE("st locks the canonical project path like the indexer")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	write(base + "/real/x.srctrlprj");
+	REQUIRE(QFile::link(base + "/real", base + "/link"));
+	REQUIRE(st::projectLockFile(FilePath((base + "/link/x.srctrlprj").toStdWString())) == base + "/real/x.srctrlprj.lock");
 }

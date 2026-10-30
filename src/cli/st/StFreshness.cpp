@@ -133,30 +133,49 @@ Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& index
 	return freshness;
 }
 
-TimeStamp lastRefresh(const ProjectSettings& settings)
+std::optional<RefreshRecord> lastRefresh(const ProjectSettings& settings)
 {
 	QFile file(refreshFile(settings));
 	if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
 	{
-		return TimeStamp();
+		return std::nullopt;
+	}
+	const QStringList lines = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
+	if (lines.size() != 2)
+	{
+		return std::nullopt;
 	}
 	try
 	{
-		return TimeStamp(QString::fromUtf8(file.readAll()).trimmed().toStdString());
+		RefreshRecord record{TimeStamp(lines[0].trimmed().toStdString()), TimeStamp(lines[1].trimmed().toStdString())};
+		if (!record.startedAt.isValid() || !record.indexedAt.isValid())
+		{
+			return std::nullopt;
+		}
+		return record;
 	}
 	catch (const std::exception&)
 	{
-		return TimeStamp();
+		return std::nullopt;
 	}
 }
 
-void recordRefresh(const ProjectSettings& settings, const TimeStamp& startedAt)
+void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record)
 {
 	QSaveFile file(refreshFile(settings));
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Text) || file.write((startedAt.toString() + "\n").c_str()) < 0 ||
-		!file.commit())
+	const std::string text = record.startedAt.toString() + "\n" + record.indexedAt.toString() + "\n";
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text) || file.write(text.c_str()) < 0 || !file.commit())
 	{
 		std::cerr << "st: cannot write " << file.fileName().toStdString() << '\n';
 	}
+}
+
+TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last)
+{
+	if (last && last->indexedAt.toString() == indexedAt.toString())
+	{
+		return last->startedAt;
+	}
+	return indexedAt;
 }
 }

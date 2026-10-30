@@ -82,6 +82,11 @@ FilePath findProject(const FilePath& cwd, const FilePath& registryFile)
 	return FilePath();
 }
 
+QString projectLockFile(const FilePath& project)
+{
+	return toQt(project.getCanonical()) + ".lock";
+}
+
 void registerProject(const FilePath& registryFile, const FilePath& project)
 {
 	ProjectSettings settings;

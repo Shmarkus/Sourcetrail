@@ -229,9 +229,9 @@ int status(PersistentStorage& storage, const st::Freshness& freshness)
 	return st::EXIT_RESULTS;
 }
 
-std::unique_ptr<QLockFile> lockProject(const QString& project, size_t wait)
+std::unique_ptr<QLockFile> lockProject(const QString& lockFile, size_t wait)
 {
-	auto lock = std::make_unique<QLockFile>(project + ".lock");
+	auto lock = std::make_unique<QLockFile>(lockFile);
 	lock->setStaleLockTime(0);
 	if (!lock->tryLock(static_cast<int>(wait)))
 	{
@@ -254,6 +254,35 @@ int checkIndex(const ProjectSettings& settings)
 		std::cerr << "st: project has no index; index it first\n";
 		return st::EXIT_NO_INDEX;
 	}
+	return st::EXIT_RESULTS;
+}
+
+// Reads the index time under the project lock and checks the sources against it.
+int inspect(const ProjectSettings& settings, const QString& lockFile, size_t wait, TimeStamp* indexedAt,
+	st::Freshness* freshness)
+{
+	const auto lock = lockProject(lockFile, wait);
+	if (!lock)
+	{
+		return st::EXIT_STALE;
+	}
+	if (const int code = checkIndex(settings))
+	{
+		return code;
+	}
+	PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
+	if (storage.isEmpty() || storage.isIncompatible())
+	{
+		std::cerr << "st: index is empty or incompatible; reindex with --full\n";
+		return st::EXIT_NO_INDEX;
+	}
+	std::vector<FilePath> indexedFiles;
+	for (const FileInfo& file: storage.getFileInfoForAllFiles())
+	{
+		indexedFiles.push_back(file.path);
+	}
+	*indexedAt = storage.getStorageStats().timestamp;
+	*freshness = st::checkFreshness(settings, st::freshnessBaseline(*indexedAt, st::lastRefresh(settings)), indexedFiles);
 	return st::EXIT_RESULTS;
 }
 
@@ -342,36 +371,13 @@ int run(QCoreApplication& app)
 	}
 	const QString project = QString::fromStdWString(projectFile.wstr());
 
-	// Freshness needs the index time; never hold the lock while Sourcetrail refreshes.
+	// Never hold the lock while Sourcetrail refreshes: the indexer takes it without waiting.
+	const QString lockFile = st::projectLockFile(projectFile);
+	TimeStamp indexedAt;
 	st::Freshness freshness;
+	if (const int code = inspect(settings, lockFile, wait, &indexedAt, &freshness))
 	{
-		const auto lock = lockProject(project, wait);
-		if (!lock)
-		{
-			return st::EXIT_STALE;
-		}
-		if (const int code = checkIndex(settings))
-		{
-			return code;
-		}
-		PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
-		if (storage.isEmpty() || storage.isIncompatible())
-		{
-			std::cerr << "st: index is empty or incompatible; reindex with --full\n";
-			return st::EXIT_NO_INDEX;
-		}
-		std::vector<FilePath> indexedFiles;
-		for (const FileInfo& file: storage.getFileInfoForAllFiles())
-		{
-			indexedFiles.push_back(file.path);
-		}
-		TimeStamp indexedAt = storage.getStorageStats().timestamp;
-		const TimeStamp refreshedAt = st::lastRefresh(settings);
-		if (refreshedAt.isValid() && indexedAt < refreshedAt)
-		{
-			indexedAt = refreshedAt;
-		}
-		freshness = st::checkFreshness(settings, indexedAt, indexedFiles);
+		return code;
 	}
 	if (!freshness.reason.empty())
 	{
@@ -387,23 +393,41 @@ int run(QCoreApplication& app)
 		QElapsedTimer timer;
 		timer.start();
 		const TimeStamp started = TimeStamp::now();
+		const size_t changedFiles = freshness.changedFiles;
 		std::string log;
+		std::string failure;
 		try
 		{
 			cli::reindex(project, false, 600000, &log);
 		}
 		catch (const std::exception& error)
 		{
-			std::cerr << log << "st: refresh failed: " << error.what() << '\n';
+			failure = error.what();
+		}
+		// Waits out a refresh another st process may be running, then looks again.
+		if (const int code = inspect(settings, lockFile, wait, &indexedAt, &freshness))
+		{
+			return code;
+		}
+		if (failure.empty())
+		{
+			st::recordRefresh(settings, {started, indexedAt});
+			std::cerr << "refreshed " << changedFiles << " files in " << std::fixed << std::setprecision(1)
+					  << timer.elapsed() / 1000.0 << "s\n";
+		}
+		else if (freshness.stale)
+		{
+			std::cerr << log << "st: refresh failed: " << failure << '\n';
 			return st::EXIT_STALE;
 		}
-		st::recordRefresh(settings, started);
-		std::cerr << "refreshed " << freshness.changedFiles << " files in " << std::fixed << std::setprecision(1)
-				  << timer.elapsed() / 1000.0 << "s\n";
+		else
+		{
+			std::cerr << "st: index was refreshed by another process\n";
+		}
 		freshness = st::Freshness();
 	}
 
-	const auto lock = lockProject(project, wait);
+	const auto lock = lockProject(lockFile, wait);
 	if (!lock)
 	{
 		return st::EXIT_STALE;

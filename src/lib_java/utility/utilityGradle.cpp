@@ -241,10 +241,9 @@ std::optional<std::map<std::wstring, std::vector<FilePath>>> getSourceDirectorie
 
 	for (const std::string& mainSrcDir: utility::splitToVector(mainOutput, ";"))
 	{
-		FilePath path(utility::decodeFromUtf8(mainSrcDir));
-		if (path.exists())
+		if (!mainSrcDir.empty())
 		{
-			directories[L"main"].push_back(path);
+			directories[L"main"].push_back(FilePath(utility::decodeFromUtf8(mainSrcDir)));
 		}
 	}
 
@@ -259,16 +258,32 @@ std::optional<std::map<std::wstring, std::vector<FilePath>>> getSourceDirectorie
 
 		for (const std::string& testSrcDir: utility::splitToVector(testOutput, ";"))
 		{
-			FilePath path(utility::decodeFromUtf8(testSrcDir));
-			if (path.exists())
+			if (!testSrcDir.empty())
 			{
-				directories[L"test"].push_back(path);
+				directories[L"test"].push_back(FilePath(utility::decodeFromUtf8(testSrcDir)));
 			}
 		}
 	}
 
 	return directories;
 }
+std::map<std::wstring, std::vector<FilePath>> filterExistingDirectories(
+	const std::map<std::wstring, std::vector<FilePath>>& directoriesBySourceSet)
+{
+	std::map<std::wstring, std::vector<FilePath>> existing;
+	for (const auto& [sourceSet, directories]: directoriesBySourceSet)
+	{
+		for (const FilePath& directory: directories)
+		{
+			if (directory.exists())
+			{
+				existing[sourceSet].push_back(directory);
+			}
+		}
+	}
+	return existing;
+}
+
 bool outputDirectoryHoldsJars(const FilePath& outputDirectoryPath)
 {
 	return outputDirectoryPath.recheckExists() &&
@@ -325,13 +340,14 @@ FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const s
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool addTestDependencies)
 {
-	if (loadGradleProjectInfo(outputDirectoryPath, projectDirectoryPath, addTestDependencies) &&
+	if (gradleDependenciesUpToDate(outputDirectoryPath, projectDirectoryPath, addTestDependencies) &&
 		outputDirectoryHoldsJars(outputDirectoryPath))
 	{
 		LOG_INFO("Gradle build files unchanged, reusing exported dependencies.");
 		return true;
 	}
 
+	const std::string exportedFingerprint = gradleBuildFingerprint(projectDirectoryPath);
 	const FilePath gradleInitScriptPath = getGradleInitScriptPath();
 	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
 	bool success = javaEnvironment->callStaticVoidMethod(
@@ -355,6 +371,7 @@ bool gradleCopyDependencies(
 	{
 		// refresh the cached info next to the freshly exported jars
 		queryGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestDependencies);
+		markGradleDependenciesExported(outputDirectoryPath, exportedFingerprint, addTestDependencies);
 	}
 
 	return success;
@@ -371,7 +388,8 @@ bool gradlePrepareLombokSources(
 		return true;
 	}
 
-	const std::map<std::wstring, std::vector<FilePath>>& sourceDirectoriesBySourceSet = info.sourceDirectories;
+	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
+		filterExistingDirectories(info.sourceDirectories);
 
 	if (info.mainHasLombok)
 	{
@@ -410,7 +428,8 @@ std::vector<FilePath> gradleGetAllSourceDirectories(
 	bool addTestDirectories)
 {
 	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestDirectories);
-	const std::map<std::wstring, std::vector<FilePath>>& sourceDirectoriesBySourceSet = info.sourceDirectories;
+	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
+		filterExistingDirectories(info.sourceDirectories);
 
 	std::vector<FilePath> directories;
 	const auto mainIt = sourceDirectoriesBySourceSet.find(L"main");

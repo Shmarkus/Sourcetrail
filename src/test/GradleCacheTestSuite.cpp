@@ -120,6 +120,35 @@ TEST_CASE("gradle cache is invalidated when a source root disappears")
 	REQUIRE_FALSE(utility::loadGradleProjectInfo(f.output, f.project, false).has_value());
 }
 
+TEST_CASE("gradle cache is invalidated when a declared source root appears later")
+{
+	GradleCacheFixture f;
+	utility::GradleProjectInfo info = f.makeInfo();
+	const FilePath testRoot = f.project.getConcatenated(L"src/test/java");
+	info.sourceDirectories[L"test"] = {testRoot};
+	utility::saveGradleProjectInfo(f.output, info);
+	REQUIRE(utility::loadGradleProjectInfo(f.output, f.project, false).has_value());
+
+	FileSystem::createDirectory(testRoot);
+	REQUIRE_FALSE(utility::loadGradleProjectInfo(f.output, f.project, false).has_value());
+}
+
+TEST_CASE("gradle dependencies are only up to date after an export for the current build files")
+{
+	GradleCacheFixture f;
+	// info cache alone (written by non-export paths) must not count as an export
+	utility::saveGradleProjectInfo(f.output, f.makeInfo());
+	REQUIRE_FALSE(utility::gradleDependenciesUpToDate(f.output, f.project, false));
+
+	utility::markGradleDependenciesExported(f.output, utility::gradleBuildFingerprint(f.project), false);
+	REQUIRE(utility::gradleDependenciesUpToDate(f.output, f.project, false));
+	REQUIRE_FALSE(utility::gradleDependenciesUpToDate(f.output, f.project, true));
+
+	f.bumpMtime("build.gradle");
+	utility::saveGradleProjectInfo(f.output, f.makeInfo());	// refreshed for the new fingerprint
+	REQUIRE_FALSE(utility::gradleDependenciesUpToDate(f.output, f.project, false));
+}
+
 TEST_CASE("gradle build files list known names and skip build directories")
 {
 	GradleCacheFixture f;

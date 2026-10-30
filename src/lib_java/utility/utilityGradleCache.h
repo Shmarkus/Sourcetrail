@@ -30,6 +30,14 @@ std::optional<GradleProjectInfo> loadGradleProjectInfo(
 	const FilePath& outputDirectory, const FilePath& projectDirectory, bool includesTests);
 
 void saveGradleProjectInfo(const FilePath& outputDirectory, const GradleProjectInfo& info);
+
+// The exported-jars marker is written only after a successful dependency export, so it can
+// not be refreshed by anything that merely queried Gradle.
+void markGradleDependenciesExported(
+	const FilePath& outputDirectory, const std::string& fingerprint, bool includesTests);
+
+bool gradleDependenciesUpToDate(
+	const FilePath& outputDirectory, const FilePath& projectDirectory, bool includesTests);
 }	 // namespace utility
 
 #endif	  // UTILITY_GRADLE_CACHE_H

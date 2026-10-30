@@ -14,7 +14,8 @@ namespace utility
 namespace
 {
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
-const char* const CACHE_VERSION = "1";
+const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
+const char* const CACHE_VERSION = "2";
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",
@@ -28,6 +29,36 @@ const std::set<std::string> SKIPPED_DIRECTORY_NAMES = {"build", ".gradle", ".git
 std::filesystem::path getCachePath(const FilePath& outputDirectory)
 {
 	return std::filesystem::path(outputDirectory.str()) / CACHE_FILE_NAME;
+}
+
+std::filesystem::path getExportedPath(const FilePath& outputDirectory)
+{
+	return std::filesystem::path(outputDirectory.str()) / EXPORTED_FILE_NAME;
+}
+
+std::string exportedMarker(const std::string& fingerprint, bool includesTests)
+{
+	return std::string(CACHE_VERSION) + "\n" + (includesTests ? "1" : "0") + "\n" + fingerprint;
+}
+
+void writeFileAtomically(const std::filesystem::path& path, const std::string& content, const FilePath& outputDirectory)
+{
+	const std::filesystem::path temporaryPath = path.string() + ".tmp";
+	{
+		std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
+		stream << content;
+		if (!stream)
+		{
+			LOG_ERROR(L"Failed to write Gradle cache: " + outputDirectory.wstr());
+			return;
+		}
+	}
+	std::error_code ec;
+	std::filesystem::rename(temporaryPath, path, ec);
+	if (ec)
+	{
+		LOG_ERROR(L"Failed to store Gradle cache: " + outputDirectory.wstr());
+	}
 }
 
 bool isBuildFile(const std::filesystem::path& path)
@@ -102,6 +133,7 @@ std::optional<GradleProjectInfo> loadGradleProjectInfo(
 
 	GradleProjectInfo info;
 	bool versionOk = false;
+	std::vector<std::pair<FilePath, bool>> recordedExistence;
 	std::string line;
 	while (std::getline(stream, line))
 	{
@@ -137,9 +169,11 @@ std::optional<GradleProjectInfo> loadGradleProjectInfo(
 				info.testLombokJar = jar;
 			}
 		}
-		else if (parts[0] == "root" && parts.size() == 3)
+		else if (parts[0] == "root" && parts.size() == 4)
 		{
-			info.sourceDirectories[decodeFromUtf8(parts[1])].push_back(FilePath(decodeFromUtf8(parts[2])));
+			const FilePath root(decodeFromUtf8(parts[2]));
+			info.sourceDirectories[decodeFromUtf8(parts[1])].push_back(root);
+			recordedExistence.emplace_back(root, parts[3] == "1");
 		}
 	}
 
@@ -149,14 +183,11 @@ std::optional<GradleProjectInfo> loadGradleProjectInfo(
 		return std::nullopt;
 	}
 
-	for (const auto& entry: info.sourceDirectories)
+	for (const auto& [root, existed]: recordedExistence)
 	{
-		for (const FilePath& root: entry.second)
+		if (root.recheckExists() != existed)
 		{
-			if (!root.recheckExists())
-			{
-				return std::nullopt;
-			}
+			return std::nullopt;
 		}
 	}
 
@@ -183,7 +214,8 @@ void saveGradleProjectInfo(const FilePath& outputDirectory, const GradleProjectI
 	{
 		for (const FilePath& root: entry.second)
 		{
-			out << "root\t" << encodeToUtf8(entry.first) << "\t" << joinPath(root) << "\n";
+			out << "root\t" << encodeToUtf8(entry.first) << "\t" << joinPath(root) << "\t"
+				<< (root.recheckExists() ? "1" : "0") << "\n";
 		}
 	}
 	for (const std::string& fingerprintLine: splitToVector(info.fingerprint, "\n"))
@@ -194,21 +226,27 @@ void saveGradleProjectInfo(const FilePath& outputDirectory, const GradleProjectI
 		}
 	}
 
-	const std::filesystem::path cachePath = getCachePath(outputDirectory);
-	const std::filesystem::path temporaryPath = cachePath.string() + ".tmp";
+	writeFileAtomically(getCachePath(outputDirectory), out.str(), outputDirectory);
+}
+
+void markGradleDependenciesExported(
+	const FilePath& outputDirectory, const std::string& fingerprint, bool includesTests)
+{
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(outputDirectory.str()), ec);
+	writeFileAtomically(getExportedPath(outputDirectory), exportedMarker(fingerprint, includesTests), outputDirectory);
+}
+
+bool gradleDependenciesUpToDate(
+	const FilePath& outputDirectory, const FilePath& projectDirectory, bool includesTests)
+{
+	std::ifstream stream(getExportedPath(outputDirectory), std::ios::binary);
+	if (!stream)
 	{
-		std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
-		stream << out.str();
-		if (!stream)
-		{
-			LOG_ERROR(L"Failed to write Gradle cache: " + outputDirectory.wstr());
-			return;
-		}
+		return false;
 	}
-	std::filesystem::rename(temporaryPath, cachePath, ec);
-	if (ec)
-	{
-		LOG_ERROR(L"Failed to store Gradle cache: " + outputDirectory.wstr());
-	}
+	std::ostringstream content;
+	content << stream.rdbuf();
+	return content.str() == exportedMarker(gradleBuildFingerprint(projectDirectory), includesTests);
 }
 }	 // namespace utility

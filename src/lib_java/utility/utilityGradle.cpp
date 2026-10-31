@@ -298,7 +298,7 @@ std::optional<DelombokChanges> getDelombokChanges(
 		return std::nullopt;
 	}
 
-	// the output of an unchanged @Delegate or @ExtensionMethod user may depend on any changed file
+	// the output of an unchanged @Delegate, @ExtensionMethod or lombok.val user may depend on any changed file
 	for (const DelombokOriginal& original: current.crossFileOriginals)
 	{
 		if (!touched.empty() && !std::count(touched.begin(), touched.end(), original))

@@ -19,7 +19,7 @@ namespace
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
 const char* const CACHE_VERSION = "3";
-const char* const MANIFEST_VERSION = "2";
+const char* const MANIFEST_VERSION = "3";
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",
@@ -147,7 +147,8 @@ std::string hashFingerprint(const std::string& fingerprint)
 	return out.str();
 }
 
-// @Delegate and @ExtensionMethod generate code from other types, so their output changes with those
+// @Delegate and @ExtensionMethod generate code from other types, and lombok.val resolves to a
+// concrete type on Java 8, so their output changes with those types
 bool usesCrossFileLombok(const std::filesystem::path& file)
 {
 	std::ifstream stream(file, std::ios::binary);
@@ -155,7 +156,12 @@ bool usesCrossFileLombok(const std::filesystem::path& file)
 	content << stream.rdbuf();
 	const std::string text = content.str();
 	for (const char* marker:
-		 {"@Delegate", "lombok.experimental.Delegate", "@ExtensionMethod", "lombok.experimental.ExtensionMethod"})
+		 {"@Delegate",
+		  "lombok.experimental.Delegate",
+		  "lombok.Delegate",
+		  "@ExtensionMethod",
+		  "lombok.experimental.ExtensionMethod",
+		  "lombok.val"})
 	{
 		if (text.find(marker) != std::string::npos)
 		{

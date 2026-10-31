@@ -558,6 +558,14 @@ TEST_CASE("delombok runs on the whole tree when an unchanged file uses a cross-f
 			"b/src/main/java/other/X.java",
 			"import lombok.experimental.ExtensionMethod;\n@ExtensionMethod(B.class) class X {}");
 	}
+	SECTION("deprecated @lombok.Delegate")
+	{
+		f.write("b/src/main/java/other/X.java", "class X { @lombok.Delegate private final B b; }");
+	}
+	SECTION("lombok.val")
+	{
+		f.write("b/src/main/java/other/X.java", "import lombok.val;\nclass X { void f() { val b = new B(); } }");
+	}
 	REQUIRE(f.run(fake));
 
 	f.edit("a/src/main/java/pkg/B.java", "class B { int make() { return 1; } }");

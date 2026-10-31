@@ -53,7 +53,7 @@ struct DelombokManifest
 	std::vector<FilePath> sourceDirectories;
 	std::map<std::wstring, FileStamp> lombokConfigs;	// lombok.config files above the roots
 	std::map<std::pair<size_t, std::wstring>, FileStamp> files;	 // (root index, relative path) -> stamp
-	// originals using @Delegate or @ExtensionMethod, whose output depends on other files
+	// originals using @Delegate, @ExtensionMethod or lombok.val, whose output depends on other files
 	std::set<std::pair<size_t, std::wstring>> crossFileOriginals;
 
 	bool operator==(const DelombokManifest& other) const;

@@ -496,7 +496,7 @@ Id addGeneric(Code& code, const std::wstring& parameters)
 	type.push(L"p");
 	type.push(L"Result<T>");
 	const Id result = add(code.storage, type, NODE_CLASS);
-	addLocation(code.storage, outcome, code.file(L"Result"), 1);
+	addLocation(code.storage, result, code.file(L"Result"), 1);
 
 	NameHierarchy name = type;
 	name.push(NameElement(L"failed<T>", L"Result<T>", parameters));
@@ -928,7 +928,7 @@ TEST_CASE("st find hides type parameters unless the kind asks for them")
 	name.push(L"p");
 	name.push(L"Result<T>");
 	name.push(NameElement(L"failed<T>", L"Result<T>", L"(java.lang.String)"));
-	name.push(L"O");
+	name.push(L"T");
 	const Id parameter = add(code.storage, name, NODE_TYPE_PARAMETER);
 	addLocation(code.storage, parameter, code.file(L"Result"), 2);
 	code.storage.buildCaches();

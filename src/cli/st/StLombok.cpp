@@ -53,20 +53,30 @@ FilePath canonical(const FilePath& file)
 ResultLine generated(ResultLine line)
 {
 	line.kind += L" (generated)";
+	line.generated = true;
 	return line;
 }
+
+std::string squeezed(const std::string& text)
+{
+	std::string result;
+	for (const char c: text)
+	{
+		if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\f' && c != '\v')
+		{
+			result += c;
+		}
+	}
+	return result;
 }
 
-std::vector<std::optional<size_t>> alignLines(
+// Generated line index -> original line index of the LCS matches that pass the guards against repeated lines.
+std::vector<std::optional<size_t>> matchLines(
 	const std::vector<std::string>& generatedLines, const std::vector<std::string>& original)
 {
 	const size_t n = generatedLines.size();
 	const size_t m = original.size();
 	std::vector<std::optional<size_t>> result(n);
-	if (n > MAX_ALIGNED_LINES || m > MAX_ALIGNED_LINES)
-	{
-		return result;
-	}
 	std::vector<std::string> a;
 	std::vector<std::string> b;
 	for (const std::string& text: generatedLines)
@@ -172,6 +182,125 @@ std::vector<std::optional<size_t>> alignLines(
 	return result;
 }
 
+// Maps generated lines in [gBegin, gEnd) to runs of non-blank original lines in [oBegin, oEnd) that delombok joined.
+void tileGap(const std::vector<std::string>& a, const std::vector<std::string>& b, size_t gBegin, size_t gEnd,
+	size_t oBegin, size_t oEnd, std::vector<std::optional<LineSpan>>& spans)
+{
+	const size_t MAX_JOINED_LINES = 12;
+	std::map<std::string, size_t> uses;
+	size_t longest = 0;
+	for (size_t g = gBegin; g < gEnd; g++)
+	{
+		if (!a[g].empty())
+		{
+			uses[a[g]]++;
+			longest = std::max(longest, a[g].size());
+		}
+	}
+	std::vector<size_t> lines;
+	for (size_t o = oBegin; o < oEnd; o++)
+	{
+		if (!b[o].empty())
+		{
+			lines.push_back(o);
+		}
+	}
+	std::map<std::string, std::vector<LineSpan>> runs;
+	for (size_t start = 0; start < lines.size(); start++)
+	{
+		std::string text = b[lines[start]];
+		for (size_t end = start + 1; end < lines.size() && end - start < MAX_JOINED_LINES && text.size() < longest; end++)
+		{
+			text += b[lines[end]];
+			if (uses.count(text))
+			{
+				runs[text].push_back({lines[start], lines[end]});
+			}
+		}
+	}
+	std::vector<std::pair<size_t, LineSpan>> tiles;
+	for (size_t g = gBegin; g < gEnd; g++)
+	{
+		const auto run = runs.find(a[g]);
+		if (run != runs.end() && run->second.size() == 1 && uses[a[g]] == 1)
+		{
+			tiles.emplace_back(g, run->second.front());
+		}
+	}
+	// Tiles keep the order of both files and never share an original line.
+	for (const auto& tile: tiles)
+	{
+		const bool consistent = std::all_of(tiles.begin(), tiles.end(), [&](const std::pair<size_t, LineSpan>& other) {
+			return other.first == tile.first ||
+				(other.first < tile.first ? other.second.last < tile.second.first : other.second.first > tile.second.last);
+		});
+		if (consistent)
+		{
+			spans[tile.first] = tile.second;
+		}
+	}
+}
+}
+
+std::vector<std::optional<LineSpan>> alignSpans(
+	const std::vector<std::string>& generatedLines, const std::vector<std::string>& original)
+{
+	const size_t n = generatedLines.size();
+	const size_t m = original.size();
+	std::vector<std::optional<LineSpan>> spans(n);
+	if (generatedLines == original)
+	{
+		for (size_t i = 0; i < n; i++)
+		{
+			spans[i] = LineSpan{i, i};
+		}
+		return spans;
+	}
+	if (n > MAX_ALIGNED_LINES || m > MAX_ALIGNED_LINES)
+	{
+		return spans;
+	}
+	const std::vector<std::optional<size_t>> matched = matchLines(generatedLines, original);
+	std::vector<std::string> a;
+	std::vector<std::string> b;
+	for (const std::string& text: generatedLines)
+	{
+		a.push_back(squeezed(text));
+	}
+	for (const std::string& text: original)
+	{
+		b.push_back(squeezed(text));
+	}
+	size_t gBegin = 0;
+	size_t oBegin = 0;
+	for (size_t g = 0; g <= n; g++)
+	{
+		if (g < n && !matched[g])
+		{
+			continue;
+		}
+		tileGap(a, b, gBegin, g, oBegin, g < n ? *matched[g] : m, spans);
+		if (g < n)
+		{
+			spans[g] = LineSpan{*matched[g], *matched[g]};
+			gBegin = g + 1;
+			oBegin = *matched[g] + 1;
+		}
+	}
+	return spans;
+}
+
+std::vector<std::optional<size_t>> alignLines(
+	const std::vector<std::string>& generatedLines, const std::vector<std::string>& original)
+{
+	std::vector<std::optional<size_t>> lines;
+	for (const auto& span: alignSpans(generatedLines, original))
+	{
+		lines.push_back(span ? std::optional<size_t>(span->first) : std::nullopt);
+	}
+	return lines;
+}
+
 LombokRoots lombokRoots(const ProjectSettings& settings)
 {
 	LombokRoots roots;
@@ -253,35 +382,43 @@ Counterpart findOriginal(const FilePath& generatedFile, const LombokRoots& roots
 ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 	const std::function<std::vector<std::string>(const FilePath&)>& readLines)
 {
-	auto cached = roots.alignments.find(line.file.wstr());
-	if (cached == roots.alignments.end())
+	auto cached = roots.originalFiles.find(line.file.wstr());
+	if (cached == roots.originalFiles.end())
 	{
 		Counterpart counterpart = findOriginal(line.file, roots, readLines);
 		if (!counterpart.inside)
 		{
 			return line;
 		}
-		std::vector<std::optional<size_t>> alignment;
 		if (!counterpart.file.empty())
 		{
-			alignment = alignLines(readLines(line.file), counterpart.lines);
+			if (!roots.alignments.count(line.file.wstr()))
+			{
+				roots.alignments[line.file.wstr()] = alignSpans(readLines(line.file), counterpart.lines);
+			}
 			roots.originalLines[counterpart.file.wstr()] = std::move(counterpart.lines);
 		}
-		cached = roots.alignments.emplace(line.file.wstr(), std::make_pair(counterpart.file, std::move(alignment))).first;
+		cached = roots.originalFiles.emplace(line.file.wstr(), counterpart.file).first;
 	}
-	const FilePath& originalFile = cached->second.first;
-	const auto& alignment = cached->second.second;
-	if (originalFile.empty() || line.line == 0 || line.line > alignment.size() || !alignment[line.line - 1])
+	const FilePath& originalFile = cached->second;
+	if (originalFile.empty())
 	{
 		return generated(line);
 	}
+	const auto& alignment = roots.alignments[line.file.wstr()];
 	ResultLine mapped = line;
 	mapped.file = originalFile;
-	mapped.line = *alignment[line.line - 1] + 1;
 	mapped.endLine = 0;
+	if (line.line == 0 || line.line > alignment.size() || !alignment[line.line - 1])
+	{
+		mapped.line = 0;
+		mapped.generated = true;
+		return mapped;
+	}
+	mapped.line = alignment[line.line - 1]->first + 1;
 	if (line.endLine > line.line && line.endLine <= alignment.size() && alignment[line.endLine - 1])
 	{
-		mapped.endLine = *alignment[line.endLine - 1] + 1;
+		mapped.endLine = alignment[line.endLine - 1]->last + 1;
 	}
 	mapped.source = roots.originalLines[originalFile.wstr()][mapped.line - 1];
 	return mapped;
@@ -326,34 +463,49 @@ std::optional<FilePath> toGeneratedFile(const FilePath& original, const LombokRo
 	return found.front();
 }
 
-std::optional<size_t> toGeneratedLine(const FilePath& originalFile, const FilePath& generatedFile, size_t line,
+std::vector<std::optional<size_t>> originalToGenerated(const FilePath& originalFile, const FilePath& generatedFile,
 	const std::function<std::vector<std::string>(const FilePath&)>& readLines, const LombokRoots* cache)
 {
-	std::vector<std::optional<size_t>> computed;
-	const std::vector<std::optional<size_t>>* aligned = &computed;
+	std::vector<std::optional<LineSpan>> computed;
+	const std::vector<std::optional<LineSpan>>* spans = &computed;
 	if (cache)
 	{
-		auto it = cache->reverseAlignments.find(generatedFile.wstr());
-		if (it == cache->reverseAlignments.end())
+		auto it = cache->alignments.find(generatedFile.wstr());
+		if (it == cache->alignments.end())
 		{
-			it = cache->reverseAlignments.emplace(generatedFile.wstr(),
-				alignLines(readLines(generatedFile), readLines(originalFile))).first;
+			it = cache->alignments.emplace(generatedFile.wstr(),
+				alignSpans(readLines(generatedFile), readLines(originalFile))).first;
 		}
-		aligned = &it->second;
+		spans = &it->second;
 	}
 	else
 	{
-		computed = alignLines(readLines(generatedFile), readLines(originalFile));
+		computed = alignSpans(readLines(generatedFile), readLines(originalFile));
 	}
-	const auto& alignment = *aligned;
-	for (size_t i = 0; i < alignment.size(); i++)
+	std::vector<std::optional<size_t>> lines;
+	for (size_t g = 0; g < spans->size(); g++)
 	{
-		if (line > 0 && alignment[i] && *alignment[i] == line - 1)
+		if (const auto& span = (*spans)[g])
 		{
-			return i + 1;
+			lines.resize(std::max(lines.size(), span->last + 1));
+			for (size_t o = span->first; o <= span->last; o++)
+			{
+				lines[o] = g;
+			}
 		}
 	}
-	return std::nullopt;
+	return lines;
+}
+
+std::optional<size_t> toGeneratedLine(const FilePath& originalFile, const FilePath& generatedFile, size_t line,
+	const std::function<std::vector<std::string>(const FilePath&)>& readLines, const LombokRoots* cache)
+{
+	const auto lines = originalToGenerated(originalFile, generatedFile, readLines, cache);
+	if (line == 0 || line > lines.size() || !lines[line - 1])
+	{
+		return std::nullopt;
+	}
+	return *lines[line - 1] + 1;
 }
 
 std::vector<std::string> readLinesFromDisk(const FilePath& file)

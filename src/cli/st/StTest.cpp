@@ -643,9 +643,10 @@ TEST_CASE("lombok location without a matching original line stays generated")
 	};
 	const st::ResultLine line{L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 3, "public String getN() {"};
 	const st::ResultLine mapped = st::toOriginal(line, roots, read);
-	CHECK(mapped.file.wstr() == L"/out/delombok/main/p/A.java");
-	CHECK(mapped.line == 3);
-	CHECK(mapped.kind == L"call (generated)");
+	CHECK(mapped.file.wstr() == L"/src/main/java/p/A.java");
+	CHECK(mapped.line == 0);
+	CHECK(mapped.generated);
+	CHECK(mapped.kind == L"call");
 
 	const st::ResultLine kept = st::toOriginal(
 		{L"k", L"call", FilePath(L"/out/delombok/main/p/A.java"), 2, "public class A {"}, roots, read);
@@ -756,4 +757,101 @@ TEST_CASE("lombok range end without a counterpart is dropped")
 	CHECK(dropped.file.wstr() == L"/src/main/java/p/A.java");
 	CHECK(dropped.line == 3);
 	CHECK(dropped.endLine == 0);
+}
+
+TEST_CASE("lombok alignment maps every line of a byte-identical copy")
+{
+	const std::vector<std::string> lines = {"class A {\n", "void f() {\n", "a();\n", "}\n", "void g() {\n", "a();\n", "}\n",
+		"void f() {\n", "a();\n", "}\n", "}\n"};
+	const auto aligned = st::alignLines(lines, lines);
+	for (size_t i = 0; i < lines.size(); i++)
+	{
+		CHECK(aligned[i] == i);
+	}
+	const auto read = [&](const FilePath&) { return lines; };
+	CHECK(st::toGeneratedLine(FilePath(L"/o/A.java"), FilePath(L"/g/A.java"), 4, read) == 4);
+	CHECK(st::toGeneratedLine(FilePath(L"/o/A.java"), FilePath(L"/g/A.java"), 7, read) == 7);
+}
+
+namespace
+{
+const std::vector<std::string> JOINED_ORIGINAL = {"class M {", "@Getter", "private int n;", "Optional<P> get(Order o) {",
+	"return gw.find(b.getUuid())", "    .map(this::project);", "}", "public void alter(UUID id, Alter a,",
+	"        Strategy s) {", "go();", "}", "}"};
+const std::vector<std::string> JOINED_GENERATED = {"class M {", "private int n;", "Optional<P> get(Order o) {",
+	"return gw.find(b.getUuid()).map(this::project);", "}", "public void alter(UUID id, Alter a, Strategy s) {", "go();",
+	"}", "@lombok.Generated", "public int getN() {", "return this.n;", "}", "}"};
+
+std::vector<std::string> joinedLines(const FilePath& file)
+{
+	return file.wstr() == L"/o/M.java" ? JOINED_ORIGINAL : JOINED_GENERATED;
+}
+}
+
+TEST_CASE("lombok alignment maps a statement delombok joined onto one line")
+{
+	const auto aligned = st::alignLines(JOINED_GENERATED, JOINED_ORIGINAL);
+	CHECK(aligned[3] == 4);
+	CHECK(st::toGeneratedLine(FilePath(L"/o/M.java"), FilePath(L"/g/M.java"), 5, joinedLines) == 4);
+	CHECK(st::toGeneratedLine(FilePath(L"/o/M.java"), FilePath(L"/g/M.java"), 6, joinedLines) == 4);
+}
+
+TEST_CASE("lombok alignment maps a method signature delombok joined onto one line")
+{
+	const auto aligned = st::alignLines(JOINED_GENERATED, JOINED_ORIGINAL);
+	CHECK(aligned[5] == 7);
+	CHECK(st::toGeneratedLine(FilePath(L"/o/M.java"), FilePath(L"/g/M.java"), 8, joinedLines) == 6);
+	CHECK(st::toGeneratedLine(FilePath(L"/o/M.java"), FilePath(L"/g/M.java"), 9, joinedLines) == 6);
+}
+
+TEST_CASE("lombok alignment leaves a joined line unmapped when its run is not unique")
+{
+	const std::vector<std::string> original = {"class A {", "@Getter", "int n;", "void f() {", "go(a,", "b);", "go(a,", "b);",
+		"}", "}"};
+	const std::vector<std::string> generated = {"class A {", "int n;", "void f() {", "go(a, b);", "}",
+		"@lombok.Generated", "int getN() {", "return n;", "}", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	CHECK_FALSE(aligned[3].has_value());
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+	for (size_t line = 5; line <= 8; line++)
+	{
+		CHECK_FALSE(st::toGeneratedLine(FilePath(L"/o/A.java"), FilePath(L"/g/A.java"), line, read).has_value());
+	}
+
+	// One run, matched by two generated lines.
+	const std::vector<std::string> twice = {"class A {", "int n;", "void f() {", "go(a, b);", "go(a, b);", "}",
+		"@lombok.Generated", "int getN() {", "return n;", "}", "}"};
+	const std::vector<std::string> once = {"class A {", "@Getter", "int n;", "void f() {", "go(a,", "b);", "}", "}"};
+	const auto twiceAligned = st::alignLines(twice, once);
+	CHECK_FALSE(twiceAligned[3].has_value());
+	CHECK_FALSE(twiceAligned[4].has_value());
+}
+
+TEST_CASE("lombok location without a counterpart line names the original file only")
+{
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/out/delombok/main"), {FilePath(L"/r/src")}});
+	const auto read = [](const FilePath& file) {
+		return file.wstr() == L"/out/delombok/main/p/M.java" ? JOINED_GENERATED
+			: file.wstr() == L"/r/src/p/M.java"			  ? JOINED_ORIGINAL
+															  : std::vector<std::string>();
+	};
+	const st::ResultLine getter =
+		st::toOriginal({L"p.M.getN()", L"method", FilePath(L"/out/delombok/main/p/M.java"), 10, "public int getN() {"}, roots, read);
+	CHECK(getter.generated);
+	CHECK(getter.file.wstr() == L"/r/src/p/M.java");
+
+	st::OutputOptions options;
+	options.cwd = FilePath(L"/r");
+	std::ostringstream out;
+	REQUIRE(st::printResults({getter, {L"p.M.get(Order)", L"method", FilePath(L"/r/src/p/M.java"), 4, "Optional<P> get(Order o) {"}},
+				options, out) == 0);
+	CHECK(out.str() ==
+		"p.M.getN()\tmethod\tsrc/p/M.java (generated)\tpublic int getN() {\n"
+		"p.M.get(Order)\tmethod\tsrc/p/M.java:4\tOptional<P> get(Order o) {\n");
+
+	options.hideGenerated = true;
+	std::ostringstream shown;
+	REQUIRE(st::printResults({getter}, options, shown) == 1);
+	CHECK(shown.str().empty());
 }

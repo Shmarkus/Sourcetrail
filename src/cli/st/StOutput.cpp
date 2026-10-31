@@ -1,6 +1,7 @@
 #include "StOutput.h"
 
 #include <algorithm>
+#include <iostream>
 #include <set>
 #include <tuple>
 
@@ -67,6 +68,21 @@ std::wstring displayPath(const FilePath& file, const FilePath& cwd)
 	return path;
 }
 
+std::wstring displayLocation(const ResultLine& line, const FilePath& cwd)
+{
+	std::wstring text = displayPath(line.file, cwd);
+	if (line.generated && line.line == 0)
+	{
+		return text + L" (generated)";
+	}
+	text += L':' + std::to_wstring(line.line);
+	if (line.endLine > line.line)
+	{
+		text += L'-' + std::to_wstring(line.endLine);
+	}
+	return text;
+}
+
 int printResults(std::vector<ResultLine> lines, const OutputOptions& options, std::ostream& out)
 {
 	if (options.mapLocation)
@@ -74,6 +90,16 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 		for (ResultLine& line: lines)
 		{
 			line = options.mapLocation(line);
+		}
+	}
+	if (options.hideGenerated)
+	{
+		const size_t all = lines.size();
+		lines.erase(std::remove_if(lines.begin(), lines.end(), [](const ResultLine& line) { return line.generated; }),
+			lines.end());
+		if (lines.size() < all)
+		{
+			std::cerr << "st: " << all - lines.size() << " generated lines hidden (--no-generated)\n";
 		}
 	}
 	std::stable_sort(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) {
@@ -93,11 +119,7 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 	for (const ResultLine& line: lines)
 	{
 		out << utility::encodeToUtf8(line.key) << '\t' << utility::encodeToUtf8(line.kind) << '\t'
-			<< utility::encodeToUtf8(displayPath(line.file, options.cwd)) << ':' << line.line;
-		if (line.endLine > line.line)
-		{
-			out << '-' << line.endLine;
-		}
+			<< utility::encodeToUtf8(displayLocation(line, options.cwd));
 		if (options.showSource)
 		{
 			out << '\t' << clean(line.source);

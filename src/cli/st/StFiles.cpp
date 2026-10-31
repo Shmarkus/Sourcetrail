@@ -233,6 +233,41 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 	return *named.begin();
 }
 
+std::optional<Id> symbolAtOriginal(PersistentStorage& storage, const FilePath& indexedFile, const FilePath& original,
+	size_t line, const std::function<std::vector<std::string>(const FilePath&)>& readLines, const LombokRoots* cache)
+{
+	const std::vector<std::optional<size_t>> generated = originalToGenerated(original, indexedFile, readLines, cache);
+	if (line == 0)
+	{
+		return std::nullopt;
+	}
+	if (line <= generated.size() && generated[line - 1])
+	{
+		return symbolAt(storage, indexedFile, *generated[line - 1] + 1);
+	}
+	// The alignment keeps the order of both files, so the line lies between the counterparts of its neighbours.
+	std::optional<size_t> above;
+	std::optional<size_t> below;
+	for (size_t i = std::min(line - 1, generated.size()); i-- > 0 && !above;)
+	{
+		above = generated[i];
+	}
+	for (size_t i = line; i < generated.size() && !below; i++)
+	{
+		below = generated[i];
+	}
+	if (!above || !below)
+	{
+		return std::nullopt;
+	}
+	const Id id = symbolAt(storage, indexedFile, *above + 1);
+	if (!id || id != symbolAt(storage, indexedFile, *below + 1))
+	{
+		return std::nullopt;
+	}
+	return id;
+}
+
 IndexedFiles indexedFiles(PersistentStorage& storage, const LombokRoots* roots)
 {
 	IndexedFiles result;

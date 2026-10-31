@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 
 #ifdef _WIN32
@@ -157,6 +158,7 @@ int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, 
 	{
 		st::OutputOptions all = options;
 		all.limit = candidates.size();
+		all.hideGenerated = false;
 		st::printResults(std::move(candidates), all, std::cerr);
 		return st::EXIT_AMBIGUOUS;
 	}
@@ -182,8 +184,7 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 		{
 			mapped = options.mapLocation(mapped);
 		}
-		return utility::encodeToUtf8(st::displayPath(mapped.file, options.cwd)) + ':' + std::to_string(mapped.line) +
-			utility::encodeToUtf8(mapped.kind);
+		return utility::encodeToUtf8(st::displayLocation(mapped, options.cwd) + mapped.kind);
 	};
 	for (size_t i = 0; i < chains.size() && i < options.limit; i++)
 	{
@@ -281,6 +282,22 @@ bool keeps(PersistentStorage& storage, const std::wstring& key, const st::Filter
 	return st::matchesFilter(storage, id, filterOptions, path);
 }
 
+// Whether a result line printed by st stays generated: the marker ends its kind or its location column.
+bool isGeneratedRow(const std::string& raw)
+{
+	const std::string marker = " (generated)";
+	std::stringstream columns(raw);
+	std::string column;
+	for (int i = 0; i < 3 && std::getline(columns, column, '\t'); i++)
+	{
+		if (i > 0 && column.size() >= marker.size() && column.compare(column.size() - marker.size(), marker.size(), marker) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 // Prints the input lines whose symbol passes; keys that don't resolve exactly are reported and skipped.
 int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, const st::FilterOptions& filterOptions,
 	const st::OutputOptions& options)
@@ -289,6 +306,10 @@ int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, 
 	std::map<std::wstring, bool> verdicts;	// per distinct key: refs-style input repeats keys across many lines
 	for (const st::InputLine& line: input)
 	{
+		if (options.hideGenerated && isGeneratedRow(line.raw))
+		{
+			continue;
+		}
 		auto verdict = verdicts.find(line.key);
 		if (verdict == verdicts.end())
 		{
@@ -401,20 +422,18 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		}
 		// A user reading the original source gives original line numbers.
 		const std::optional<FilePath> original = st::toOriginalFile(file, lombok);
-		if (original && !isGiven(file, path, options.cwd))
+		const std::optional<Id> id = original && !isGiven(file, path, options.cwd)
+			? st::symbolAtOriginal(storage, file, *original, line, st::readLinesFromDisk, &lombok)
+			: st::symbolAt(storage, file, line);
+		if (!id)
 		{
-			const auto generated = st::toGeneratedLine(*original, file, line, st::readLinesFromDisk, &lombok);
-			if (!generated)
-			{
-				std::cerr << "st: " << utility::encodeToUtf8(path) << ':' << line
-						  << " has no counterpart in the indexed (delombok) file\n";
-				return st::EXIT_NOT_FOUND;
-			}
-			line = *generated;
+			std::cerr << "st: " << utility::encodeToUtf8(path) << ':' << line
+					  << " has no counterpart in the indexed (delombok) file\n";
+			return st::EXIT_NOT_FOUND;
 		}
-		if (const Id id = st::symbolAt(storage, file, line))
+		if (*id)
 		{
-			ids.insert(id);
+			ids.insert(*id);
 		}
 	}
 	if (ambiguous)
@@ -587,6 +606,7 @@ int run(QCoreApplication& app)
 	parser.addOption({"file", "filter only: wildcard on the definition file; a pattern with / matches the displayed path, else the file name", "glob"});
 	parser.addOption({"not", "filter only: keep the symbols that do not meet the criteria"});
 	parser.addOption({"no-source", "Omit the source line column"});
+	parser.addOption({"no-generated", "Drop result lines that stay generated: Lombok-made code without an original line"});
 	parser.addOption({"no-refresh", "Do not refresh a stale index before querying"});
 	parser.addOption({"wait", "Milliseconds to wait for the project lock (default 30000)", "ms"});
 	if (!parser.parse(app.arguments()))
@@ -609,11 +629,12 @@ int run(QCoreApplication& app)
 		throw UsageError(
 			"Usage: st <find|status|refs|callers|callees|impls|supers|path|impact|deps|filter|symbols-in|at|outline> [symbol|file[:line]] [target] "
 			"[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--in] [--package P] [--annotated A] "
-			"[--file G] [--not] [--no-source] [--no-refresh]; see --help");
+			"[--file G] [--not] [--no-source] [--no-generated] [--no-refresh]; see --help");
 	}
 	st::OutputOptions options;
 	options.limit = number(parser, "limit", options.limit);
 	options.showSource = !parser.isSet("no-source");
+	options.hideGenerated = parser.isSet("no-generated");
 	options.cwd = FilePath(QDir::currentPath().toStdWString());
 	const size_t wait = number(parser, "wait", 30000);
 	const size_t depth = number(parser, "depth", command == "path" ? 6 : command == "impact" ? 0 : 1);

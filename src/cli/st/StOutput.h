@@ -32,12 +32,16 @@ struct ResultLine
 	int tier = 0;
 	// Last line of a symbol's extent; 0 when it is a single line or unknown.
 	size_t endLine = 0;
+	// A delombok location without an original line: `file` is the original file and `line` is 0.
+	bool generated = false;
 };
 
 struct OutputOptions
 {
 	size_t limit = 50;
 	bool showSource = true;
+	// Drops lines that stay generated after mapLocation, and says how many on stderr.
+	bool hideGenerated = false;
 	FilePath cwd;
 	// Applied to every line before sorting; identity when empty.
 	std::function<ResultLine(const ResultLine&)> mapLocation;
@@ -48,6 +52,9 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 
 // Relative to cwd when the file is below it, otherwise absolute.
 std::wstring displayPath(const FilePath& file, const FilePath& cwd);
+
+// `<path>:<line>`, `<path>:<line>-<endLine>` for a range, or `<path> (generated)` for a generated line without one.
+std::wstring displayLocation(const ResultLine& line, const FilePath& cwd);
 }
 
 #endif

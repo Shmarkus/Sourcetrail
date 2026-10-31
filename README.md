@@ -344,8 +344,9 @@ nodes unless `--kind` asks for them.
 
 **Input rules.** `filter`, `impact` and `deps` take symbols as arguments or keys on stdin; `symbols-in` takes paths; `at`
 takes `file:line`. With Lombok, give the original path and line: the file maps to its delombok copy and the line maps back
-through the generated code. A line with no counterpart exits 3 (`st: <file>:<line> has no counterpart in the indexed (delombok)
-file`) rather than guessing a neighbour. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
+through the generated code; every line of a statement delombok joined onto one line maps to it. A line with no counterpart
+gets the symbol of the nearest mapped lines above and below when both give the same one; otherwise it exits 3
+(`st: <file>:<line> has no counterpart in the indexed (delombok) file`) rather than guessing. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
 
 ```bash
 grep -n 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package
@@ -359,8 +360,10 @@ components are missing from every answer. Field reads and writes are not disting
 5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.
 
 **Lombok.** Sourcetrail indexes delombok copies, so `st` maps those locations back to the original
-file and line, mapping only lines whose text matches the original unambiguously. Generated members
-and reformatted statements keep the delombok path and the kind column gets `(generated)`.
+file and line, mapping only lines whose text matches the original unambiguously. Unchanged copies map line for line; a
+statement delombok joined onto one line maps to its first original line. Generated members and other lines without an
+original line print the original path without a line, `src/.../Order.java (generated)`; if there is no original file, the
+row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no-generated` (any command) drops those rows.
 
 **Auto-refresh.** Before each query `st` compares source (and Gradle build file) times with the last index
 and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The

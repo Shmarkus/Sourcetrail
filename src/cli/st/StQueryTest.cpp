@@ -267,6 +267,30 @@ TEST_CASE("st at aligns a delombok file once")
 	REQUIRE(reads == 2);
 }
 
+TEST_CASE("st at answers an unmapped original line only when both mapped neighbours share a symbol")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	const Id other = code.member(a, L"A", L"other");
+	code.scope(a, L"A", 1, 15);
+	code.scope(run, L"A", 3, 7);
+	code.scope(other, L"A", 8, 10);
+	code.storage.buildCaches();
+	const std::vector<std::string> generated = {"class A {", "int n;", "void run() {", "a();", "final String x = f();", "c();",
+		"}", "void other() {", "d();", "}", "@lombok.Generated", "int getN() {", "return n;", "}", "}"};
+	const std::vector<std::string> original = {"@Getter", "class A {", "int n;", "void run() {", "a();", "val x = f();",
+		"c();", "}", "@Synchronized", "void other() {", "d();", "}", "}"};
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+	const FilePath indexed(L"/r/p/A.java");
+	const FilePath source(L"/o/A.java");
+
+	REQUIRE(st::symbolAtOriginal(code.storage, indexed, source, 5, read) == run);
+	REQUIRE(st::symbolAtOriginal(code.storage, indexed, source, 6, read) == run);
+	REQUIRE_FALSE(st::symbolAtOriginal(code.storage, indexed, source, 9, read).has_value());
+	REQUIRE_FALSE(st::symbolAtOriginal(code.storage, indexed, source, 1, read).has_value());
+}
+
 TEST_CASE("st outline shows visibility and line ranges")
 {
 	Code code;

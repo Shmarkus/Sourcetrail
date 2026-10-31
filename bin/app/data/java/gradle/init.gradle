@@ -41,12 +41,13 @@ allprojects { pp ->
 		}
 	}
 
+	// every source set besides main, one "<sourceSetName>|<dir>" line per directory
 	task printTestSrcDirs {
 		doLast {
 			if (project.hasProperty("sourceSets")) {
-				if (project.sourceSets.hasProperty("test")) {
-					project.sourceSets.test.java.srcDirs.each { dir ->
-						println "${dir}"
+				project.sourceSets.matching { it.name != "main" }.each { sourceSet ->
+					sourceSet.java.srcDirs.each { dir ->
+						println "${sourceSet.name}|${dir}"
 					}
 				}
 			}
@@ -55,14 +56,16 @@ allprojects { pp ->
 
 	task printLombokInfo {
 		doLast {
-			def mainLombokJar = findLombokJar(project, ["annotationProcessor", "compileOnly", "compileClasspath"])
-			if (mainLombokJar != null) {
-				println "main|${mainLombokJar}"
-			}
-
-			def testLombokJar = findLombokJar(project, ["testAnnotationProcessor", "testCompileOnly", "testCompileClasspath"])
-			if (testLombokJar != null) {
-				println "test|${testLombokJar}"
+			if (project.hasProperty("sourceSets")) {
+				project.sourceSets.each { sourceSet ->
+					def lombokJar = findLombokJar(project, [
+						sourceSet.annotationProcessorConfigurationName,
+						sourceSet.compileOnlyConfigurationName,
+						sourceSet.compileClasspathConfigurationName])
+					if (lombokJar != null) {
+						println "${sourceSet.name}|${lombokJar}"
+					}
+				}
 			}
 		}
 	}
@@ -91,6 +94,14 @@ allprojects { pp ->
                         if (pp.configurations.hasProperty("testCompileClasspath")) {
                                 copyDependencies(pp.configurations.testCompileClasspath, destination)
                         }
+			if (pp.hasProperty("sourceSets")) {
+				pp.sourceSets.matching { it.name != "main" && it.name != "test" }.each { sourceSet ->
+					def classpath = pp.configurations.findByName(sourceSet.compileClasspathConfigurationName)
+					if (classpath != null) {
+						copyDependencies(classpath, destination)
+					}
+				}
+			}
 		}
 	}
 }

@@ -14,11 +14,8 @@ struct GradleProjectInfo
 {
 	std::string fingerprint;	// build-file fingerprint it was computed for
 	bool includesTests = false;
-	bool mainHasLombok = false;
-	bool testHasLombok = false;
-	FilePath mainLombokJar;
-	FilePath testLombokJar;
-	std::map<std::wstring, std::vector<FilePath>> sourceDirectories;	// "main" / "test" -> original roots
+	std::map<std::wstring, FilePath> lombokJars;	// source set -> lombok jar, for source sets using Lombok
+	std::map<std::wstring, std::vector<FilePath>> sourceDirectories;	// source set ("main", "test", ...) -> original roots
 };
 
 std::vector<FilePath> gradleBuildFiles(const FilePath& projectDirectory);

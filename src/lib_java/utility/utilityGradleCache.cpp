@@ -16,7 +16,7 @@ namespace
 {
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
-const char* const CACHE_VERSION = "2";
+const char* const CACHE_VERSION = "3";
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",
@@ -193,17 +193,7 @@ std::optional<GradleProjectInfo> loadGradleProjectInfo(
 		}
 		else if (parts[0] == "lombok" && parts.size() == 3)
 		{
-			const FilePath jar(decodeFromUtf8(parts[2]));
-			if (parts[1] == "main")
-			{
-				info.mainHasLombok = true;
-				info.mainLombokJar = jar;
-			}
-			else if (parts[1] == "test")
-			{
-				info.testHasLombok = true;
-				info.testLombokJar = jar;
-			}
+			info.lombokJars[decodeFromUtf8(parts[1])] = FilePath(decodeFromUtf8(parts[2]));
 		}
 		else if (parts[0] == "root" && parts.size() == 4)
 		{
@@ -238,13 +228,9 @@ void saveGradleProjectInfo(const FilePath& outputDirectory, const GradleProjectI
 	std::ostringstream out;
 	out << "version\t" << CACHE_VERSION << "\n";
 	out << "includesTests\t" << (info.includesTests ? "1" : "0") << "\n";
-	if (info.mainHasLombok)
+	for (const auto& [sourceSet, jar]: info.lombokJars)
 	{
-		out << "lombok\tmain\t" << joinPath(info.mainLombokJar) << "\n";
-	}
-	if (info.testHasLombok)
-	{
-		out << "lombok\ttest\t" << joinPath(info.testLombokJar) << "\n";
+		out << "lombok\t" << encodeToUtf8(sourceSet) << "\t" << joinPath(jar) << "\n";
 	}
 	for (const auto& entry: info.sourceDirectories)
 	{

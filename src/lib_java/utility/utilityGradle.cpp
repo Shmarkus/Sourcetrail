@@ -24,14 +24,6 @@ namespace utility
 {
 namespace
 {
-struct LombokInfo
-{
-	bool mainHasLombok = false;
-	bool testHasLombok = false;
-	FilePath mainJarPath;
-	FilePath testJarPath;
-};
-
 FilePath getGradleInitScriptPath()
 {
 	return ResourcePaths::getJavaDirectoryPath().concatenate(L"gradle/init.gradle");
@@ -78,7 +70,8 @@ std::string callGradleStringMethod(
 	return output;
 }
 
-std::optional<LombokInfo> getLombokInfo(const FilePath& projectDirectoryPath)
+// Source set name -> lombok jar, for every source set that uses Lombok.
+std::optional<std::map<std::wstring, FilePath>> getLombokJars(const FilePath& projectDirectoryPath)
 {
 	std::shared_ptr<JavaEnvironment> javaEnvironment = createPreparedJavaEnvironment();
 	const std::string output = callGradleStringMethod(
@@ -89,7 +82,7 @@ std::optional<LombokInfo> getLombokInfo(const FilePath& projectDirectoryPath)
 		return std::nullopt;
 	}
 
-	LombokInfo info;
+	std::map<std::wstring, FilePath> jars;
 	for (const std::string& line: utility::splitToVector(output, "\n"))
 	{
 		const std::string trimmedLine = utility::trim(line);
@@ -104,20 +97,10 @@ std::optional<LombokInfo> getLombokInfo(const FilePath& projectDirectoryPath)
 			continue;
 		}
 
-		const FilePath jarPath(utility::decodeFromUtf8(parts[1]));
-		if (parts[0] == "main")
-		{
-			info.mainHasLombok = true;
-			info.mainJarPath = jarPath;
-		}
-		else if (parts[0] == "test")
-		{
-			info.testHasLombok = true;
-			info.testJarPath = jarPath;
-		}
+		jars[utility::decodeFromUtf8(parts[0])] = FilePath(utility::decodeFromUtf8(parts[1]));
 	}
 
-	return info;
+	return jars;
 }
 
 bool clearDirectoryContents(const FilePath& directoryPath)
@@ -256,11 +239,14 @@ std::optional<std::map<std::wstring, std::vector<FilePath>>> getSourceDirectorie
 			return std::nullopt;
 		}
 
+		// every other source set, as "<sourceSetName>|<dir>"
 		for (const std::string& testSrcDir: utility::splitToVector(testOutput, ";"))
 		{
-			if (!testSrcDir.empty())
+			const size_t separator = testSrcDir.find('|');
+			if (separator != std::string::npos && separator + 1 < testSrcDir.size())
 			{
-				directories[L"test"].push_back(FilePath(utility::decodeFromUtf8(testSrcDir)));
+				directories[utility::decodeFromUtf8(testSrcDir.substr(0, separator))].push_back(
+					FilePath(utility::decodeFromUtf8(testSrcDir.substr(separator + 1))));
 			}
 		}
 	}
@@ -298,15 +284,12 @@ GradleProjectInfo queryGradleProjectInfo(
 	info.fingerprint = gradleBuildFingerprint(projectDirectoryPath);
 	info.includesTests = includesTests;
 
-	const std::optional<LombokInfo> lombokInfo = getLombokInfo(projectDirectoryPath);
-	if (!lombokInfo)
+	const std::optional<std::map<std::wstring, FilePath>> lombokJars = getLombokJars(projectDirectoryPath);
+	if (!lombokJars)
 	{
 		return info;
 	}
-	info.mainHasLombok = lombokInfo->mainHasLombok;
-	info.testHasLombok = lombokInfo->testHasLombok;
-	info.mainLombokJar = lombokInfo->mainJarPath;
-	info.testLombokJar = lombokInfo->testJarPath;
+	info.lombokJars = *lombokJars;
 
 	const auto sourceDirectories =
 		getSourceDirectoriesBySourceSet(projectDirectoryPath, getGradleInitScriptPath(), includesTests);
@@ -383,37 +366,21 @@ bool gradlePrepareLombokSources(
 	bool addTestSources)
 {
 	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestSources);
-	if (!info.mainHasLombok && !(addTestSources && info.testHasLombok))
+	if (info.lombokJars.empty())
 	{
 		return true;
 	}
 
-	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
-		filterExistingDirectories(info.sourceDirectories);
-
-	if (info.mainHasLombok)
+	// the cached source sets are main only, or every source set when tests are included
+	for (const auto& [sourceSet, directories]: filterExistingDirectories(info.sourceDirectories))
 	{
-		const auto it = sourceDirectoriesBySourceSet.find(L"main");
-		if (it != sourceDirectoriesBySourceSet.end() &&
+		const auto jarIt = info.lombokJars.find(sourceSet);
+		if (jarIt != info.lombokJars.end() &&
 			!runDelombok(
 				projectDirectoryPath,
-				info.mainLombokJar,
-				it->second,
-				getDelombokOutputDirectory(outputDirectoryPath, L"main")))
-		{
-			return false;
-		}
-	}
-
-	if (addTestSources && info.testHasLombok)
-	{
-		const auto it = sourceDirectoriesBySourceSet.find(L"test");
-		if (it != sourceDirectoriesBySourceSet.end() &&
-			!runDelombok(
-				projectDirectoryPath,
-				info.testLombokJar,
-				it->second,
-				getDelombokOutputDirectory(outputDirectoryPath, L"test")))
+				jarIt->second,
+				directories,
+				getDelombokOutputDirectory(outputDirectoryPath, sourceSet)))
 		{
 			return false;
 		}
@@ -428,38 +395,21 @@ std::vector<FilePath> gradleGetAllSourceDirectories(
 	bool addTestDirectories)
 {
 	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestDirectories);
-	const std::map<std::wstring, std::vector<FilePath>> sourceDirectoriesBySourceSet =
-		filterExistingDirectories(info.sourceDirectories);
 
 	std::vector<FilePath> directories;
-	const auto mainIt = sourceDirectoriesBySourceSet.find(L"main");
-	if (info.mainHasLombok)
+	for (const auto& [sourceSet, sourceSetDirectories]: filterExistingDirectories(info.sourceDirectories))
 	{
-		const FilePath delombokMainDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"main");
-		if (delombokMainDirectory.exists())
+		if (info.lombokJars.count(sourceSet) > 0)
 		{
-			directories.push_back(delombokMainDirectory);
-		}
-	}
-	else if (mainIt != sourceDirectoriesBySourceSet.end())
-	{
-		utility::append(directories, mainIt->second);
-	}
-
-	if (addTestDirectories)
-	{
-		const auto testIt = sourceDirectoriesBySourceSet.find(L"test");
-		if (info.testHasLombok)
-		{
-			const FilePath delombokTestDirectory = getDelombokOutputDirectory(outputDirectoryPath, L"test");
-			if (delombokTestDirectory.exists())
+			const FilePath delombokDirectory = getDelombokOutputDirectory(outputDirectoryPath, sourceSet);
+			if (delombokDirectory.exists())
 			{
-				directories.push_back(delombokTestDirectory);
+				directories.push_back(delombokDirectory);
 			}
 		}
-		else if (testIt != sourceDirectoriesBySourceSet.end())
+		else
 		{
-			utility::append(directories, testIt->second);
+			utility::append(directories, sourceSetDirectories);
 		}
 	}
 

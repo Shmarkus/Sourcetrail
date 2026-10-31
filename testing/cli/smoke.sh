@@ -31,7 +31,7 @@ fail() {
 run --help > "$work/help.txt"
 fail search "$project" getName
 run index "$project" --full > "$work/index.json"
-jq -e '.ok and .result.errors == 0 and .result.completed_files == 7' "$work/index.json" >/dev/null
+jq -e '.ok and .result.errors == 0 and .result.completed_files == 8' "$work/index.json" >/dev/null
 run search "$project" getName > "$work/search.json"
 id="$(jq -er '.result.symbols[] | select(.name == "example.Person.getName") | .id' "$work/search.json")"
 run describe "$project" "$id" > "$work/describe.json"

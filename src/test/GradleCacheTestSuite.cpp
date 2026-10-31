@@ -73,8 +73,7 @@ struct GradleCacheFixture
 		utility::GradleProjectInfo info;
 		info.fingerprint = utility::gradleBuildFingerprint(project);
 		info.includesTests = false;
-		info.mainHasLombok = true;
-		info.mainLombokJar = FilePath(L"/libs/lombok.jar");
+		info.lombokJars[L"main"] = FilePath(L"/libs/lombok.jar");
 		info.sourceDirectories[L"main"] = {project.getConcatenated(L"src/main/java")};
 		return info;
 	}
@@ -99,10 +98,40 @@ TEST_CASE("gradle cache round-trips project info")
 	REQUIRE(loaded.has_value());
 	REQUIRE(loaded->fingerprint == info.fingerprint);
 	REQUIRE(loaded->includesTests == false);
-	REQUIRE(loaded->mainHasLombok);
-	REQUIRE_FALSE(loaded->testHasLombok);
-	REQUIRE(loaded->mainLombokJar == info.mainLombokJar);
+	REQUIRE(loaded->lombokJars == info.lombokJars);
 	REQUIRE(loaded->sourceDirectories == info.sourceDirectories);
+}
+
+TEST_CASE("gradle cache round-trips every source set")
+{
+	GradleCacheFixture f;
+	utility::GradleProjectInfo info = f.makeInfo();
+	info.includesTests = true;
+	info.lombokJars[L"integrationTest"] = FilePath(L"/libs/lombok-it.jar");
+	info.sourceDirectories[L"test"] = {f.project.getConcatenated(L"src/test/java")};
+	info.sourceDirectories[L"integrationTest"] = {f.project.getConcatenated(L"src/integrationTest/java")};
+	utility::saveGradleProjectInfo(f.output, info);
+
+	const auto loaded = utility::loadGradleProjectInfo(f.output, f.project, true);
+	REQUIRE(loaded.has_value());
+	REQUIRE(loaded->lombokJars == info.lombokJars);
+	REQUIRE(loaded->sourceDirectories == info.sourceDirectories);
+}
+
+TEST_CASE("gradle cache of an older version is stale")
+{
+	GradleCacheFixture f;
+	utility::saveGradleProjectInfo(f.output, f.makeInfo());
+	const std::filesystem::path cache =
+		std::filesystem::path(f.output.str()) / "sourcetrail-gradle-project.cache";
+	std::ifstream in(cache, std::ios::binary);
+	std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	in.close();
+	REQUIRE(content.rfind("version\t3\n", 0) == 0);
+	content.replace(0, std::string("version\t3").size(), "version\t2");
+	std::ofstream(cache, std::ios::binary | std::ios::trunc) << content;
+
+	REQUIRE_FALSE(utility::loadGradleProjectInfo(f.output, f.project, false).has_value());
 }
 
 TEST_CASE("gradle cache is missing before anything was saved")

@@ -44,6 +44,9 @@ run 0 find getName
 run 0 callers 'example.Caller.greeting(example.Person)'
 grep -F 'example.Welcome.welcome(example.Person)' "$work/out" | grep -qF 'method via example.Greeter.greeting(example.Person)' \
     || assert "interface-dispatch caller missing"
+# A Lombok source set other than main and test is indexed and maps back to its original file.
+grep -F 'example.CallerIntegrationTest.greetsPerson()' "$work/out" | grep -qF 'src/integrationTest/java/example/CallerIntegrationTest.java:10' \
+    || assert "integration-test caller missing"
 
 run 0 find getName
 "$st" find getName 2> /dev/null | "$st" callers > "$work/out" 2> "$work/err" || assert "find | callers failed"

@@ -406,3 +406,18 @@ Root cause e2: `init.gradle` exports only the `main` and `test` source sets. sho
 
 - [ ] **Fresh run.** A fresh agent answers `benchmark-questions-only.md` with the final build. Score it against the corrected ground truth: Q2 also has the anonymous subclass, Q5 also has the method-reference callers, and Q7a starts at 177.
 - [ ] **Write the results.** Write `docs/superpowers/specs/2026-10-31-st-benchmark-results.md` with both runs (before and after the fixes), the medians against the targets, and the remaining limits.
+
+### Task 14: Fixes from the second benchmark run
+
+Source: `docs/superpowers/specs/2026-10-31-st-benchmark-results.md`, remaining problems 1, 3 and 5.
+
+**Files:** `src/cli/st/StOutput.h`, `StGraph.cpp`, `StLombok.cpp`, `StArchitecture.cpp`, `StKey.cpp`, `StMain.cpp`, `README.md`, and tests.
+
+- [ ] **Exact line inside a joined statement** (problem 5, a correctness fix).
+  - Today a result location on a delombok line that was tiled from a multi-line original run maps to the run's first line. That is up to 5 lines off: PaymentV2Service :189 instead of :194.
+  - Carry the location's column in `ResultLine`. Map the column's position, counted in non-whitespace characters, onto the run, and pick the original line that holds that character.
+  - If the column is unknown, or the character can't be placed, the line stays `(generated)`. It never falls back to the first line.
+  - Tests: a call at the second line of a 2-line run maps to that line, and an unknown column stays generated.
+- [ ] **`impact` order** (problem 1). With `--limit`, keep the lowest depths first (depth, then path, then line), so the direct callers are never cut. Printed rows stay in path/line order. The README names the pipe `| st filter --not --file '*Test*'` for leaving out tests.
+- [ ] **Not-found hints** (problem 3). When a name with a parameter list doesn't resolve, but the same name without parameters does, exit 3 and list those overloads on stderr in the ambiguity format.
+- [ ] **Real-index check** on shop: the PaymentV2Service call from the Q3/Q6 answers prints `:194`; `st impact` of `PaymentService.alterPayments` at the default limit lists all 6 direct callers; and a wrong parameter guess lists the `sendPayments` overloads.

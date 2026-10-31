@@ -118,11 +118,12 @@ contains 'example.web.GreetingController.greet(example.Person)' out
 run 0 filter --annotated Endpoint 'example.web.GreetingController.greet(example.Person)'
 contains 'example.web.GreetingController' out
 run 1 filter --annotated Endpoint 'example.Caller.shout(example.Person)'
+! grep -qF 'symbol not found' "$work/err" || assert "negative filter reported a missing symbol: $(cat "$work/err")"
 
 run 64 path --edges calls example.Welcome 'example.Person.getName()'
-contains calls err
+contains "'calls'" err
 run 64 impact --edges calls 'example.Person.getName()'
-contains calls err
+contains "'calls'" err
 
 # Exit codes.
 run 3 callers nope

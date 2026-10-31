@@ -322,6 +322,8 @@ st path com.acme.Controller.create com.acme.Repo.save
 - `symbols-in <file>...`: symbols defined in the files, in line order (no packages, files or type parameters).
 - `outline <class|file>...`: a class's direct members, or a file's symbols, with `visibility kind` (`public method`) and a
   `path:line-endLine` range. An argument naming an existing file is a file, anything else a symbol.
+  Package-private members print `package method`; interface and annotation members print no access word.
+  `outline <class>` lists nested types but not their members.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
   counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
   package. Overrides are followed up and down, but not down again after going up. stderr gets `impact: N symbols in F files, P packages`.

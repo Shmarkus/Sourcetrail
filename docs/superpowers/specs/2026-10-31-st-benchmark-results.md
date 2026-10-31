@@ -40,12 +40,12 @@ Verdicts: **C** correct, **P** partial, **W** wrong. Calls and characters are gi
 
 | Q | Shape | Run 1 | Run 2 | Calls | Chars (k) | Run 2 notes |
 |---|---|---|---|---|---|---|
-| 1 | overload callers | C | C | 5 / 2 / 2 | 12 / 2.2 / 1.1 | First guess of the parameter FQNs was wrong, giving exit 3 with no hint. Simple type names, as written in the question, then worked. |
+| 1 | overload callers | C | C | 5 / 2 / 2 | 12 / 2.2 / 1.1 | First guess of the parameter FQNs was wrong, giving exit 3 with no hint (since Task 14 the exit 3 lists the overloads). Simple type names, as written in the question, then worked. |
 | 2 | implementations | C | C | 2 / 1 / 1 | 1.2 / 1.0 / 0.9 | All 4, including both anonymous classes. |
-| 3 | path | C | C | 4 / 1 / 1 | 25 / 1.6 / 1.2 | Correct 4-hop path. Two call sites are given at the first line of the statement (141, 182) instead of the call line (143, 183). |
+| 3 | path | C | C | 4 / 1 / 1 | 25 / 1.6 / 1.2 | Correct 4-hop path. Two call sites are given at the first line of the statement (141, 182) instead of the call line (143, 183); since Task 14 they print 143 and 183. |
 | 4 | tests reaching a line | P | C | 7 / 3 / 2 | 40 / 4.8 / 3.4 | 9/9, including the IntTest. `at …:25` now works. |
 | 5 | signature impact | P | C | 6 / 3 / 3 | 20 / 8.2 / 16.6 | Direct, transitive and hop depth are all correct. Needed a second, filtered `impact`, because 185 of the 203 rows are tests. |
-| 6 | Lombok getter callers | C | C | 6 / 1 / 1 | 18 / 2.7 / 2.6 | 11/11, no delombok paths. Three lines are statement starts: 189 for 190, 199 for 200, 189 for 194. |
+| 6 | Lombok getter callers | C | C | 6 / 1 / 1 | 18 / 2.7 / 2.6 | 11/11, no delombok paths. Three lines are statement starts: 189 for 190, 199 for 200, 189 for 194; since Task 14 they print 190, 200 and 194. |
 | 7 | enclosing symbol | C (fallback) | C | 2 / 2 / 2 | 3 / 11.9 / 0.6 | Both `at` calls answer directly. The agent misquoted the start line as "~174"; `st` prints 177. |
 | 8 | outline | C | C | 1 / 1 / 1 | 0.9 / 1.4 / 10.2 | All 30 members, with source. Run 1 piped through `grep public`. |
 | 9 | package deps | P | C | 4 / 1 / 1 | 7 / 0.6 / 0.8 | All 6 target packages, and no dependency on rest. |
@@ -68,6 +68,10 @@ Verdicts: **C** correct, **P** partial, **W** wrong. Calls and characters are gi
 | Total chars | ~154k | ~49k (−68%) | **~47k (−69%)** | — | — |
 | Correct answers | 12/14 | 10/14 | **14/14** | no worse than grep | Yes (better) |
 | Query time | — | all under 1 s | all under 1 s; `path` (depth 6) 0.33 s; worst pipeline 0.67 s | under 1 s; path under 2 s | Yes |
+| Median command time per question | not recorded | 0.30 s | 0.34 s | ≥ 30% faster than grep | Not measured |
+| Total command time | not recorded | ~7.2 s | ~5.8 s | — | — |
+
+Time per question is the wall time of the question's commands only, as each agent recorded it (run 1: the summary table of its answers; run 2: the `Time:` line of each answer). It leaves out the model's own latency, so it is not the start-to-answer time the plan asked for, and the grep baseline recorded no times. The "≥ 30% faster" target is therefore not measured. Per-question times range from 0.01 s (rg) to 1.9 s (run 1, Q5: three commands) and 1.05 s (run 2, Q5: two commands).
 
 In run 2, st costs as many calls as grep on Q7, Q8 and Q10. Its output is larger than grep's on Q8 (10.2k vs 0.9k) and Q10 (7.0k vs 4k). Q5 is close to grep (16.6k vs 20k). These three questions account for 72% of run 2's characters.
 
@@ -85,13 +89,19 @@ In run 2, st costs as many calls as grep on Q7, Q8 and Q10. Its output is larger
 
 ## Remaining problems in run 2
 
+Task 14 (commit 820cca40) fixed problems 1 and 5 and the ordering part of problem 2, and they were checked on the shop index; problems 3, 4, 6 and 7 stay open. (The plan's Task 14 numbers these differently: its "1, 3, 5" are problems 2, 1 and 5 here.)
+
+- **Problem 1, fixed.** A parameter list that matches no overload still exits 3, but stderr now lists the overloads in the ambiguity format. The run 2 guess (`…sendPayments(java.util.UUID, …payment.PaymentPlan, java.util.Collection)`) lists both `sendPayments` overloads with their keys and locations (`PaymentService.java:45`, `:59`). The exit stays 3, not the 2 recommended below.
+- **Problem 2, ordering fixed.** `--limit` now keeps the lowest depths. `impact PaymentService.alterPayments` at the default limit keeps all 6 direct callers (depth 1), where run 2 showed 3 of them; the 50 kept rows cover depths 1-5. The README names the `| st filter --not --file '*Test*'` pipe. The per-depth main/test count and a `--no-tests` option were not added.
+- **Problem 5, fixed.** A location inside a joined statement maps to the original line holding its column. The Q6 caller in `PaymentV2Service` is now printed at `:194` (was `:189`), the line with `order.getPaymentPlan()`. The Q3 path hops are `:143` and `:183` (were `:141` and `:182`). All of the more than 30 mapped sites checked hold their call.
+
 | # | Problem | Root cause | Recommended fix | Type |
 |---|---|---|---|---|
-| 1 | **Q1:** a wrong guess of the parameter types gives `symbol not found`, exit 3, with no candidates. The agent guessed `service.payment.PaymentPlan`; the class is in `definition`. | `resolveSymbol` reports not-found as soon as no parameter list matches. It does not fall back to the name. | When the name without parameters resolves, list its overloads in the same format as the ambiguity message (exit 2), so that the next call can copy a key. | st fix |
-| 2 | **Q5:** `impact` output is dominated by tests. 185 of 203 rows are tests (153 at depth 5). The default `--limit 50` view is sorted by file, not by depth, and it shows only 3 of the 6 direct callers. The agent needed a second call, and the answer cost 16.6k chars. `impact … \| st filter --not --file '*Test*'` would have given the 21 main rows in 4.9k chars, but the help does not mention it. | Rows are ordered by file and package, and truncated without regard to depth. There is no main-only mode. | Sort `impact` rows by depth, then by key, so that truncation drops the deepest rows first. Print a per-depth main/test count in the header. Add `--no-tests` (an alias for the file filter), or name the filter pipe in `impact --help` and the README. | st fix (+ usage) |
+| 1 | **Fixed in Task 14.** **Q1:** a wrong guess of the parameter types gives `symbol not found`, exit 3, with no candidates. The agent guessed `service.payment.PaymentPlan`; the class is in `definition`. | `resolveSymbol` reports not-found as soon as no parameter list matches. It does not fall back to the name. | When the name without parameters resolves, list its overloads in the same format as the ambiguity message (exit 2), so that the next call can copy a key. | st fix |
+| 2 | **Ordering fixed in Task 14; test counts and `--no-tests` open.** **Q5:** `impact` output is dominated by tests. 185 of 203 rows are tests (153 at depth 5). The default `--limit 50` view is sorted by file, not by depth, and it shows only 3 of the 6 direct callers. The agent needed a second call, and the answer cost 16.6k chars. `impact … \| st filter --not --file '*Test*'` would have given the 21 main rows in 4.9k chars, but the help does not mention it. | Rows are ordered by file and package, and truncated without regard to depth. There is no main-only mode. | Sort `impact` rows by depth, then by key, so that truncation drops the deepest rows first. Print a per-depth main/test count in the header. Add `--no-tests` (an alias for the file filter), or name the filter pipe in `impact --help` and the README. | st fix (+ usage) |
 | 3 | **Q8:** `outline` has no visibility filter. A question about 5 public methods returned all 30 members with their source (10.2k chars; 7.4k with `--no-source`; 1.9k when filtered with `grep '\tpublic'`). `--kind` accepts only a bare kind, so `filter --kind 'public method'` is rejected. | Visibility is folded into the kind column but cannot be filtered on. | Add `--access public\|protected\|private` to `outline` and `filter`, or accept `--kind 'public method'`. Also print a hint to use `--no-source` when output exceeds a size threshold. | st fix (+ usage: `--no-source`) |
 | 4 | **Q10:** the real nested class `CatalogAttachmentDto` (line 98) and its fields `id` and `fileName` (99-100) print "(generated)" with no line. `--no-generated` drops them, so it cuts the output to 2.2k chars but loses real symbols. | Lombok `@Value` rewrites the declarations: `public static class X {` becomes `public static final class X {`, and `String id;` becomes `private final String id;`. The lines are no longer equal, and the join-aware step only handles joins. | In the gaps between alignment anchors, compare lines with Java modifiers removed (`public`, `private`, `protected`, `static`, `final`), keeping the rule that the match must be unique in its gap. Until that is in place, `--no-generated` should keep symbols whose declaration name occurs in the original file. | st fix |
-| 5 | **Q3, Q6:** a call site inside a joined multi-line statement is reported at the statement's first line, up to 5 lines away from the call (`PaymentV2Service.java:189` for `:194`). | Join-aware mapping maps the whole joined line back to the first line of its original run. | Use the reference column in the delombok line to find the original line inside the run. The whitespace-free concatenation already gives the offset of each original line. | st fix |
+| 5 | **Fixed in Task 14.** **Q3, Q6:** a call site inside a joined multi-line statement is reported at the statement's first line, up to 5 lines away from the call (`PaymentV2Service.java:189` for `:194`). | Join-aware mapping maps the whole joined line back to the first line of its original run. | Use the reference column in the delombok line to find the original line inside the run. The whitespace-free concatenation already gives the offset of each original line. | st fix |
 | 6 | **Q5:** 2 rows still print "(generated)", both call sites `defineOrderEventConsumer.accept(definition);` in `DefineOrderEventConsumerIntTest`. | `@SneakyThrows` wraps the method body in `try {}`, so the copy is not byte-identical. The call line occurs several times in the file, so the file-wide uniqueness guard refuses it. | Apply the uniqueness rule per gap between LCS anchors rather than per file. | st fix |
 | 7 | **Q4:** `filter --annotated Test` also keeps methods whose *enclosing type* is annotated. Here that made no difference. | The behaviour is documented, but it is too broad for "@Test methods". | Add `--annotated-self` (or `--direct`) to match only the symbol's own annotations. | st fix (minor) |
 
@@ -107,9 +117,9 @@ In run 2, st costs as many calls as grep on Q7, Q8 and Q10. Its output is larger
 
 ## Recommendations
 
-1. Fix items 2 and 3 first. Q5 and Q8 are the only questions where `st` output approaches or exceeds grep. Sorting `impact` by depth, adding a test exclusion, and adding an access filter would bring both well under the target.
-2. Fix item 1. A not-found result that lists the overloads costs nothing when the input is right, and saves a call when it is wrong. Overloaded methods are where an agent most often guesses parameter types.
-3. Fix items 4 to 6 together in the Lombok alignment. Match lines with modifiers removed, apply the uniqueness rule per gap, and pick the exact line by column. After that, only true Lombok members should print "(generated)", and `--no-generated` becomes safe to recommend by default for `symbols-in` and `outline`.
+1. Fix item 3 and the rest of item 2. Q5 and Q8 are the only questions where `st` output approaches or exceeds grep. A test exclusion for `impact` and an access filter for `outline` would bring both well under the target. (`impact` sorting by depth and the overload hint of item 1 were done in Task 14.)
+2. Fix items 4 and 6 together in the Lombok alignment. Match lines with modifiers removed and apply the uniqueness rule per gap (the exact line by column was done in Task 14). After that, only true Lombok members should print "(generated)", and `--no-generated` becomes safe to recommend by default for `symbols-in` and `outline`.
+3. Next time, record start-to-answer time per question for grep and st alike, so the speed target can be judged.
 4. In the README's agent section, document the idioms that worked in run 2:
    - `callers … | st filter --annotated …`
    - `impact … | st filter --not --file '*Test*'`

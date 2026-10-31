@@ -103,6 +103,8 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 	size_t span = 0;
 	size_t start = 0;
 	std::set<Id> named;
+	std::set<Id> referenced;
+	std::set<Id> referencing;
 	storage.getSourceLocationsForFile(indexedFile)->forEachStartSourceLocation([&](SourceLocation* location) {
 		const size_t first = location->getLineNumber();
 		if (!location->isScopeLocation())
@@ -114,6 +116,11 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 					if (listed(storage, id))
 					{
 						named.insert(id);
+					}
+					else if (const StorageEdge edge = storage.getEdgeById(id); edge.id)
+					{
+						referenced.insert(edge.targetNodeId);
+						referencing.insert(edge.sourceNodeId);
 					}
 				}
 			}
@@ -138,7 +145,9 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 	// A reference to a symbol defined elsewhere is not a name on this line.
 	for (auto it = named.begin(); it != named.end();)
 	{
-		it = definitionFile(storage, *it) == indexedFile ? std::next(it) : named.erase(it);
+		// A name that a link on the line points to is a use, unless the line's own symbol is what uses it.
+		const bool used = referenced.count(*it) && !referencing.count(*it);
+		it = !used && definitionFile(storage, *it) == indexedFile ? std::next(it) : named.erase(it);
 	}
 	if (named.empty() || named.count(innermost))
 	{

@@ -198,3 +198,22 @@ TEST_CASE("st at ignores a symbol only referenced on the line")
 
 	REQUIRE(st::symbolAt(code.storage, FilePath(L"/r/p/A.java"), 7) == run);
 }
+
+TEST_CASE("st at ignores a sibling only called on the line")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	const Id helper = add(code.storage, method({L"p", L"A"}, L"helper", L"void", L"()"));
+	code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), a, helper));
+	addLocation(code.storage, helper, code.file(L"A"), 12);
+	code.scope(a, L"A", 1, 20);
+	code.scope(run, L"A", 5, 9);
+	code.link(Edge::EDGE_CALL, run, helper, L"A", {7});
+	addLocation(code.storage, helper, code.file(L"A"), 7);
+	code.storage.buildCaches();
+
+	const FilePath file(L"/r/p/A.java");
+	REQUIRE(st::symbolAt(code.storage, file, 7) == run);
+	REQUIRE(st::symbolAt(code.storage, file, 12) == helper);
+}

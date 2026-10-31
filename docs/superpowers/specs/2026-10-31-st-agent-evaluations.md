@@ -12,7 +12,8 @@ tuning:
    on questions nobody tuned for, and does it warn when an answer touches a gap in the index?
 2. **Unprompted.** Eight tasks phrased the way a developer asks a coding agent, with no tool named. The agent got only a
    one-line project note saying `st` exists. Does it choose `st` where `st` fits (spec target: on at least 80% of the
-   questions it suits) and grep where grep fits, and what stops it?
+   questions it suits) and grep where grep fits, and what stops it? A second unprompted run (run 2) repeats the eight
+   tasks with a CLAUDE.md snippet as the project note, to see whether it cuts unnecessary source re-reads.
 
 ## Method
 
@@ -128,30 +129,123 @@ The rest was confirmation that the README does not tell the agent it can skip. U
    answers that had no `incomplete:` line. The README explains the `incomplete:` line but does not say that its absence
    means the answer can be trusted.
 
+## Run 2: with the CLAUDE.md snippet
+
+A fresh agent redid the eight unprompted tasks. Its only project note was the snippet in
+`docs/agents/st-claude-md-snippet.md`. The snippet does three things:
+- It tells the agent to use `st` for structure and grep for text, config, strings and log messages.
+- It says to trust an `st` answer without re-reading the source, unless stderr shows `st: incomplete:` or the question
+  touches a listed blind spot (records, Lombok `@Builder` setters).
+- It points to the README's new "For agents" block.
+
+Between the two runs, `st` gained the project name on the count line (`callers: 4 (project <name>)`). A bare class name
+now resolves to the class instead of being ambiguous with its constructors. Both changes were confirmed here.
+
+### Correctness
+
+All 8 answers are correct. Details:
+- **U1** now also names the test `instanceof` site that run 1 missed.
+- **U8** attributes the "already done" return to the planner's public method. The return is actually in a private helper
+  that the public method calls, so this is a naming slip, not a wrong answer.
+- **U5** shows a new `st` problem. One caller, a test helper, was printed with the path of its delombok copy under
+  `sourcetrail_dependencies/.../delombok/test/` instead of its source path. The agent still identified it correctly.
+  - Cause, checked here: two modules each have a test helper with the same package and file name. Their test source
+    sets are delomboked into one shared `test` tree, so the two copies land on the same relative path. The manifest
+    lists both, but only one file survives on disk. `st` cannot map that path back to one original file.
+  - The other copy is therefore not in the index at all, and no warning reports it (a silent gap). It did not affect
+    any answer in this run.
+
+### Cost and tool choice
+
+| # | Kind | Run 1 (commands / chars) | Run 2 (commands / chars) | grep (calls / chars) | Run 2 tool choice |
+|---|---|---|---|---|---|
+| U1 | structural | 11 / 21k | 11 / 14k (3 of them setup) | 3 / 6k | `st refs`, then grep/sed (records) |
+| U2 | structural | 7 / 8.5k | 10 / 12k | 3 / 7k | `st` callers/impls/refs/outline, 2 sed, 1 grep |
+| U3 | structural | 12 / 10k | 11 / 8k | 3 / 7k | `st` impls/callers/refs, 5 sed, 1 grep (Spring wiring) |
+| U4 | structural | 5 / 5k | **4 / 4k** | 2 / 5k | `st` only |
+| U5 | structural | 7 / 5k | **4 / 5k** | 3 / 7k | `st` only |
+| U6 | stack trace | 5 / 9k | 9 / 9k | 2 / 9k | `st at \| st callers`, sed for the statement |
+| U7 | text | 10 / 5k | 6 / 4k | 3 / 5k | grep, cat, sed; one `st refs` cross-check |
+| U8 | text | 3 / 3k | 3 / 5k | 2 / 3k | grep, then `st callers` for the caller |
+| | **Total** | **60 / ~66k** (+4 / 11k setup) | **58 / ~61k** (setup included) | **21 / ~49k** | |
+
+Counting notes:
+- Run 2's chars are the sum of its per-task estimates. Its log header says "about 45k", which does not match its own
+  per-task figures, so the per-task sum is used here.
+- Including setup, run 1 cost 64 commands and ~77k characters; run 2 cost 58 commands and ~61k characters.
+- `st` commands: 21 in run 1, 28 in run 2. Other commands: ~39 in run 1, ~30 in run 2.
+
+**Tool choice is still right on every task.** `st` was the primary tool on all 6 structural and stack-trace tasks (100%
+against the 80% target). grep was the primary tool on both text tasks. In those, `st` appeared only as a follow-up: a
+`refs` cross-check in U7, and finding the planner's caller in U8.
+
+**Cost improved about 20% but is still above grep.** On the pure structure tasks (U4, U5), the snippet worked as
+intended: `st` only, no re-read, and cheaper than grep. Overall, the agent spent ~2.8 times grep's commands and ~1.25
+times its characters.
+
+### Were the source re-reads justified?
+
+Run 2 re-read source after an `st` answer on 4 of the 6 `st` tasks (U1, U2, U3, U6). Run 1 did so on all 6. In U8
+grep came first, so its reads are not re-reads of an `st` answer.
+
+| # | Re-read | Verdict |
+|---|---|---|
+| U1 | grep for switch arms and `instanceof`; read the sealed interface, the routing switch, the stage switch, two enums | **Justified.** The permitted subtypes are records, a listed blind spot, and `st refs` warned `incomplete: 1 links to unresolved symbols`. |
+| U2 | Read the runner's `run` method and grep for `main(` | **Justified.** The framework calls the runner (`ApplicationRunner`) and the adapter is built with `new` inside `run`. Neither is a call edge. |
+| U2 | Read the guard method; plus a no-op `st ... \| head -0` and repeated `st refs`/`impls` after `callers --depth 6` already showed the chain with the `via <interface>` hop | **Unnecessary** (about 4 commands). |
+| U3 | Five reads for bean names, the qualifier, the stream binding and the test lambda bean | **Justified.** Spring wiring by bean name and stream binding are not in the index. |
+| U6 | Read line 95 | **Justified.** The question asks what runs on that line, and `st at` names the enclosing method, not the statement. |
+| U6 | `find`, a second `sed`, a second `st at`, a second `callers --depth 3` piped through `grep -v Test` | **Unnecessary** (about 4 commands). Part of the cause is in `st`: `callers --depth` has no depth column, so the agent re-ran it to tell direct callers from transitive ones. |
+| U8 | Read the planner for the condition | **Justified.** The question asks when the log line fires, which needs the statement-level logic. |
+
+About 8 of 58 commands were unnecessary. The other re-reads were for things the index does not hold. In run 1,
+unnecessary checks included:
+- a grep cross-check after an overload-exact `st callers` (U5),
+- confirmation reads of a chain `st` had already given (U2).
+The snippet removed those.
+
+### Warnings in run 2
+
+Two `st: incomplete:` lines appeared, and both were justified:
+- **U1 `refs`:** a link to a record type.
+- **U2 `callers`:** 1 index error in the runner's `run` method. A type it constructs belongs to a package missing from
+  this copy of project B.
+Neither changed an answer, and the agent's answers did not depend on the missing links.
+
+### Conclusions after run 2
+
+- **Adoption is solved.** Both unprompted runs pick `st` for 6 of 6 suited tasks and grep for text.
+- **The trust sentence works where it applies.** Pure structure questions are now answered with `st` alone, cheaper
+  than grep.
+- **The remaining overhead is mostly legitimate.** Records and Spring wiring are outside the index, and some
+  questions need the statement text.
+- **What remains fixable** is about 8 redundant commands per run (repeated queries, flat `--depth` output) and the long
+  setup in U1.
+- **The gap to grep is structural.** The unprompted tasks are deliberately mixed. On them, `st` cannot match the told
+  agent's 52% call saving from the holdout run, because a third of the tasks need source anyway.
+
 ## Remaining issues and recommended fixes (ranked)
 
-1. **Say when an answer can be trusted (README).** Add one sentence to the Incomplete answers paragraph: no
-   `incomplete:` line means the index has every link the answer depends on, so re-reading source is only needed for
-   what the index never holds (text, config, switch arms over records, the Lombok builder relation). This targets the
-   largest cost in the unprompted run, which was confirmation reads. Cheapest fix, largest expected effect.
-2. **Prefer the type over its constructors (st).** When a bare name matches a type and that type's own constructors,
-   resolve it to the type for `impls`, `supers`, `deps`, `outline` and `impact`. Keep exit 2 for real ambiguity. This
-   removed one call in U3 and would remove one in any class-level query on a Lombok code base.
-3. **Name the project and the error owners (st).**
-   - Print the project name on the stderr count line (`find: 1 [<project>]`), so a wrong-directory query is visible.
-   - Make the `incomplete:` line, or `st status <symbol>`, name the symbols the index errors belong to, with a test or
-     main marker. The agent could then dismiss the H5 warning, which came from a test base class, instead of
-     treating the answer as a lower bound.
-4. **Explain record misses (st).** On `symbol not found`, if the name's type matches an indexed file
-   (`<Type>.java`) that defines no symbol of that name, say
-   `st: <Type> is declared in <file> but not indexed (Java record? see README Known limits)`. H7 failed loudly but
-   without a reason. This makes the message self-explaining for agents that skipped the README.
-5. **Connect Lombok builder setters to their field (st, or README).** `refs`/`impact` of a `@Builder` field should
-   include the builder setter of the same name, or the README should say to also query `<Type>Builder.<field>(...)`.
-   The H3 answer was short without a warning because of this.
-6. **Allow a parameter prefix (st, optional).** Accept `(LocalDate, ...)` or a unique leading-parameter match for an
-   overload. Exit 3 with the overload list already makes a wrong guess cost only one call, so this ranks low.
-7. **Package walks include tests (st, optional).** `deps`/`impact` of a package also walk test classes in the same
-   package, which inflated the H5 link counts and caused its warning. A `--no-tests` switch, or a test/main split in
-   `deps` rows, would let main-code questions stay main-only. Today `| st filter --not --file '*Test*'` works only on
-   symbol rows, not on package rows.
+Status after run 2: items marked *done* were confirmed in the current binary or docs.
+
+1. ~~**Say when an answer can be trusted (README).**~~ *Done* (snippet and README "For agents"). Effect confirmed: no
+   re-reads on U4/U5, re-reads down from 6 to 4 tasks.
+2. ~~**Prefer the type over its constructors (st).**~~ *Done*: a bare class name now resolves to the class.
+3. **Name the project and the error owners (st).** The project name on the count line is *done*. Still open: the
+   `incomplete:` line, or `st status <symbol>`, should name the symbols the index errors belong to, with a test or main
+   marker. That would let an agent dismiss the H5 warning, which came from a test base class.
+4. **Add a depth column to `callers`/`callees --depth` (st, new).** `impact` already prints `depth <n>`. In U6 the
+   flat list cost a re-run and a source read to split direct callers from transitive ones.
+5. **Fix delombok output collisions across modules (indexer, new).** Same-named files with the same package in two
+   modules' test (or main) source sets overwrite each other in the shared delombok tree. One copy silently drops out of
+   the index, and the other is reported under its delombok path.
+   - Fix: delombok each module into its own tree, or keep the module in the relative path.
+   - Until then, `st status` should count such collisions.
+6. **Explain record misses (st).** Still open. `symbol not found` on a record accessor gives no reason. Suggested
+   message: `st: <Type> is declared in <file> but not indexed (Java record? see README Known limits)`.
+7. **Connect Lombok builder setters to their field (st).** Still open in `st`. The snippet now lists `@Builder` setters
+   as a blind spot, which covers agents that read it.
+8. **Allow a parameter prefix (st, optional).** Exit 3 with the overload list cost one extra call in both unprompted
+   runs (U5). This is low priority.
+9. **Package walks include tests (st, optional).** `deps`/`impact` of a package also walk the test classes in that
+   package. A `--no-tests` switch, or a test/main split in `deps` rows, would keep main-code questions main-only.

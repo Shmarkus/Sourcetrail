@@ -132,16 +132,10 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 
 const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
-// Prints on stderr the gaps of the index the results touch; a failure to tell leaves the answer as it is.
+// Prints on stderr the gaps of the index the results touch, or that they could not be checked.
 void printGaps(PersistentStorage& storage, const st::Walked& walked, const std::vector<st::ResultLine>& lines)
 {
-	try
-	{
-		st::printGaps(st::findGaps(storage, walked, lines), std::cerr);
-	}
-	catch (...)
-	{
-	}
+	st::printGaps([&]() { return st::findGaps(storage, walked, lines); }, std::cerr);
 }
 
 // Prints the results, then on stderr the gaps of the index they touch.

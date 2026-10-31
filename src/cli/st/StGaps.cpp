@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include "CppSQLite3.h"
 #include "DefinitionKind.h"
 #include "ErrorInfo.h"
 #include "NameHierarchy.h"
@@ -468,5 +469,28 @@ void printGaps(const Gaps& gaps, std::ostream& out)
 		out << gaps.indexErrors << " index errors";
 	}
 	out << " (see st status)\n";
+}
+
+void printGaps(const std::function<Gaps()>& findGaps, std::ostream& out)
+{
+	std::string failure;
+	try
+	{
+		printGaps(findGaps(), out);
+		return;
+	}
+	catch (CppSQLite3Exception& error)
+	{
+		failure = error.errorMessage();
+	}
+	catch (const std::exception& error)
+	{
+		failure = error.what();
+	}
+	catch (...)
+	{
+		failure = "unknown error";
+	}
+	out << "st: incomplete: gap check failed (" << failure << ")\n";
 }
 }

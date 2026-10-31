@@ -1,6 +1,7 @@
 #ifndef ST_GAPS_H
 #define ST_GAPS_H
 
+#include <functional>
 #include <map>
 #include <ostream>
 #include <set>
@@ -52,6 +53,10 @@ size_t countUnresolved(PersistentStorage& storage);
 // `st: incomplete: <n> links to unresolved symbols, <m> index errors (see st status)` on `out`,
 // leaving out a zero part; nothing when both are zero.
 void printGaps(const Gaps& gaps, std::ostream& out);
+
+// printGaps of what `findGaps` returns; when it throws, `st: incomplete: gap check failed (<what>)` instead, since
+// no line on stderr means the answer is complete.
+void printGaps(const std::function<Gaps()>& findGaps, std::ostream& out);
 }
 
 #endif

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -1213,4 +1214,17 @@ TEST_CASE("no incomplete line when nothing is missing")
 	CHECK(printed({2, 0}) == "st: incomplete: 2 links to unresolved symbols (see st status)\n");
 	CHECK(printed({0, 3}) == "st: incomplete: 3 index errors (see st status)\n");
 	CHECK(printed({2, 3}) == "st: incomplete: 2 links to unresolved symbols, 3 index errors (see st status)\n");
+}
+
+TEST_CASE("st reports a failed gap check as incomplete")
+{
+	const auto printedOf = [](const std::function<st::Gaps()>& findGaps) {
+		std::ostringstream out;
+		st::printGaps(findGaps, out);
+		return out.str();
+	};
+	CHECK(printedOf([]() { return st::Gaps{0, 3}; }) == "st: incomplete: 3 index errors (see st status)\n");
+	CHECK(printedOf([]() -> st::Gaps { throw std::runtime_error("no such table: error"); }) ==
+		"st: incomplete: gap check failed (no such table: error)\n");
+	CHECK(printedOf([]() -> st::Gaps { throw 1; }) == "st: incomplete: gap check failed (unknown error)\n");
 }

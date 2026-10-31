@@ -787,7 +787,7 @@ int run(QCoreApplication& app)
 		}
 		QElapsedTimer timer;
 		timer.start();
-		const TimeStamp started = TimeStamp::now();
+		const TimeStamp started = st::refreshStart();
 		const size_t changedFiles = freshness.changedFiles;
 		std::string log;
 		std::string failure;

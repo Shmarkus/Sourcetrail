@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 
+#include <boost/date_time/c_local_time_adjustor.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "DefinitionKind.h"
@@ -556,6 +557,60 @@ TEST_CASE("st freshness baseline sees edits made during a refresh")
 	// Someone else indexed since: their index time is the baseline.
 	REQUIRE(st::freshnessBaseline(later, last).toString() == "2026-10-30 13:00:00");
 	REQUIRE(st::freshnessBaseline(finished, std::nullopt).toString() == "2026-10-30 12:00:30");
+}
+
+TEST_CASE("st freshness tells an edit just before a refresh from one during it within the same second")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/build.gradle", "plugins {}");
+	write(repo + "/src/main/java/p/A.java", "class A {}");
+	write(base + "/prj/x.srctrlprj", QString(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+		"<gradle><project_file_path>" + repo + "/build.gradle</project_file_path><should_index_tests>0</should_index_tests></gradle>"
+		"<source_extensions><source_extension>.java</source_extension></source_extensions>"
+		"<status>enabled</status><type>Java Source Group from Gradle</type>"
+		"</source_group_g1></source_groups><version>8</version></config>\n").toUtf8());
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+	// A whole second two minutes ago, as a file time and as the local time st records.
+	const auto second = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now() - std::chrono::minutes(2));
+	const auto fileTime = [&](std::chrono::milliseconds offset) {
+		return std::filesystem::file_time_type::clock::now() +
+			std::chrono::duration_cast<std::filesystem::file_time_type::duration>(second + offset - std::chrono::system_clock::now());
+	};
+	const boost::posix_time::ptime localSecond = boost::date_time::c_local_adjustor<boost::posix_time::ptime>::utc_to_local(
+		boost::posix_time::from_time_t(std::chrono::system_clock::to_time_t(second)));
+	const auto past = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+	std::filesystem::last_write_time(repo.toStdString(), past);
+	for (const auto& entry: std::filesystem::recursive_directory_iterator(repo.toStdString()))
+	{
+		std::filesystem::last_write_time(entry.path(), past);
+	}
+	const FilePath project(repo.toStdWString());
+	utility::GradleProjectInfo info;
+	info.fingerprint = utility::gradleBuildFingerprint(project);
+	info.sourceDirectories[L"main"] = {project.getConcatenated(L"src/main/java")};
+	utility::saveGradleProjectInfo(FilePath((base + "/prj/sourcetrail_dependencies/g1/gradle").toStdWString()), info);
+	const TimeStamp indexedAt(localSecond + boost::posix_time::seconds(3));
+	const std::vector<FilePath> indexed = {FilePath((repo + "/src/main/java/p/A.java").toStdWString())};
+	st::recordRefresh(settings, {TimeStamp(localSecond + boost::posix_time::milliseconds(600)), indexedAt});
+	const TimeStamp baseline = st::freshnessBaseline(indexedAt, st::lastRefresh(settings));
+	const std::string a = (repo + "/src/main/java/p/A.java").toStdString();
+
+	// Saved 300 ms before the refresh started: the refresh indexed it.
+	std::filesystem::last_write_time(a, fileTime(std::chrono::milliseconds(300)));
+	REQUIRE_FALSE(st::checkFreshness(settings, baseline, indexed).stale);
+	// Saved 200 ms after it started: the refresh may have missed it.
+	std::filesystem::last_write_time(a, fileTime(std::chrono::milliseconds(800)));
+	REQUIRE(st::checkFreshness(settings, baseline, indexed).stale);
+	// A file written right after a refresh starts is never older than its start.
+	std::filesystem::last_write_time(a, past);
+	const TimeStamp started = st::refreshStart();
+	write(repo + "/src/main/java/p/A.java", "class A { int x; }");
+	REQUIRE(st::checkFreshness(settings, started, indexed).stale);
 }
 
 TEST_CASE("st refs include inheritance and override links")

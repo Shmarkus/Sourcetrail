@@ -37,6 +37,9 @@ void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record)
 // ends and keeps it when a refresh re-indexes nothing, so while the index is still the one st's refresh
 // produced, that refresh's start is the baseline; after anyone else's indexing, the index time is.
 TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last);
+
+// The start time to record for a refresh that begins now.
+TimeStamp refreshStart();
 }
 
 #endif

@@ -3,6 +3,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,17 +49,22 @@ struct FileStamp
 // What a delombok output directory was last generated from.
 struct DelombokManifest
 {
-	std::string fingerprint;	// build-file fingerprint
+	std::string fingerprint;	// hash of the build-file fingerprint
 	std::vector<FilePath> sourceDirectories;
 	std::map<std::wstring, FileStamp> lombokConfigs;	// lombok.config files above the roots
 	std::map<std::pair<size_t, std::wstring>, FileStamp> files;	 // (root index, relative path) -> stamp
+	// originals using @Delegate or @ExtensionMethod, whose output depends on other files
+	std::set<std::pair<size_t, std::wstring>> crossFileOriginals;
 
 	bool operator==(const DelombokManifest& other) const;
 };
 
-// Stamps every file in the roots and every lombok.config in the directories above them.
+// Stamps every file in the roots and every lombok.config in the directories above them. Only
+// files that changed since previous are read to find cross-file originals.
 DelombokManifest scanDelombokOriginals(
-	const std::vector<FilePath>& sourceDirectories, const std::string& fingerprint);
+	const std::vector<FilePath>& sourceDirectories,
+	const std::string& fingerprint,
+	const std::optional<DelombokManifest>& previous = std::nullopt);
 
 // The manifest lives beside the delombok output directory, so the indexer never sees it.
 std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOutputDirectory);

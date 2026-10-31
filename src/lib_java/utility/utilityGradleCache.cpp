@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -18,7 +19,7 @@ namespace
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
 const char* const CACHE_VERSION = "3";
-const char* const MANIFEST_VERSION = "1";
+const char* const MANIFEST_VERSION = "2";
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",
@@ -131,6 +132,55 @@ std::optional<FileStamp> stampFile(const std::filesystem::path& path)
 std::string formatStamp(const FileStamp& stamp)
 {
 	return std::to_string(stamp.size) + "\t" + std::to_string(stamp.mtime);
+}
+
+// FNV-1a, so the stored value does not depend on the standard library's std::hash
+std::string hashFingerprint(const std::string& fingerprint)
+{
+	uint64_t hash = 14695981039346656037ull;
+	for (const unsigned char c: fingerprint)
+	{
+		hash = (hash ^ c) * 1099511628211ull;
+	}
+	std::ostringstream out;
+	out << std::hex << hash;
+	return out.str();
+}
+
+// @Delegate and @ExtensionMethod generate code from other types, so their output changes with those
+bool usesCrossFileLombok(const std::filesystem::path& file)
+{
+	std::ifstream stream(file, std::ios::binary);
+	std::ostringstream content;
+	content << stream.rdbuf();
+	const std::string text = content.str();
+	for (const char* marker:
+		 {"@Delegate", "lombok.experimental.Delegate", "@ExtensionMethod", "lombok.experimental.ExtensionMethod"})
+	{
+		if (text.find(marker) != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Reuses the previous answer for an unchanged file and reads the file otherwise.
+bool isCrossFileOriginal(
+	const std::optional<DelombokManifest>& previous,
+	const std::pair<size_t, std::wstring>& original,
+	const FileStamp& stamp,
+	const std::filesystem::path& file)
+{
+	if (previous)
+	{
+		const auto it = previous->files.find(original);
+		if (it != previous->files.end() && it->second == stamp)
+		{
+			return previous->crossFileOriginals.count(original) > 0;
+		}
+	}
+	return file.extension() == ".java" && usesCrossFileLombok(file);
 }
 
 std::optional<FileStamp> parseStamp(const std::string& size, const std::string& mtime)
@@ -318,15 +368,19 @@ bool FileStamp::operator==(const FileStamp& other) const
 bool DelombokManifest::operator==(const DelombokManifest& other) const
 {
 	return fingerprint == other.fingerprint && sourceDirectories == other.sourceDirectories &&
-		lombokConfigs == other.lombokConfigs && files == other.files;
+		lombokConfigs == other.lombokConfigs && files == other.files &&
+		crossFileOriginals == other.crossFileOriginals;
 }
 
 DelombokManifest scanDelombokOriginals(
-	const std::vector<FilePath>& sourceDirectories, const std::string& fingerprint)
+	const std::vector<FilePath>& sourceDirectories,
+	const std::string& fingerprint,
+	const std::optional<DelombokManifest>& previous)
 {
 	DelombokManifest manifest;
-	manifest.fingerprint = fingerprint;
+	manifest.fingerprint = hashFingerprint(fingerprint);
 	manifest.sourceDirectories = sourceDirectories;
+	const bool comparable = previous && previous->sourceDirectories == sourceDirectories;
 
 	for (size_t index = 0; index < sourceDirectories.size(); index++)
 	{
@@ -356,9 +410,17 @@ DelombokManifest scanDelombokOriginals(
 			std::error_code entryEc;
 			if (it->is_regular_file(entryEc))
 			{
-				if (const std::optional<FileStamp> stamp = stampFile(it->path()))
+				const std::optional<FileStamp> stamp = stampFile(it->path());
+				if (!stamp)
 				{
-					manifest.files[{index, it->path().lexically_relative(root).generic_wstring()}] = *stamp;
+					continue;
+				}
+				const std::pair<size_t, std::wstring> original = {
+					index, it->path().lexically_relative(root).generic_wstring()};
+				manifest.files[original] = *stamp;
+				if (isCrossFileOriginal(comparable ? previous : std::nullopt, original, *stamp, it->path()))
+				{
+					manifest.crossFileOriginals.insert(original);
 				}
 			}
 		}
@@ -389,9 +451,9 @@ std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOut
 		{
 			versionOk = parts[1] == MANIFEST_VERSION;
 		}
-		else if (parts[0] == "fp" && parts.size() >= 2)
+		else if (parts[0] == "fp" && parts.size() == 2)
 		{
-			manifest.fingerprint += line.substr(3) + "\n";
+			manifest.fingerprint = parts[1];
 		}
 		else if (parts[0] == "root" && parts.size() == 2)
 		{
@@ -406,7 +468,7 @@ std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOut
 			}
 			manifest.lombokConfigs[decodeFromUtf8(parts[1])] = *stamp;
 		}
-		else if (parts[0] == "file" && parts.size() == 5)
+		else if (parts[0] == "file" && parts.size() == 6)
 		{
 			const std::optional<FileStamp> stamp = parseStamp(parts[3], parts[4]);
 			size_t index = 0;
@@ -423,6 +485,10 @@ std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOut
 				return std::nullopt;
 			}
 			manifest.files[{index, decodeFromUtf8(parts[2])}] = *stamp;
+			if (parts[5] == "1")
+			{
+				manifest.crossFileOriginals.insert({index, decodeFromUtf8(parts[2])});
+			}
 		}
 		else
 		{
@@ -445,13 +511,7 @@ void saveDelombokManifest(const FilePath& delombokOutputDirectory, const Delombo
 
 	std::ostringstream out;
 	out << "version\t" << MANIFEST_VERSION << "\n";
-	for (const std::string& fingerprintLine: splitToVector(manifest.fingerprint, "\n"))
-	{
-		if (!fingerprintLine.empty())
-		{
-			out << "fp\t" << fingerprintLine << "\n";
-		}
-	}
+	out << "fp\t" << manifest.fingerprint << "\n";
 	for (const FilePath& root: manifest.sourceDirectories)
 	{
 		out << "root\t" << joinPath(root) << "\n";
@@ -462,7 +522,8 @@ void saveDelombokManifest(const FilePath& delombokOutputDirectory, const Delombo
 	}
 	for (const auto& [file, stamp]: manifest.files)
 	{
-		out << "file\t" << file.first << "\t" << encodeToUtf8(file.second) << "\t" << formatStamp(stamp) << "\n";
+		out << "file\t" << file.first << "\t" << encodeToUtf8(file.second) << "\t" << formatStamp(stamp) << "\t"
+			<< (manifest.crossFileOriginals.count(file) > 0 ? "1" : "0") << "\n";
 	}
 
 	writeFileAtomically(path, out.str(), delombokOutputDirectory);

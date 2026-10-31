@@ -292,6 +292,21 @@ std::optional<DelombokChanges> getDelombokChanges(
 		}
 	}
 
+	// a long command line costs more than a whole-tree run saves
+	if (changes.changed.size() > 200)
+	{
+		return std::nullopt;
+	}
+
+	// the output of an unchanged @Delegate or @ExtensionMethod user may depend on any changed file
+	for (const DelombokOriginal& original: current.crossFileOriginals)
+	{
+		if (!touched.empty() && !std::count(touched.begin(), touched.end(), original))
+		{
+			return std::nullopt;
+		}
+	}
+
 	for (const DelombokOriginal& original: touched)
 	{
 		// a lombok.config changes other files' output, and only a whole-tree run copies non-Java files
@@ -498,8 +513,8 @@ bool delombokSourceSet(
 		return true;
 	}
 
-	const DelombokManifest current = scanDelombokOriginals(sourceDirectories, fingerprint);
 	const std::optional<DelombokManifest> previous = loadDelombokManifest(outputDirectory);
+	const DelombokManifest current = scanDelombokOriginals(sourceDirectories, fingerprint, previous);
 	const bool outputExists = outputDirectory.recheckExists();
 	if (previous && outputExists && *previous == current)
 	{

@@ -377,15 +377,33 @@ TEST_CASE("delombok manifest round trip")
 	REQUIRE(manifest.files.count({0, L"pkg/A.java"}) == 1);
 	REQUIRE(manifest.files.count({1, L"other/C.java"}) == 1);
 	REQUIRE(manifest.lombokConfigs.size() == 1);
+	REQUIRE(manifest.crossFileOriginals.empty());
 
 	utility::saveDelombokManifest(f.delombok, manifest);
 
 	const auto loaded = utility::loadDelombokManifest(f.delombok);
 	REQUIRE(loaded.has_value());
 	REQUIRE(*loaded == manifest);
-	REQUIRE(loaded->fingerprint == f.fingerprint);
 	REQUIRE(loaded->sourceDirectories == f.roots);
 	REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "main.manifest"));
+}
+
+TEST_CASE("delombok manifest round trip keeps any build fingerprint")
+{
+	DelombokFixture f;
+	f.write("a/src/main/java/pkg/X.java", "import lombok.experimental.Delegate;\nclass X { @Delegate B b; }");
+	for (const std::string& fingerprint: {std::string("a|1|2"), std::string("a|1|2\n\nb|3|4\n"), std::string()})
+	{
+		const utility::DelombokManifest manifest = utility::scanDelombokOriginals(f.roots, fingerprint);
+		utility::saveDelombokManifest(f.delombok, manifest);
+		const auto loaded = utility::loadDelombokManifest(f.delombok);
+		REQUIRE(loaded.has_value());
+		REQUIRE(*loaded == manifest);
+		REQUIRE(loaded->crossFileOriginals.count({0, L"pkg/X.java"}) == 1);
+	}
+	REQUIRE(
+		utility::scanDelombokOriginals(f.roots, "a|1|2").fingerprint !=
+		utility::scanDelombokOriginals(f.roots, "a|1|3").fingerprint);
 }
 
 TEST_CASE("delombok manifest of an older version is unreadable")
@@ -524,6 +542,68 @@ TEST_CASE("delombok runs files sharing a name in separate batches")
 	REQUIRE(fake.runs.size() == 3);
 	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { int z; }");
 	REQUIRE(readTree(f.delombok)["other/A.java"] == "// delomboked\nclass OtherA { int z; }");
+}
+
+TEST_CASE("delombok runs on the whole tree when an unchanged file uses a cross-file annotation")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	SECTION("@Delegate")
+	{
+		f.write("b/src/main/java/other/X.java", "class X { @lombok.experimental.Delegate private final B b; }");
+	}
+	SECTION("@ExtensionMethod")
+	{
+		f.write(
+			"b/src/main/java/other/X.java",
+			"import lombok.experimental.ExtensionMethod;\n@ExtensionMethod(B.class) class X {}");
+	}
+	REQUIRE(f.run(fake));
+
+	f.edit("a/src/main/java/pkg/B.java", "class B { int make() { return 1; } }");
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok of a cross-file original alone stays incremental")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	f.write("b/src/main/java/other/X.java", "class X { @Delegate private final B b; }");
+	REQUIRE(f.run(fake));
+
+	f.edit("b/src/main/java/other/X.java", "class X { @Delegate private final B b2; }");
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE_FALSE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok runs on the whole tree when more than 200 files changed")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	for (int i = 0; i < 201; i++)
+	{
+		f.write("a/src/main/java/many/M" + std::to_string(i) + ".java", "class M {}");
+	}
+	REQUIRE(f.run(fake));
+
+	for (int i = 0; i < 201; i++)
+	{
+		f.edit("a/src/main/java/many/M" + std::to_string(i) + ".java", "class M { int x; }");
+	}
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+
+	for (int i = 0; i < 200; i++)
+	{
+		f.edit("a/src/main/java/many/M" + std::to_string(i) + ".java", "class M { long x; }");
+	}
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 3);
+	REQUIRE_FALSE(fake.lastRunWasWholeTree());
 }
 
 TEST_CASE("delombok falls back to the whole tree when an incremental run fails")

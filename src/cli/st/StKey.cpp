@@ -156,6 +156,11 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
 		std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
 		return s;
 	};
+	if (kinds & ~NODE_TYPE_PARAMETER)
+	{
+		// Type parameters (`failed<T>.T`) only show up when --kind asks for them.
+		kinds &= ~NODE_TYPE_PARAMETER;
+	}
 	const std::wstring bare = withoutTypeParameters(text);
 	const std::wstring needle = lower(bare);
 	std::vector<std::pair<int, Id>> ranked;

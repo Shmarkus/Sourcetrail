@@ -296,7 +296,8 @@ that it consults the registry `~/.config/sourcetrail/st-projects.tsv` (source tr
 Any run with `--project /abs/project.srctrlprj` registers that project for its source tree, so
 afterwards `st` works from anywhere in the tree without the flag.
 
-**Commands:** `find`, `status`, `refs`, `callers`, `callees`, `impls`, `supers`, `path` (see `st --help`).
+**Commands:** `find`, `status`, `refs`, `callers`, `callees`, `impls`, `supers`, `path`, `impact`, `deps`, `filter`,
+`symbols-in`, `at`, `outline` (see `st --help`).
 The symbol is a name or a full key (`pkg.Class.method(pkg.Arg)`); without one, `st` reads
 keys from stdin, one per line or the first tab-separated column, so commands pipe.
 Ambiguous names exit 2 and list the candidates.
@@ -314,7 +315,38 @@ st find --kind interface Repository | st impls | st callers --depth 3
 st path com.acme.Controller.create com.acme.Repo.save
 ```
 
-Planned for Phase 2 and not available yet: `at`, `filter`, `impact`, `symbols-in`.
+**Phase 2 commands.**
+- `at <file>:<line>`: the innermost symbol defined around that line. A bare file name (`OrderService.java:42`, as in a
+  stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr. Text after a second colon is ignored,
+  so `grep -n` output pipes in.
+- `symbols-in <file>...`: symbols defined in the files, in line order (no packages, files or type parameters).
+- `outline <class|file>...`: a class's direct members, or a file's symbols, with `visibility kind` (`public method`) and a
+  `path:line-endLine` range. An argument naming an existing file is a file, anything else a symbol.
+- `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
+  counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
+  package. stderr gets `impact: N symbols in F files, P packages`.
+- `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
+  (`package, N links`). `--in` gives incoming. Links inside the input and external targets are not counted.
+- `filter`: keeps the stdin lines that pass, unchanged and in order: `--kind K`, `--package P` (keys under `P.`),
+  `--annotated A` (the symbol or its enclosing type carries `@A`), `--file G` (wildcard; with a `/` it matches the path, else
+  the file name), `--not` negates the combination.
+
+`--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
+name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.
+`--package`, `--annotated`, `--file`, `--not`, `--in`, `--group` and `--edges` on another command exit 64.
+
+**Input rules.** `filter`, `impact` and `deps` take symbols as arguments or keys on stdin; `symbols-in` takes paths; `at`
+takes `file:line`. With Lombok, give the original path and line: the file maps to its delombok copy and the line maps back
+through the generated code. A line with no counterpart exits 3 (`st: <file>:<line> has no counterpart in the indexed (delombok)
+file`) rather than guessing a neighbour. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
+
+```bash
+grep -n 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package
+st find --kind class Controller | st filter --annotated RestController | st deps
+```
+
+**Known limits.** Java records are not indexed as types by the bundled Java indexer: record types, constructors and
+components are missing from every answer. Field reads and writes are not distinguished (both are `usage`).
 
 **Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
 5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.

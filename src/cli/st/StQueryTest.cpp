@@ -657,3 +657,22 @@ TEST_CASE("st deps of a package covers its sub-packages")
 	REQUIRE(in.size() == 1);
 	CHECK(in[0].key == L"w");
 }
+
+TEST_CASE("st find hides type parameters unless the kind asks for them")
+{
+	Code code;
+	const Id failed = addGeneric(code, L"(java.lang.String)");
+	NameHierarchy name(NAME_DELIMITER_JAVA);
+	name.push(L"p");
+	name.push(L"Result<T>");
+	name.push(NameElement(L"failed<T>", L"Result<T>", L"(java.lang.String)"));
+	name.push(L"O");
+	const Id parameter = add(code.storage, name, NODE_TYPE_PARAMETER);
+	addLocation(code.storage, parameter, code.file(L"Result"), 2);
+	code.storage.buildCaches();
+
+	const auto hidden = st::findSymbols(code.storage, L"Result.failed", ~0);
+	CHECK(std::find(hidden.begin(), hidden.end(), parameter) == hidden.end());
+	CHECK(std::find(hidden.begin(), hidden.end(), failed) != hidden.end());
+	CHECK(st::findSymbols(code.storage, L"Result.failed", NODE_TYPE_PARAMETER) == std::vector<Id>{parameter});
+}

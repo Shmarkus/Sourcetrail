@@ -85,6 +85,34 @@ contains 'example.Caller.shout(example.Person)' out
 run 0 callers 'example.Person.getName()'
 ! grep -q refreshed "$work/err" || assert "second run refreshed again"
 
+# Phase 2 commands against the fixture (the edited Caller.java is still in place).
+caller=src/main/java/example/Caller.java
+shout_line="$(grep -n 'toUpperCase' "$caller" | head -n1 | cut -d: -f1)"
+run 0 at "$caller:$shout_line"
+contains 'example.Caller.shout(example.Person)' out
+grep -F 'example.Caller.shout(example.Person)' "$work/out" | grep -qF "$caller:" || assert "at lacks the method location: $(cat "$work/out")"
+
+run 0 symbols-in src/main/java/example/Person.java
+contains 'example.Person' out
+grep -F 'example.Person' "$work/out" | grep -q 'src/main/java/example/Person.java:[0-9]' || assert "symbols-in lacks an original Person.java line: $(cat "$work/out")"
+
+run 0 outline example.Caller
+grep -F 'public method' "$work/out" | grep -qE ':[0-9]+-[0-9]+' || assert "outline lacks a public method with a range: $(cat "$work/out")"
+
+run 0 impact 'example.Person.getName()'
+contains 'example.Caller.' out
+
+run 0 deps example.web.GreetingController
+grep -F 'example.Caller' "$work/out" | grep -qF 'class, ' || assert "deps lacks 'example.Caller' with 'class, ': $(cat "$work/out")"
+
+"$st" find GreetingController 2> /dev/null | "$st" callees 2> /dev/null | "$st" filter --package example --not --kind field > "$work/out" 2> "$work/err" \
+    || assert "find | callees | filter pipeline failed"
+run 0 filter --annotated Endpoint 'example.web.GreetingController.greet(example.Person)'
+contains 'example.web.GreetingController' out
+
+run 64 path --edges calls example.Welcome 'example.Person.getName()'
+run 64 impact --edges calls 'example.Person.getName()'
+
 # Exit codes.
 run 3 callers nope
 run 2 callers greeting

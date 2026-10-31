@@ -106,7 +106,7 @@ Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& index
 			if (gradle->getGradleProjectFilePathExpandedAndAbsolute().exists())
 			{
 				freshness.changedFiles++;
-				freshness.reason = "Gradle source information missing or outdated; refreshing";
+				freshness.reason = "Gradle source information missing or outdated; next query refreshes";
 			}
 			else
 			{

@@ -325,7 +325,8 @@ st path com.acme.Controller.create com.acme.Repo.save
   Package-private members print `package method`; interface and annotation members print no access word.
   `outline <class>` lists nested types but not their members.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
-  counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
+  counts every hop except override hops; a class stands for all its members, a package for every type and member in it and
+  its sub-packages (by name prefix, as in `deps`); the input's own symbols are not listed. `--group file|package` prints one line per file or
   package. Overrides are followed up and down, but not down again after going up. Rows read `<kind>, depth <n>` (`depth 1` is a direct user); `--limit` keeps the lowest depths. stderr gets `impact: N symbols in F files, P packages`.
   `| st filter --not --file '*Test*'` leaves out tests.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input

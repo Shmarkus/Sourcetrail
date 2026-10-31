@@ -38,8 +38,9 @@ struct ImpactResult
 
 // Symbols a change to `symbols` may break: users over `types` links, subtypes, and overrides both ways
 // (override hops are free, every other hop costs 1; `depth` 0 = unlimited). A type stands for itself and
-// all its members. Each line shows the site of the link that first reached the symbol; Group::File and
-// Group::Package print one line per file or package instead, keyed by its path or name.
+// all its members, a package for every type and member in it and its sub-packages. Each line shows the
+// site of the link that first reached the symbol; Group::File and Group::Package print one line per file
+// or package instead, keyed by its path or name.
 ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, size_t depth, Edge::TypeMask types,
 	Group group);
 

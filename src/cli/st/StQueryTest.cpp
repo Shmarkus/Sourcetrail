@@ -874,3 +874,28 @@ TEST_CASE("st result lines carry the column of their location")
 	REQUIRE(definition.size() == 1);
 	CHECK(definition[0].column == 1);
 }
+
+TEST_CASE("st impact of a package covers what it and its sub-packages own")
+{
+	Code code;
+	const Id d = code.package(L"d");
+	NameHierarchy lone(NAME_DELIMITER_JAVA);
+	lone.push(L"d");
+	lone.push(L"x");
+	code.packages[L"d.x"] = add(code.storage, lone, NODE_PACKAGE);	// no member edge from d
+	const Id deepRun = code.member(code.type(L"d.x", L"Deep"), L"Deep", L"run");
+	const Id topGo = code.member(code.type(L"d", L"Top"), L"Top", L"go");
+	const Id serve = code.member(code.type(L"w", L"Web"), L"Web", L"serve");
+	const Id main = code.member(code.type(L"w", L"Main"), L"Main", L"main");
+	const Id other = code.member(code.type(L"dx", L"Other"), L"Other", L"other");
+	code.link(Edge::EDGE_CALL, serve, deepRun, L"Web", {3});
+	code.link(Edge::EDGE_CALL, main, serve, L"Main", {4});
+	code.link(Edge::EDGE_CALL, deepRun, topGo, L"Deep", {5});
+	code.link(Edge::EDGE_CALL, other, topGo, L"Other", {6});
+	code.storage.buildCaches();
+
+	const auto result = st::impact(code.storage, {d}, 0, st::IMPACT_EDGES, st::Group::None);
+	CHECK(keys(result.lines) == std::set<std::wstring>{L"dx.Other.other()", L"w.Web.serve()", L"w.Main.main()"});
+	REQUIRE(lineFor(result.lines, L"w.Main.main()"));
+	CHECK(lineFor(result.lines, L"w.Main.main()")->kind == L"method, depth 2");
+}

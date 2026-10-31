@@ -167,33 +167,6 @@ private:
 	std::map<Id, bool> m_walkable;
 };
 
-// The input symbols, with every member of a type, recursively.
-std::set<Id> withMembers(PersistentStorage& storage, const std::vector<Id>& symbols)
-{
-	std::set<Id> all(symbols.begin(), symbols.end());
-	std::vector<Id> owners;
-	for (const Id id: symbols)
-	{
-		if (storage.getNodeTypeForNodeWithId(id).getKind() & (TYPES | NODE_ANNOTATION))
-		{
-			owners.push_back(id);
-		}
-	}
-	while (!owners.empty())
-	{
-		std::vector<Id> members;
-		for (const StorageEdge& edge: storage.getEdgesForSourceIds(owners))
-		{
-			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER && all.insert(edge.targetNodeId).second)
-			{
-				members.push_back(edge.targetNodeId);
-			}
-		}
-		owners = std::move(members);
-	}
-	return all;
-}
-
 bool before(const Site& a, const Site& b)
 {
 	return std::make_pair(a.file.wstr(), a.line) < std::make_pair(b.file.wstr(), b.line);
@@ -281,6 +254,28 @@ std::set<Id> owned(PersistentStorage& storage, const std::vector<Id>& symbols)
 	return all;
 }
 
+// A package and its sub-packages; other symbols stand for themselves.
+std::vector<Id> withSubPackages(PersistentStorage& storage, Id input)
+{
+	std::vector<Id> roots = {input};
+	if (storage.getNodeTypeForNodeWithId(input).getKind() != NODE_PACKAGE)
+	{
+		return roots;
+	}
+	// The index lacks some package-to-sub-package member links, so sub-packages are found by name.
+	const NameHierarchy name = storage.getNameHierarchyForNodeId(input);
+	const std::wstring prefix = name.getQualifiedName() + name.getDelimiter();
+	for (const StorageNode& node: storage.getStorageNodes())
+	{
+		if (intToNodeKind(node.type) == NODE_PACKAGE && node.id != input &&
+			storage.getNameHierarchyForNodeId(node.id).getQualifiedName().compare(0, prefix.size(), prefix) == 0)
+		{
+			roots.push_back(node.id);
+		}
+	}
+	return roots;
+}
+
 struct Affected
 {
 	Id id;
@@ -339,7 +334,13 @@ Edge::TypeMask parseEdges(const std::wstring& list)
 ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, size_t depth, Edge::TypeMask types,
 	Group group)
 {
-	const std::set<Id> inputs = withMembers(storage, symbols);
+	std::vector<Id> roots;
+	for (const Id id: symbols)
+	{
+		const std::vector<Id> expanded = withSubPackages(storage, id);
+		roots.insert(roots.end(), expanded.begin(), expanded.end());
+	}
+	const std::set<Id> inputs = owned(storage, roots);
 	const std::map<Id, Reach> reached = Walk(storage, depth, types).run(inputs);
 
 	std::vector<Affected> affected;
@@ -464,21 +465,7 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 				(packageLevel && key.compare(0, home.size() + 1, home + inputName.getDelimiter()) == 0);
 		};
 
-		std::vector<Id> roots = {input};
-		if (packageLevel)
-		{
-			// The index lacks some package-to-sub-package member links, so sub-packages are found by name.
-			const std::wstring prefix = home + inputName.getDelimiter();
-			for (const StorageNode& node: storage.getStorageNodes())
-			{
-				if (intToNodeKind(node.type) == NODE_PACKAGE && node.id != input &&
-					storage.getNameHierarchyForNodeId(node.id).getQualifiedName().compare(0, prefix.size(), prefix) == 0)
-				{
-					roots.push_back(node.id);
-				}
-			}
-		}
-		const std::set<Id> own = owned(storage, roots);
+		const std::set<Id> own = owned(storage, withSubPackages(storage, input));
 		const std::vector<Id> ids(own.begin(), own.end());
 		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)
 																				: storage.getEdgesForTargetIds(ids);

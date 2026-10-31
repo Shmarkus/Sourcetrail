@@ -1,5 +1,9 @@
+#include <algorithm>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 
+#include "StArchitecture.h"
 #include "StFiles.h"
 #include "StFilter.h"
 #include "StGraph.h"
@@ -15,6 +19,16 @@ namespace
 bool passes(Code& code, Id id, const st::FilterOptions& options, const std::wstring& path = L"src/A.java")
 {
 	return st::matchesFilter(code.storage, id, options, path);
+}
+
+std::set<std::wstring> impactKeys(Code& code, const std::vector<Id>& ids, size_t depth = 0)
+{
+	return keys(st::impact(code.storage, ids, depth, st::IMPACT_EDGES, st::Group::None).lines);
+}
+
+bool includes(const std::set<std::wstring>& all, const std::set<std::wstring>& some)
+{
+	return std::includes(all.begin(), all.end(), some.begin(), some.end());
 }
 }
 
@@ -382,6 +396,8 @@ TEST_CASE("st hides the unsolved-symbol pseudo node")
 	addLocation(code.storage, unsolved, code.file(L"A"), 4);
 	code.link(Edge::EDGE_CALL, unsolved, run, L"A", {4});
 	code.link(Edge::EDGE_CALL, run, unsolved, L"A", {5});
+	const Id other = code.member(code.type(L"B"), L"B", L"other");
+	code.link(Edge::EDGE_CALL, other, unsolved, L"B", {3});
 	code.storage.buildCaches();
 
 	CHECK(st::definedInFile(code.storage, FilePath(L"/r/p/A.java")) == std::vector<Id>{a, run});
@@ -390,4 +406,154 @@ TEST_CASE("st hides the unsolved-symbol pseudo node")
 	CHECK(st::calls(code.storage, {run}, st::Direction::Incoming, 1).empty());
 	CHECK(st::calls(code.storage, {run}, st::Direction::Outgoing, 1).empty());
 	CHECK(st::references(code.storage, {run}).empty());
+	CHECK(st::impact(code.storage, {run}, 0, st::IMPACT_EDGES, st::Group::None).lines.empty());
+}
+
+TEST_CASE("st impact reaches callers through interfaces and subtypes")
+{
+	Code code;
+	const Id api = code.type(L"Api", NODE_INTERFACE);
+	const Id apiRun = code.member(api, L"Api", L"run");
+	const Id impl = code.type(L"Impl");
+	const Id implRun = code.member(impl, L"Impl", L"run");
+	code.link(Edge::EDGE_OVERRIDE, implRun, apiRun, L"Impl", {3});
+	const Id other = code.type(L"Other");
+	const Id otherRun = code.member(other, L"Other", L"run");
+	code.link(Edge::EDGE_OVERRIDE, otherRun, apiRun, L"Other", {3});
+	const Id use = code.member(code.type(L"Client"), L"Client", L"use");
+	code.link(Edge::EDGE_CALL, use, apiRun, L"Client", {4});
+	const Id sub = code.type(L"Sub");
+	code.link(Edge::EDGE_INHERITANCE, sub, impl, L"Sub", {2});
+	const Id field = code.member(code.type(L"Holder"), L"Holder", L"field", NODE_FIELD);
+	code.link(Edge::EDGE_TYPE_USAGE, field, impl, L"Holder", {5});
+	code.storage.buildCaches();
+
+	const auto ofRun = st::impact(code.storage, {implRun}, 0, st::IMPACT_EDGES, st::Group::None);
+	CHECK(includes(keys(ofRun.lines), {L"p.Api.run()", L"p.Client.use()"}));
+	CHECK_FALSE(keys(ofRun.lines).count(L"p.Impl.run()"));
+	// A sibling implementation is not affected by a change to this one.
+	CHECK_FALSE(keys(ofRun.lines).count(L"p.Other.run()"));
+	REQUIRE(lineFor(ofRun.lines, L"p.Client.use()"));
+	CHECK(lineFor(ofRun.lines, L"p.Client.use()")->line == 4);
+	CHECK(lineFor(ofRun.lines, L"p.Client.use()")->kind == L"method");
+
+	const auto ofImpl = impactKeys(code, {impl});
+	CHECK(includes(ofImpl, {L"p.Sub", L"p.Holder.field", L"p.Client.use()"}));
+	CHECK_FALSE(ofImpl.count(L"p.Impl"));
+	CHECK_FALSE(ofImpl.count(L"p.Impl.run()"));
+
+	CHECK(includes(impactKeys(code, {apiRun}), {L"p.Impl.run()", L"p.Other.run()"}));
+}
+
+TEST_CASE("st impact honours depth with free override hops")
+{
+	Code code;
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	const Id c = code.member(code.type(L"C"), L"C", L"c");
+	code.link(Edge::EDGE_CALL, a, b, L"A", {2});
+	code.link(Edge::EDGE_CALL, b, c, L"B", {2});
+	const Id i = code.member(code.type(L"I", NODE_INTERFACE), L"I", L"i");
+	const Id d = code.member(code.type(L"D"), L"D", L"d");
+	const Id x = code.member(code.type(L"X"), L"X", L"x");
+	code.link(Edge::EDGE_OVERRIDE, d, i, L"D", {2});
+	code.link(Edge::EDGE_CALL, x, i, L"X", {2});
+	code.link(Edge::EDGE_CALL, a, x, L"A", {3});
+	code.storage.buildCaches();
+
+	CHECK(impactKeys(code, {c}, 1) == std::set<std::wstring>{L"p.B.b()"});
+	CHECK(impactKeys(code, {c}, 0) == std::set<std::wstring>{L"p.A.a()", L"p.B.b()"});
+	CHECK(impactKeys(code, {d}, 1) == std::set<std::wstring>{L"p.I.i()", L"p.X.x()"});
+	CHECK(impactKeys(code, {d}, 2) == std::set<std::wstring>{L"p.I.i()", L"p.X.x()", L"p.A.a()"});
+}
+
+TEST_CASE("st impact terminates on cycles and leaves out its input")
+{
+	Code code;
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	code.link(Edge::EDGE_CALL, a, b, L"A", {2});
+	code.link(Edge::EDGE_CALL, b, a, L"B", {2});
+	code.storage.buildCaches();
+
+	CHECK(impactKeys(code, {a}) == std::set<std::wstring>{L"p.B.b()"});
+}
+
+TEST_CASE("st impact groups by package")
+{
+	Code code;
+	NameHierarchy package(NAME_DELIMITER_JAVA);
+	package.push(L"p");
+	add(code.storage, package, NODE_PACKAGE);
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	const Id c = code.member(code.type(L"C"), L"C", L"c");
+	code.link(Edge::EDGE_CALL, a, c, L"A", {2});
+	code.link(Edge::EDGE_CALL, b, c, L"B", {2});
+	// q has no package node: its package is the prefix before the top-level type.
+	NameHierarchy zName(NAME_DELIMITER_JAVA);
+	zName.push(L"q");
+	zName.push(L"Z");
+	const Id zType = add(code.storage, zName, NODE_CLASS);
+	addLocation(code.storage, zType, code.file(L"Z"), 1);
+	const Id z = add(code.storage, method({L"q", L"Z"}, L"z", L"void", L"()"));
+	addLocation(code.storage, z, code.file(L"Z"), 3);
+	code.link(Edge::EDGE_CALL, z, c, L"Z", {4});
+	code.storage.buildCaches();
+
+	const auto byPackage = st::impact(code.storage, {c}, 0, st::IMPACT_EDGES, st::Group::Package);
+	CHECK(keys(byPackage.lines) == std::set<std::wstring>{L"p", L"q"});
+	for (const auto& line: byPackage.lines)
+	{
+		CHECK(line.kind.rfind(L"package, ", 0) == 0);
+	}
+	REQUIRE(lineFor(byPackage.lines, L"p"));
+	CHECK(lineFor(byPackage.lines, L"p")->kind == L"package, 2 symbols");
+	CHECK(lineFor(byPackage.lines, L"p")->file.wstr() == L"/r/p/A.java");
+	CHECK(byPackage.symbols == 3);
+	CHECK(byPackage.files == 3);
+	CHECK(byPackage.packages == 2);
+
+	const auto byFile = st::impact(code.storage, {c}, 0, st::IMPACT_EDGES, st::Group::File);
+	CHECK(keys(byFile.lines) == std::set<std::wstring>{L"/r/p/A.java", L"/r/p/B.java", L"/r/p/Z.java"});
+	REQUIRE(lineFor(byFile.lines, L"/r/p/Z.java"));
+	CHECK(lineFor(byFile.lines, L"/r/p/Z.java")->kind == L"file, 1 symbols");
+	CHECK(lineFor(byFile.lines, L"/r/p/Z.java")->line == 3);
+}
+
+TEST_CASE("st edges parse names and reject unknown ones")
+{
+	CHECK(st::parseEdges(L"call,override") == (Edge::EDGE_CALL | Edge::EDGE_OVERRIDE));
+	CHECK(st::parseEdges(L" type-usage , annotation,import") ==
+		(Edge::EDGE_TYPE_USAGE | Edge::EDGE_ANNOTATION_USAGE | Edge::EDGE_IMPORT));
+	std::string message;
+	try
+	{
+		st::parseEdges(L"call,calls");
+	}
+	catch (const std::invalid_argument& error)
+	{
+		message = error.what();
+	}
+	CHECK(message.find("calls") != std::string::npos);
+	CHECK_THROWS_AS(st::parseEdges(L"call,,usage"), std::invalid_argument);
+	CHECK_THROWS_AS(st::parseEdges(L""), std::invalid_argument);
+}
+
+TEST_CASE("st path over inheritance only when asked")
+{
+	Code code;
+	const Id go = code.member(code.type(L"Caller"), L"Caller", L"go");
+	const Id base = code.type(L"Base");
+	const Id derived = code.type(L"Derived");
+	code.link(Edge::EDGE_USAGE, go, base, L"Caller", {2});
+	code.link(Edge::EDGE_INHERITANCE, derived, base, L"Derived", {1});
+	code.storage.buildCaches();
+
+	CHECK(st::paths(code.storage, {go}, {derived}, 6, 10, st::PATH_EDGES).empty());
+	const auto chains = st::paths(code.storage, {go}, {derived}, 6, 10, st::PATH_EDGES | Edge::EDGE_INHERITANCE);
+	REQUIRE(chains.size() == 1);
+	REQUIRE(chains[0].size() == 2);
+	CHECK(chains[0][1].type == Edge::EDGE_INHERITANCE);
+	CHECK(chains[0][1].to == derived);
 }

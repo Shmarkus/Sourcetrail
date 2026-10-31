@@ -600,6 +600,16 @@ StorageEdge PersistentStorage::getEdgeById(Id edgeId) const
 	return m_sqliteIndexStorage.getEdgeById(edgeId);
 }
 
+std::vector<StorageEdge> PersistentStorage::getEdgesForSourceIds(const std::vector<Id>& ids) const
+{
+	return m_sqliteIndexStorage.getEdgesBySourceIds(ids);
+}
+
+std::vector<StorageEdge> PersistentStorage::getEdgesForTargetIds(const std::vector<Id>& ids) const
+{
+	return m_sqliteIndexStorage.getEdgesByTargetIds(ids);
+}
+
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getFullTextSearchLocations(
 	const std::wstring& searchTerm, bool caseSensitive) const
 {

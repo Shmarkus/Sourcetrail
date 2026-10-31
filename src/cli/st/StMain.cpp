@@ -28,6 +28,7 @@
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "Query.h"
+#include "StArchitecture.h"
 #include "StFiles.h"
 #include "StFreshness.h"
 #include "StFilter.h"
@@ -122,7 +123,7 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
-const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path"};
+const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact"};
 
 // Resolves every name; ambiguous names list their candidates on stderr.
 int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
@@ -163,7 +164,7 @@ int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, 
 }
 
 int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vector<Id>& to, size_t depth,
-	const st::OutputOptions& options)
+	Edge::TypeMask types, const st::OutputOptions& options)
 {
 	const std::vector<Id> origins = st::expandClasses(storage, from);
 	const std::vector<Id> targets = st::expandClasses(storage, to);
@@ -173,7 +174,7 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 				  << " symbol pairs\n";
 	}
 	const size_t found = 1000;
-	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1));
+	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1), types);
 	std::cerr << "path: " << chains.size() << '\n';
 	const auto location = [&](const FilePath& file, size_t line) {
 		st::ResultLine mapped{L"", L"", file, line, ""};
@@ -206,6 +207,22 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 		std::cout << "(+" << chains.size() - options.limit << " more paths, --limit)\n";
 	}
 	return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
+}
+
+int impact(PersistentStorage& storage, const std::vector<Id>& ids, size_t depth, Edge::TypeMask types, st::Group group,
+	const st::LombokRoots& lombok, const st::OutputOptions& options)
+{
+	st::ImpactResult result = st::impact(storage, ids, depth, types, group);
+	std::cerr << "impact: " << result.symbols << " symbols in " << result.files << " files, " << result.packages
+			  << " packages\n";
+	// A file line is keyed by its displayed path: the original of a delombok file.
+	for (st::ResultLine& line: result.lines)
+	{
+		line.key = group == st::Group::File
+			? st::displayPath(st::toOriginalFile(line.file, lombok).value_or(line.file), options.cwd)
+			: line.key;
+	}
+	return st::printResults(std::move(result.lines), options, std::cout);
 }
 
 int graph(PersistentStorage& storage, const QString& command, const std::vector<Id>& ids, size_t depth,
@@ -546,13 +563,16 @@ int run(QCoreApplication& app)
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter | symbols-in | at | outline");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | impact | filter | symbols-in | at | outline");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted. symbols-in takes files "
 		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...]), outline takes files or symbols", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
 	parser.addOption({"project", "Project file (.srctrlprj); registers it for later use from its source tree", "file"});
 	parser.addOption({"limit", "Maximum result lines (default 50)", "count"});
-	parser.addOption({"depth", "Call levels for callers/callees (default 1) and links for path (default 6); 0 = unlimited", "n"});
+	parser.addOption({"depth", "Call levels for callers/callees (default 1), links for path (default 6) and impact (default 0); 0 = unlimited", "n"});
+	parser.addOption({"edges", "path and impact only: link kinds to follow, comma-separated: call, usage, type-usage, override, "
+		"inheritance, import, annotation (path default call,usage,override; impact default all but import)", "list"});
+	parser.addOption({"group", "impact only: one line per file or package", "file|package"});
 	parser.addOption({"kind", "Only symbols of this kind, e.g. class, method", "kind"});
 	parser.addOption({"package", "filter only: keep symbols whose key starts with this package", "package"});
 	parser.addOption({"annotated", "filter only: keep symbols annotated with this type, or inside a type that is", "annotation"});
@@ -579,16 +599,16 @@ int run(QCoreApplication& app)
 		(args.size() > (command == "path" ? 3 : 2) && !takesMany) || (command == "status" && args.size() != 1))
 	{
 		throw UsageError(
-			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter|symbols-in|at|outline> [symbol|file[:line]] [target] [--project P] "
-			"[--limit N] [--depth N] [--kind K] [--package P] [--annotated A] [--file G] [--not] [--no-source] "
-			"[--no-refresh]; see --help");
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path|impact|filter|symbols-in|at|outline> [symbol|file[:line]] [target] "
+			"[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--package P] [--annotated A] "
+			"[--file G] [--not] [--no-source] [--no-refresh]; see --help");
 	}
 	st::OutputOptions options;
 	options.limit = number(parser, "limit", options.limit);
 	options.showSource = !parser.isSet("no-source");
 	options.cwd = FilePath(QDir::currentPath().toStdWString());
 	const size_t wait = number(parser, "wait", 30000);
-	const size_t depth = number(parser, "depth", command == "path" ? 6 : 1);
+	const size_t depth = number(parser, "depth", command == "path" ? 6 : command == "impact" ? 0 : 1);
 	const NodeKindMask kinds = kindMask(parser);
 	for (const QString& name: {"package", "annotated", "file", "not"})
 	{
@@ -596,6 +616,36 @@ int run(QCoreApplication& app)
 		{
 			throw UsageError("--" + name.toStdString() + " applies to filter only");
 		}
+	}
+	if (command != "impact" && parser.isSet("group"))
+	{
+		throw UsageError("--group applies to impact only");
+	}
+	if (command != "path" && command != "impact" && parser.isSet("edges"))
+	{
+		throw UsageError("--edges applies to path and impact only");
+	}
+	Edge::TypeMask edges = command == "path" ? st::PATH_EDGES : st::IMPACT_EDGES;
+	if (parser.isSet("edges"))
+	{
+		try
+		{
+			edges = st::parseEdges(parser.value("edges").toStdWString());
+		}
+		catch (const std::invalid_argument& error)
+		{
+			throw UsageError(error.what());
+		}
+	}
+	st::Group group = st::Group::None;
+	if (parser.isSet("group"))
+	{
+		const QString value = parser.value("group");
+		if (value != "file" && value != "package")
+		{
+			throw UsageError("Unknown --group '" + value.toStdString() + "': expected file or package");
+		}
+		group = value == "file" ? st::Group::File : st::Group::Package;
 	}
 	st::FilterOptions filterOptions;
 	if (command == "filter")
@@ -776,6 +826,10 @@ int run(QCoreApplication& app)
 	{
 		return code;
 	}
+	if (command == "impact")
+	{
+		return impact(storage, ids, depth, edges, group, lombok, options);
+	}
 	if (command != "path")
 	{
 		return graph(storage, command, ids, depth, options);
@@ -785,7 +839,7 @@ int run(QCoreApplication& app)
 	{
 		return code;
 	}
-	return path(storage, ids, targetIds, depth, options);
+	return path(storage, ids, targetIds, depth, edges, options);
 }
 }
 

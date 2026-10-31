@@ -22,6 +22,7 @@
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "StFreshness.h"
+#include "StArchitecture.h"
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
@@ -381,7 +382,7 @@ TEST_CASE("st path returns shortest simple chains first and drops off-path nodes
 	code.link(Edge::EDGE_CALL, m[L"E"], m[L"D"], L"E", {6});
 	code.link(Edge::EDGE_OVERRIDE, m[L"Z"], m[L"A"], L"Z", {7});
 	code.storage.buildCaches();
-	const auto chains = st::paths(code.storage, {m[L"A"]}, {m[L"D"]}, 6, 10);
+	const auto chains = st::paths(code.storage, {m[L"A"]}, {m[L"D"]}, 6, 10, st::PATH_EDGES);
 	REQUIRE(chains.size() == 2);
 	REQUIRE(chains[0].size() == 2);
 	REQUIRE(chains[1].size() == 3);
@@ -399,7 +400,7 @@ TEST_CASE("st path returns shortest simple chains first and drops off-path nodes
 			REQUIRE(hop.to != m[L"Z"]);
 		}
 	}
-	REQUIRE(st::paths(code.storage, {m[L"A"]}, {m[L"D"]}, 6, 1).size() == 1);
+	REQUIRE(st::paths(code.storage, {m[L"A"]}, {m[L"D"]}, 6, 1, st::PATH_EDGES).size() == 1);
 }
 
 TEST_CASE("st freshness detects edits, new files and deletions")

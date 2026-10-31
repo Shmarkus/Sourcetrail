@@ -111,6 +111,8 @@ public:
 	AccessKind getAccessKindForNodeId(Id nodeId) const;
 
 	StorageEdge getEdgeById(Id edgeId) const override;
+	std::vector<StorageEdge> getEdgesForSourceIds(const std::vector<Id>& ids) const;
+	std::vector<StorageEdge> getEdgesForTargetIds(const std::vector<Id>& ids) const;
 
 	std::shared_ptr<SourceLocationCollection> getFullTextSearchLocations(
 		const std::wstring& searchTerm, bool caseSensitive) const override;

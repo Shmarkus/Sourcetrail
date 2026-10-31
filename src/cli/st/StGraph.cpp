@@ -11,6 +11,7 @@
 #include "PersistentStorage.h"
 #include "SourceLocation.h"
 #include "SourceLocationCollection.h"
+#include "StGraphInternal.h"
 #include "StKey.h"
 #include "TextAccess.h"
 #include "utilityString.h"
@@ -21,41 +22,9 @@ namespace
 {
 const Edge::TypeMask CALL_EDGES = Edge::EDGE_CALL | Edge::EDGE_USAGE | Edge::EDGE_OVERRIDE;
 const NodeKindMask CALLABLE = NODE_METHOD | NODE_FUNCTION;
-const NodeKindMask TYPES = NODE_CLASS | NODE_INTERFACE | NODE_ENUM | NODE_STRUCT | NODE_UNION;
 const size_t UNREACHED = std::numeric_limits<size_t>::max();
 const size_t MAX_PATH_PAIRS = 200;
 const size_t MAX_PATH_EXPANSIONS = 200000;
-
-struct Site
-{
-	FilePath file;
-	size_t line = 0;
-};
-
-std::string sourceText(PersistentStorage& storage, const Site& site)
-{
-	const auto content = storage.getFileContent(site.file, false);
-	if (content && site.line >= 1 && site.line <= content->getLineCount())
-	{
-		return content->getLine(static_cast<unsigned int>(site.line));
-	}
-	return "";
-}
-
-// First start location of a link, by file then line.
-Site linkSite(PersistentStorage& storage, Id edgeId)
-{
-	Site best;
-	storage.getSourceLocationsForTokenIds({edgeId})->forEachSourceLocation([&](SourceLocation* location) {
-		if (location->isStartLocation() &&
-			(best.file.empty() || std::make_pair(location->getFilePath().wstr(), location->getLineNumber()) <
-					std::make_pair(best.file.wstr(), best.line)))
-		{
-			best = {location->getFilePath(), location->getLineNumber()};
-		}
-	});
-	return best;
-}
 
 std::wstring key(PersistentStorage& storage, Id id)
 {
@@ -166,10 +135,10 @@ std::map<Id, Reached> walkCalls(const Graph& graph, Id start, Direction directio
 }
 
 // Simple paths from origin to target inside a trail graph, breadth-first.
-void collectPaths(const Graph& graph, Id origin, Id target, size_t depth, size_t limit,
+void collectPaths(const Graph& graph, Id origin, Id target, size_t depth, size_t limit, Edge::TypeMask types,
 	std::vector<std::vector<const Edge*>>* found)
 {
-	const auto hops = adjacency(graph, CALL_EDGES, Direction::Outgoing);
+	const auto hops = adjacency(graph, types, Direction::Outgoing);
 	struct Partial
 	{
 		Id at;
@@ -223,26 +192,87 @@ std::wstring linkKind(Edge::EdgeType type)
 	return kind;
 }
 
-std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
+std::string sourceText(PersistentStorage& storage, const Site& site)
 {
-	const auto locations = storage.getSourceLocationsForTokenIds({id});
-	// The name's line, not the scope's: a scope starts at the first annotation.
-	const SourceLocation* best = nullptr;
-	locations->forEachSourceLocation([&](SourceLocation* location) {
+	const auto content = storage.getFileContent(site.file, false);
+	if (content && site.line >= 1 && site.line <= content->getLineCount())
+	{
+		return content->getLine(static_cast<unsigned int>(site.line));
+	}
+	return "";
+}
+
+Site linkSite(PersistentStorage& storage, Id edgeId)
+{
+	const auto sites = linkSites(storage, {edgeId});
+	return sites.empty() ? Site() : sites.begin()->second;
+}
+
+std::map<Id, Site> linkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds)
+{
+	std::map<Id, Site> sites;
+	if (edgeIds.empty())
+	{
+		return sites;
+	}
+	const std::set<Id> wanted(edgeIds.begin(), edgeIds.end());
+	storage.getSourceLocationsForTokenIds(edgeIds)->forEachSourceLocation([&](SourceLocation* location) {
 		if (!location->isStartLocation())
 		{
 			return;
 		}
-		if (!best || (!location->isScopeLocation() && best->isScopeLocation()))
+		for (const Id id: location->getTokenIds())
 		{
-			best = location;
+			if (!wanted.count(id))
+			{
+				continue;
+			}
+			const auto it = sites.find(id);
+			if (it == sites.end() || std::make_pair(location->getFilePath().wstr(), location->getLineNumber()) <
+					std::make_pair(it->second.file.wstr(), it->second.line))
+			{
+				sites[id] = {location->getFilePath(), location->getLineNumber()};
+			}
 		}
 	});
-	if (!best)
+	return sites;
+}
+
+std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector<Id>& ids)
+{
+	std::map<Id, Site> sites;
+	if (ids.empty())
+	{
+		return sites;
+	}
+	const std::set<Id> wanted(ids.begin(), ids.end());
+	// The name's line, not the scope's: a scope starts at the first annotation.
+	std::map<Id, bool> isScope;
+	storage.getSourceLocationsForTokenIds(ids)->forEachSourceLocation([&](SourceLocation* location) {
+		if (!location->isStartLocation())
+		{
+			return;
+		}
+		for (const Id id: location->getTokenIds())
+		{
+			if (wanted.count(id) && (!sites.count(id) || (!location->isScopeLocation() && isScope[id])))
+			{
+				sites[id] = {location->getFilePath(), location->getLineNumber()};
+				isScope[id] = location->isScopeLocation();
+			}
+		}
+	});
+	return sites;
+}
+
+std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
+{
+	const auto sites = definitionSites(storage, {id});
+	if (sites.empty())
 	{
 		return {};
 	}
-	const Site site{best->getFilePath(), best->getLineNumber()};
+	const Site& site = sites.begin()->second;
 	return {{key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), site.file, site.line,
 		sourceText(storage, site)}};
 }
@@ -383,7 +413,7 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 }
 
 std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::vector<Id>& from,
-	const std::vector<Id>& to, size_t depth, size_t limit)
+	const std::vector<Id>& to, size_t depth, size_t limit, Edge::TypeMask types)
 {
 	std::vector<std::vector<PathHop>> chains;
 	size_t pairs = 0;
@@ -395,9 +425,9 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 			{
 				continue;
 			}
-			const auto graph = storage.getGraphForTrail(origin, target, ~NodeKindMask(0), CALL_EDGES, false, depth, true);
+			const auto graph = storage.getGraphForTrail(origin, target, ~NodeKindMask(0), types, false, depth, true);
 			std::vector<std::vector<const Edge*>> found;
-			collectPaths(*graph, origin, target, depth, limit, &found);
+			collectPaths(*graph, origin, target, depth, limit, types, &found);
 			for (const auto& edges: found)
 			{
 				std::vector<PathHop> chain;

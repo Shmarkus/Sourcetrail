@@ -43,9 +43,10 @@ struct PathHop
 	size_t line;
 };
 
-// Simple call chains from any of `from` to any of `to`, shortest first, at most `limit`.
+// Simple chains over links of `types` from any of `from` to any of `to`, shortest first, at most `limit`.
+// Vertical links (override, inheritance) are walked from the supertype down.
 std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::vector<Id>& from,
-	const std::vector<Id>& to, size_t depth, size_t limit);
+	const std::vector<Id>& to, size_t depth, size_t limit, Edge::TypeMask types);
 
 // Classes, interfaces and enums become their methods; other symbols stay.
 std::vector<Id> expandClasses(PersistentStorage& storage, const std::vector<Id>& symbols);

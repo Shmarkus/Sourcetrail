@@ -318,6 +318,8 @@ st path com.acme.Controller.create com.acme.Repo.save
 **Phase 2 commands.**
 - `at <file>:<line>`: the symbol defined on that line (fields, declarations), else the innermost enclosing scope. A bare file
   name (`OrderService.java:42`, as in a stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr.
+  An absolute path that does not exist here (a CI or container stack trace) matches the indexed files sharing the longest
+  path suffix with it.
   Text after a second colon is ignored, so `grep -n` output pipes in.
 - `symbols-in <file>...`: symbols defined in the files, in line order (no packages, files or type parameters).
 - `outline <class|file>...`: a class's direct members, or a file's symbols, with `visibility kind` (`public method`) and a

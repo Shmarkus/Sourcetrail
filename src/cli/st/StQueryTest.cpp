@@ -171,7 +171,24 @@ TEST_CASE("st at lists both files when a bare name is ambiguous")
 	REQUIRE(one.size() == 1);
 	REQUIRE(one.front().wstr() == L"/r/a/Util.java");
 	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/b/Util.java", cwd).size() == 1);
-	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/c/Util.java", cwd).empty());
+	// An absolute path from another machine (a CI or container stack trace) falls back to suffix matching.
+	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/c/Util.java", cwd).size() == 2);
+	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/c/Nope.java", cwd).empty());
+}
+
+TEST_CASE("st takes an absolute path from another machine by its longest indexed suffix")
+{
+	Code code;
+	addFile(code.storage, L"/r/src/main/java/a/Util.java");
+	addFile(code.storage, L"/r/src/test/java/a/Util.java");
+	addFile(code.storage, L"/r/src/main/java/b/Util.java");
+	code.storage.buildCaches();
+
+	const FilePath cwd(L"/nowhere");
+	const auto main = st::matchIndexedFiles(st::indexedFiles(code.storage), L"/workspace/src/main/java/a/Util.java", cwd);
+	REQUIRE(main.size() == 1);
+	CHECK(main.front().wstr() == L"/r/src/main/java/a/Util.java");
+	CHECK(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/workspace/a/Util.java", cwd).size() == 2);
 }
 
 namespace

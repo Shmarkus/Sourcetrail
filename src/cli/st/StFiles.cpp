@@ -16,6 +16,7 @@
 #include "StGraph.h"
 #include "StKey.h"
 #include "StLombok.h"
+#include "utilityString.h"
 
 namespace st
 {
@@ -64,6 +65,20 @@ bool endsWithElement(const std::wstring& path, const std::wstring& suffix)
 {
 	return path.size() > suffix.size() && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0 &&
 		path[path.size() - suffix.size() - 1] == L'/';
+}
+
+// The number of trailing path elements two paths share.
+size_t sharedTail(const std::wstring& a, const std::wstring& b)
+{
+	const std::vector<std::wstring> x = utility::splitToVector(a, L"/");
+	const std::vector<std::wstring> y = utility::splitToVector(b, L"/");
+	size_t shared = 0;
+	while (shared < x.size() && shared < y.size() && !x[x.size() - 1 - shared].empty() &&
+		   x[x.size() - 1 - shared] == y[y.size() - 1 - shared])
+	{
+		shared++;
+	}
+	return shared;
 }
 }
 
@@ -304,6 +319,27 @@ std::vector<FilePath> matchIndexedFiles(const IndexedFiles& indexed, const std::
 			if (file.wstr() == resolved.wstr() || file.wstr() == canonical || (generated && file == *generated))
 			{
 				add(file);
+			}
+		}
+		if (!matches.empty() || resolved.exists())
+		{
+			return matches;
+		}
+		// A path from another machine (a CI or container stack trace): the files sharing the longest tail with it.
+		size_t longest = 0;
+		for (size_t i = 0; i < indexed.files.size(); i++)
+		{
+			const auto& original = indexed.originals[i];
+			const size_t shared =
+				std::max(sharedTail(indexed.files[i].wstr(), path), original ? sharedTail(original->wstr(), path) : 0);
+			if (shared > longest)
+			{
+				longest = shared;
+				matches.clear();
+			}
+			if (shared && shared == longest)
+			{
+				add(indexed.files[i]);
 			}
 		}
 		return matches;

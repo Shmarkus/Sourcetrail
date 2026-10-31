@@ -48,8 +48,9 @@ struct IndexedFiles
 IndexedFiles indexedFiles(PersistentStorage& storage, const LombokRoots* roots = nullptr);
 
 // Indexed files a user-typed path denotes. An existing file (or an absolute path) must be indexed itself, or be
-// the original of an indexed delombok file; any other path is a suffix match on a whole path element, against
-// the indexed path and against the original path of delombok files.
+// the original of an indexed delombok file; an absolute path that exists nowhere takes the files sharing the most
+// trailing path elements with it. Any other path is a suffix match on a whole path element. Suffixes match the
+// indexed path and the original path of delombok files.
 std::vector<FilePath> matchIndexedFiles(const IndexedFiles& indexed, const std::wstring& path, const FilePath& cwd,
 	const LombokRoots* roots = nullptr);
 }

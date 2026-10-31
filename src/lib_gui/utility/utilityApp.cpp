@@ -3,6 +3,7 @@
 #include <chrono>
 #include <mutex>
 #include <set>
+#include <thread>
 
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/io_service.hpp>
@@ -54,16 +55,19 @@ namespace
 template <typename Rep, typename Period>
 bool safely_wait_for(boost::process::child& process, const std::chrono::duration<Rep, Period>& rel_time)
 {
-	// This wrapper around boost::process::wait_for handles the following edge case:
-	// Calling wait_for on an already exitted process will wait for the entire timeout.
-	if (process.running())
+	// Polls instead of calling boost::process::wait_for, which sleeps in sigtimedwait for SIGCHLD:
+	// a signal sent before that call (a JVM closes its output a moment before it exits) is lost,
+	// and wait_for then waits for the entire timeout although the process has exited.
+	const auto deadline = std::chrono::steady_clock::now() + rel_time;
+	while (process.running())
 	{
-		return process.wait_for(rel_time);
+		if (std::chrono::steady_clock::now() >= deadline)
+		{
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
-	else
-	{
-		return true;	// The process exitted
-	}
+	return true;
 }
 }	 // namespace
 

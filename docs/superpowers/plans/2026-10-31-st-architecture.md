@@ -306,3 +306,21 @@ New:
 - [ ] **Step 4: Update the README `st` section** with the six commands, `--edges`, the input rules (paths, `file:line`, the Lombok original-path rule) and two pipeline examples from the spec.
 - [ ] **Step 5: Run everything:** `ctest`, the full `Sourcetrail_test` (compared against the baseline), both smoke scripts.
 - [ ] **Step 6: Commit** `test(st): phase 2 smoke test, fixture package and README`.
+
+### Task 9: Use-case benchmark on real projects
+
+Added at Markus's request: check that the commands answer real agent questions, not just pass unit tests.
+
+**Files:**
+- Create: `docs/superpowers/specs/2026-10-31-st-benchmark-results.md`
+
+- [ ] **Step 1: Build the question set first, without `st`.** Use 12–14 real questions on the shop and batch scratch copies, covering the spec's question set plus the Phase 2 commands. Verify each correct answer with grep and by reading the code, and record grep's cost per question: tool calls and output size.
+- [ ] **Step 2: Answer each question with `st`** (pipelines allowed). Record:
+  - the commands;
+  - the number of tool calls;
+  - output lines and characters;
+  - wall time, including any refresh;
+  - whether the answer matches the ground truth. Note anything missing or extra and why.
+- [ ] **Step 3: Write the results file.** It has a per-question table, medians against the spec's targets (≥50% fewer tool calls and tokens, ≥30% faster, correctness no worse than grep), and every wrong answer with its root cause.
+- [ ] **Step 4: Fix or rule on each wrong answer** found by Step 2: a bug fix with a test, or a documented limit.
+- [ ] **Step 5: Commit** `docs(st): use-case benchmark against grep on real projects`.

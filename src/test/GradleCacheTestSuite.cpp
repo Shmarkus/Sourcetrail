@@ -8,11 +8,14 @@
 #	include <chrono>
 #	include <filesystem>
 #	include <fstream>
+#	include <map>
+#	include <sstream>
 
 #	include <QByteArray>
 
 #	include "FilePath.h"
 #	include "FileSystem.h"
+#	include "utilityGradle.h"
 #	include "utilityGradleCache.h"
 
 namespace
@@ -247,6 +250,295 @@ TEST_CASE("gradle build files skip a missing user gradle properties")
 	{
 		REQUIRE(file.str().rfind(f.project.str(), 0) == 0);
 	}
+}
+
+namespace
+{
+// Mimics Lombok's CLI layout: directory inputs keep their relative paths, file inputs land flat.
+struct FakeDelombok
+{
+	std::vector<std::vector<FilePath>> runs;
+	std::vector<std::vector<FilePath>> sourcePaths;
+	bool failOnFiles = false;
+
+	static void copy(const std::filesystem::path& from, const std::filesystem::path& to)
+	{
+		std::filesystem::create_directories(to.parent_path());
+		std::ifstream in(from, std::ios::binary);
+		std::ofstream out(to, std::ios::binary);
+		if (from.extension() == ".java")
+		{
+			out << "// delomboked\n";
+		}
+		out << in.rdbuf();
+	}
+
+	utility::DelombokRunner runner()
+	{
+		return [this](
+				   const std::vector<FilePath>& inputs,
+				   const std::vector<FilePath>& sourcePath,
+				   const FilePath& outputDirectory) {
+			runs.push_back(inputs);
+			sourcePaths.push_back(sourcePath);
+			const std::filesystem::path out(outputDirectory.str());
+			for (const FilePath& input: inputs)
+			{
+				const std::filesystem::path in(input.str());
+				if (std::filesystem::is_directory(in))
+				{
+					for (const auto& entry: std::filesystem::recursive_directory_iterator(in))
+					{
+						if (entry.is_regular_file())
+						{
+							copy(entry.path(), out / entry.path().lexically_relative(in));
+						}
+					}
+				}
+				else if (failOnFiles)
+				{
+					return false;
+				}
+				else
+				{
+					copy(in, out / in.filename());
+				}
+			}
+			return true;
+		};
+	}
+
+	bool lastRunWasWholeTree() const
+	{
+		return !runs.empty() &&
+			std::all_of(runs.back().begin(), runs.back().end(), [](const FilePath& input) {
+				   return std::filesystem::is_directory(input.str());
+			   });
+	}
+};
+
+std::map<std::string, std::string> readTree(const FilePath& directory)
+{
+	std::map<std::string, std::string> files;
+	const std::filesystem::path root(directory.str());
+	for (const auto& entry: std::filesystem::recursive_directory_iterator(root))
+	{
+		if (entry.is_regular_file())
+		{
+			std::ifstream in(entry.path(), std::ios::binary);
+			std::stringstream content;
+			content << in.rdbuf();
+			files[entry.path().lexically_relative(root).generic_string()] = content.str();
+		}
+	}
+	return files;
+}
+
+struct DelombokFixture: public GradleCacheFixture
+{
+	DelombokFixture(): delombok(utility::getDelombokOutputDirectory(output, L"main"))
+	{
+		write("a/src/main/java/pkg/A.java", "class A {}");
+		write("a/src/main/java/pkg/B.java", "class B {}");
+		write("a/src/main/java/pkg/data.txt", "data");
+		write("b/src/main/java/other/C.java", "class C {}");
+		roots = {project.getConcatenated(L"a/src/main/java"), project.getConcatenated(L"b/src/main/java")};
+		fingerprint = utility::gradleBuildFingerprint(project);
+	}
+
+	bool run(FakeDelombok& fake, const FilePath& target) const
+	{
+		return utility::delombokSourceSet(roots, target, fingerprint, fake.runner());
+	}
+
+	bool run(FakeDelombok& fake) const
+	{
+		return run(fake, delombok);
+	}
+
+	void edit(const std::string& relativePath, const std::string& content) const
+	{
+		write(relativePath, content);
+		bumpMtime(relativePath);
+	}
+
+	FilePath delombok;
+	std::vector<FilePath> roots;
+	std::string fingerprint;
+};
+}	 // namespace
+
+TEST_CASE("delombok manifest round trip")
+{
+	DelombokFixture f;
+	f.write("lombok.config", "lombok.addLombokGeneratedAnnotation = true");
+	const utility::DelombokManifest manifest = utility::scanDelombokOriginals(f.roots, f.fingerprint);
+	REQUIRE(manifest.files.size() == 4);
+	REQUIRE(manifest.files.count({0, L"pkg/A.java"}) == 1);
+	REQUIRE(manifest.files.count({1, L"other/C.java"}) == 1);
+	REQUIRE(manifest.lombokConfigs.size() == 1);
+
+	utility::saveDelombokManifest(f.delombok, manifest);
+
+	const auto loaded = utility::loadDelombokManifest(f.delombok);
+	REQUIRE(loaded.has_value());
+	REQUIRE(*loaded == manifest);
+	REQUIRE(loaded->fingerprint == f.fingerprint);
+	REQUIRE(loaded->sourceDirectories == f.roots);
+	REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "main.manifest"));
+}
+
+TEST_CASE("delombok manifest of an older version is unreadable")
+{
+	DelombokFixture f;
+	utility::saveDelombokManifest(f.delombok, utility::scanDelombokOriginals(f.roots, f.fingerprint));
+	const std::string path = f.delombok.str() + ".manifest";
+	std::ifstream in(path, std::ios::binary);
+	std::stringstream content;
+	content << in.rdbuf();
+	in.close();
+	std::string text = content.str();
+	text.replace(0, text.find('\n'), "version\t0");
+	std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+
+	REQUIRE_FALSE(utility::loadDelombokManifest(f.delombok).has_value());
+}
+
+TEST_CASE("incremental delombok matches a full run")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.lastRunWasWholeTree());
+	const auto unchangedMtime =
+		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "pkg/B.java");
+
+	f.edit("a/src/main/java/pkg/A.java", "class A { int x; }");
+	f.write("b/src/main/java/other/D.java", "class D {}");
+	REQUIRE(f.run(fake));
+
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.runs.back().size() == 2);
+	REQUIRE(fake.sourcePaths.back() == f.roots);
+	REQUIRE_FALSE(fake.lastRunWasWholeTree());
+	REQUIRE(
+		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "pkg/B.java") ==
+		unchangedMtime);
+
+	FakeDelombok full;
+	const FilePath fullOutput = utility::getDelombokOutputDirectory(f.output, L"full");
+	REQUIRE(f.run(full, fullOutput));
+	REQUIRE(full.lastRunWasWholeTree());
+	REQUIRE(readTree(f.delombok) == readTree(fullOutput));
+	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { int x; }");
+}
+
+TEST_CASE("delombok skips the run when no original changed")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 1);
+}
+
+TEST_CASE("delombok runs on the whole tree when lombok.config changes")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	f.write("lombok.config", "config.stopBubbling = true");
+	REQUIRE(f.run(fake));
+
+	SECTION("above the roots")
+	{
+		f.edit("lombok.config", "config.stopBubbling = false");
+	}
+	SECTION("inside a root")
+	{
+		f.write("a/src/main/java/pkg/lombok.config", "lombok.accessors.chain = true");
+	}
+	SECTION("added above a root")
+	{
+		f.write("b/lombok.config", "lombok.accessors.chain = true");
+	}
+	f.edit("a/src/main/java/pkg/A.java", "class A { int y; }");
+
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok runs on the whole tree when the build fingerprint changes")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+
+	f.fingerprint += "changed";
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok runs on the whole tree when the manifest is missing")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+
+	utility::removeDelombokManifest(f.delombok);
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok removes the copy of a deleted original")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "other/C.java"));
+
+	std::filesystem::remove(std::filesystem::path(f.project.str()) / "b/src/main/java/other/C.java");
+	REQUIRE(f.run(fake));
+
+	REQUIRE(fake.runs.size() == 1);
+	REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "other"));
+	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "pkg/A.java"));
+
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 1);
+}
+
+TEST_CASE("delombok runs files sharing a name in separate batches")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	f.write("b/src/main/java/other/A.java", "class OtherA {}");
+	REQUIRE(f.run(fake));
+
+	f.edit("a/src/main/java/pkg/A.java", "class A { int z; }");
+	f.edit("b/src/main/java/other/A.java", "class OtherA { int z; }");
+	REQUIRE(f.run(fake));
+
+	REQUIRE(fake.runs.size() == 3);
+	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { int z; }");
+	REQUIRE(readTree(f.delombok)["other/A.java"] == "// delomboked\nclass OtherA { int z; }");
+}
+
+TEST_CASE("delombok falls back to the whole tree when an incremental run fails")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+
+	fake.failOnFiles = true;
+	f.edit("a/src/main/java/pkg/A.java", "class A { long x; }");
+	REQUIRE(f.run(fake));
+
+	REQUIRE(fake.runs.size() == 3);
+	REQUIRE(fake.lastRunWasWholeTree());
+	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { long x; }");
 }
 
 #endif

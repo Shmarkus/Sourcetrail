@@ -57,7 +57,41 @@ bool replaceFile(const FilePath& sourceFile, const FilePath& targetFile)
 
 	return true;
 }
+
+void syncFile(const FilePath& sourceFile, const FilePath& targetFile, DirectorySyncResult& result)
+{
+	if (targetFile.recheckExists() && hasEqualContent(sourceFile, targetFile))
+	{
+		result.unchanged++;
+	}
+	else if (replaceFile(sourceFile, targetFile))
+	{
+		result.written++;
+	}
+	else
+	{
+		result.failed++;
+	}
+}
 }	 // namespace
+
+DirectorySyncResult syncFiles(const std::vector<std::pair<FilePath, FilePath>>& sourceAndTargetFiles)
+{
+	DirectorySyncResult result;
+	for (const auto& [sourceFile, targetFile]: sourceAndTargetFiles)
+	{
+		if (sourceFile.recheckExists())
+		{
+			syncFile(sourceFile, targetFile, result);
+		}
+		else
+		{
+			LOG_ERROR_STREAM(<< "Missing \"" << sourceFile.str() << "\"");
+			result.failed++;
+		}
+	}
+	return result;
+}
 
 DirectorySyncResult syncDirectoryContents(
 	const FilePath& sourceDirectory, const FilePath& targetDirectory)
@@ -67,6 +101,8 @@ DirectorySyncResult syncDirectoryContents(
 
 	std::error_code ec;
 	std::filesystem::create_directories(targetDirectory.str(), ec);
+	// relative paths are taken between canonical paths, which need an up to date existence check
+	targetDirectory.recheckExists();
 
 	try
 	{
@@ -75,19 +111,7 @@ DirectorySyncResult syncDirectoryContents(
 			const FilePath relativePath = sourceFile.getRelativeTo(sourceDirectory);
 			sourceRelativePaths.insert(relativePath.wstr());
 
-			const FilePath targetFile = targetDirectory.getConcatenated(relativePath);
-			if (targetFile.recheckExists() && hasEqualContent(sourceFile, targetFile))
-			{
-				result.unchanged++;
-			}
-			else if (replaceFile(sourceFile, targetFile))
-			{
-				result.written++;
-			}
-			else
-			{
-				result.failed++;
-			}
+			syncFile(sourceFile, targetDirectory.getConcatenated(relativePath), result);
 		}
 
 		for (const FilePath& targetFile: FileSystem::getFilePathsFromDirectory(targetDirectory))

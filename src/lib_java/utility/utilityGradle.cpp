@@ -1,5 +1,6 @@
 #include "utilityGradle.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <set>
@@ -131,61 +132,97 @@ bool clearDirectoryContents(const FilePath& directoryPath)
 	return true;
 }
 
-bool runDelombok(
-	const FilePath& projectDirectoryPath,
-	const FilePath& lombokJarPath,
-	const std::vector<FilePath>& sourceDirectories,
-	const FilePath& outputDirectoryPath)
+bool prepareTemporaryDirectory(const FilePath& temporaryOutputPath)
 {
-	if (sourceDirectories.empty())
-	{
-		return true;
-	}
-
-	const FilePath temporaryOutputPath(outputDirectoryPath.wstr() + L".tmp");
 	FileSystem::createDirectory(temporaryOutputPath);
 	if (!clearDirectoryContents(temporaryOutputPath))
 	{
 		LOG_ERROR(L"Failed to clear delombok temporary directory: " + temporaryOutputPath.wstr());
 		return false;
 	}
+	return true;
+}
 
-	const FilePath javaPath = ApplicationSettings::getInstance()->getJavaPath();
-	if (javaPath.empty())
+void removeTemporaryDirectory(const FilePath& temporaryOutputPath)
+{
+	clearDirectoryContents(temporaryOutputPath);
+	FileSystem::remove(temporaryOutputPath);
+}
+
+DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const FilePath& lombokJarPath)
+{
+	return [projectDirectoryPath, lombokJarPath](
+			   const std::vector<FilePath>& inputs,
+			   const std::vector<FilePath>& sourcePath,
+			   const FilePath& outputDirectory) {
+		const FilePath javaPath = ApplicationSettings::getInstance()->getJavaPath();
+		if (javaPath.empty())
+		{
+			LOG_ERROR("Cannot run delombok because configured Java path is empty.");
+			return false;
+		}
+
+		FilePath javaExecutablePath = javaPath.getParentDirectory().getParentDirectory().getParentDirectory();
+		javaExecutablePath = javaExecutablePath.getConcatenated(L"bin/java");
+		if (!javaExecutablePath.exists())
+		{
+			LOG_ERROR(
+				L"Cannot run delombok because Java executable is missing at \"" + javaExecutablePath.wstr() +
+				L"\".");
+			return false;
+		}
+
+		std::vector<std::wstring> args;
+		args.push_back(L"-jar");
+		args.push_back(lombokJarPath.wstr());
+		args.push_back(L"delombok");
+		for (const FilePath& input: inputs)
+		{
+			args.push_back(input.wstr());
+		}
+		if (!sourcePath.empty())
+		{
+#ifdef _WIN32
+			const std::wstring separator = L";";
+#else
+			const std::wstring separator = L":";
+#endif
+			std::wstring joined;
+			for (const FilePath& directory: sourcePath)
+			{
+				joined += (joined.empty() ? L"" : separator) + directory.wstr();
+			}
+			args.push_back(L"-s");
+			args.push_back(joined);
+		}
+		args.push_back(L"-f");
+		args.push_back(L"generateDelombokComment:skip");
+		args.push_back(L"-d");
+		args.push_back(outputDirectory.wstr());
+
+		const utility::ProcessOutput output =
+			utility::executeProcess(javaExecutablePath.wstr(), args, projectDirectoryPath, true, 60000, true);
+
+		if (output.exitCode != 0)
+		{
+			LOG_ERROR_STREAM(
+				<< "Delombok failed with exit code " << output.exitCode << ": "
+				<< utility::encodeToUtf8(output.output));
+			return false;
+		}
+		return true;
+	};
+}
+
+bool delombokWholeTree(
+	const std::vector<FilePath>& sourceDirectories,
+	const FilePath& outputDirectoryPath,
+	const DelombokRunner& runDelombok)
+{
+	const FilePath temporaryOutputPath(outputDirectoryPath.wstr() + L".tmp");
+	if (!prepareTemporaryDirectory(temporaryOutputPath) ||
+		!runDelombok(sourceDirectories, {}, temporaryOutputPath))
 	{
-		LOG_ERROR("Cannot run delombok because configured Java path is empty.");
-		return false;
-	}
-
-	FilePath javaExecutablePath = javaPath.getParentDirectory().getParentDirectory().getParentDirectory();
-	javaExecutablePath = javaExecutablePath.getConcatenated(L"bin/java");
-	if (!javaExecutablePath.exists())
-	{
-		LOG_ERROR(L"Cannot run delombok because Java executable is missing at \"" + javaExecutablePath.wstr() + L"\".");
-		return false;
-	}
-
-	std::vector<std::wstring> args;
-	args.push_back(L"-jar");
-	args.push_back(lombokJarPath.wstr());
-	args.push_back(L"delombok");
-	for (const FilePath& sourceDirectory: sourceDirectories)
-	{
-		args.push_back(sourceDirectory.wstr());
-	}
-	args.push_back(L"-f");
-	args.push_back(L"generateDelombokComment:skip");
-	args.push_back(L"-d");
-	args.push_back(temporaryOutputPath.wstr());
-
-	const utility::ProcessOutput output =
-		utility::executeProcess(javaExecutablePath.wstr(), args, projectDirectoryPath, true, 60000, true);
-
-	if (output.exitCode != 0)
-	{
-		LOG_ERROR_STREAM(
-			<< "Delombok failed with exit code " << output.exitCode << ": "
-			<< utility::encodeToUtf8(output.output));
 		return false;
 	}
 
@@ -195,8 +232,7 @@ bool runDelombok(
 		<< "Delombok output synced: " << syncResult.written << " written, " << syncResult.unchanged
 		<< " unchanged, " << syncResult.removed << " removed");
 
-	clearDirectoryContents(temporaryOutputPath);
-	FileSystem::remove(temporaryOutputPath);
+	removeTemporaryDirectory(temporaryOutputPath);
 
 	if (syncResult.failed > 0)
 	{
@@ -205,6 +241,137 @@ bool runDelombok(
 	}
 
 	return outputDirectoryPath.recheckExists();
+}
+
+using DelombokOriginal = std::pair<size_t, std::wstring>;	 // (root index, relative path)
+
+struct DelombokChanges
+{
+	std::vector<DelombokOriginal> changed;	  // changed or added
+	std::vector<std::wstring> removed;	  // relative paths
+};
+
+// Returns nullopt when only a whole-tree run is safe.
+std::optional<DelombokChanges> getDelombokChanges(
+	const DelombokManifest& previous, const DelombokManifest& current)
+{
+	if (previous.fingerprint != current.fingerprint ||
+		previous.sourceDirectories != current.sourceDirectories ||
+		previous.lombokConfigs != current.lombokConfigs)
+	{
+		return std::nullopt;
+	}
+
+	DelombokChanges changes;
+	std::vector<DelombokOriginal> touched;
+	for (const auto& [original, stamp]: current.files)
+	{
+		const auto it = previous.files.find(original);
+		if (it == previous.files.end() || !(it->second == stamp))
+		{
+			changes.changed.push_back(original);
+			touched.push_back(original);
+		}
+	}
+	for (const auto& [original, stamp]: previous.files)
+	{
+		if (current.files.count(original) == 0)
+		{
+			changes.removed.push_back(original.second);
+			touched.push_back(original);
+		}
+	}
+
+	// roots share one output tree, so a relative path found in two roots maps to one output file
+	std::map<std::wstring, std::set<size_t>> rootsByRelativePath;
+	for (const DelombokManifest* manifest: {&previous, &current})
+	{
+		for (const auto& entry: manifest->files)
+		{
+			rootsByRelativePath[entry.first.second].insert(entry.first.first);
+		}
+	}
+
+	for (const DelombokOriginal& original: touched)
+	{
+		// a lombok.config changes other files' output, and only a whole-tree run copies non-Java files
+		if (!utility::isPostfix<std::wstring>(L".java", original.second) ||
+			rootsByRelativePath[original.second].size() > 1)
+		{
+			return std::nullopt;
+		}
+	}
+	return changes;
+}
+
+bool delombokChangedFiles(
+	const std::vector<FilePath>& sourceDirectories,
+	const FilePath& outputDirectoryPath,
+	const DelombokChanges& changes,
+	const DelombokRunner& runDelombok)
+{
+	// Lombok writes a file input as <target>/<file name>, so files sharing a name run separately
+	std::vector<std::map<std::wstring, DelombokOriginal>> batches;
+	for (const DelombokOriginal& original: changes.changed)
+	{
+		const std::wstring fileName = FilePath(original.second).fileName();
+		auto batch = std::find_if(batches.begin(), batches.end(), [&fileName](const auto& names) {
+			return names.count(fileName) == 0;
+		});
+		if (batch == batches.end())
+		{
+			batch = batches.insert(batches.end(), std::map<std::wstring, DelombokOriginal>());
+		}
+		(*batch)[fileName] = original;
+	}
+
+	const FilePath temporaryOutputPath(outputDirectoryPath.wstr() + L".tmp");
+	for (const auto& batch: batches)
+	{
+		std::vector<FilePath> inputs;
+		std::vector<std::pair<FilePath, FilePath>> outputs;
+		for (const auto& [fileName, original]: batch)
+		{
+			inputs.push_back(sourceDirectories[original.first].getConcatenated(original.second));
+			outputs.emplace_back(
+				temporaryOutputPath.getConcatenated(fileName),
+				outputDirectoryPath.getConcatenated(original.second));
+		}
+
+		if (!prepareTemporaryDirectory(temporaryOutputPath) ||
+			!runDelombok(inputs, sourceDirectories, temporaryOutputPath))
+		{
+			return false;
+		}
+
+		const DirectorySyncResult syncResult = syncFiles(outputs);
+		LOG_INFO_STREAM(
+			<< "Delombok output of changed files synced: " << syncResult.written << " written, "
+			<< syncResult.unchanged << " unchanged");
+		if (syncResult.failed > 0)
+		{
+			return false;
+		}
+	}
+	removeTemporaryDirectory(temporaryOutputPath);
+
+	for (const std::wstring& relativePath: changes.removed)
+	{
+		const FilePath outputFile = outputDirectoryPath.getConcatenated(relativePath);
+		if (outputFile.recheckExists() && !FileSystem::remove(outputFile))
+		{
+			LOG_ERROR(L"Failed to remove delombok output: " + outputFile.wstr());
+			return false;
+		}
+
+		// non-recursive remove fails on non-empty directories, which is what we want here
+		for (FilePath directory = outputFile.getParentDirectory();
+			 directory.wstr().size() > outputDirectoryPath.wstr().size() && FileSystem::remove(directory);
+			 directory = directory.getParentDirectory())
+		{
+		}
+	}
+	return true;
 }
 
 std::optional<std::map<std::wstring, std::vector<FilePath>>> getSourceDirectoriesBySourceSet(
@@ -320,6 +487,54 @@ FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const s
 	return outputDirectoryPath.getConcatenated(L"delombok").getConcatenated(sourceSetName);
 }
 
+bool delombokSourceSet(
+	const std::vector<FilePath>& sourceDirectories,
+	const FilePath& outputDirectory,
+	const std::string& fingerprint,
+	const DelombokRunner& runDelombok)
+{
+	if (sourceDirectories.empty())
+	{
+		return true;
+	}
+
+	const DelombokManifest current = scanDelombokOriginals(sourceDirectories, fingerprint);
+	const std::optional<DelombokManifest> previous = loadDelombokManifest(outputDirectory);
+	const bool outputExists = outputDirectory.recheckExists();
+	if (previous && outputExists && *previous == current)
+	{
+		LOG_INFO(L"Delombok output is up to date: " + outputDirectory.wstr());
+		return true;
+	}
+
+	// a run that fails half way must not leave a manifest claiming its outputs are current
+	removeDelombokManifest(outputDirectory);
+
+	const std::optional<DelombokChanges> changes = previous && outputExists
+		? getDelombokChanges(*previous, current)
+		: std::nullopt;
+	if (changes)
+	{
+		LOG_INFO_STREAM(
+			<< "Delomboking " << changes->changed.size() << " changed files, removing "
+			<< changes->removed.size() << " outputs");
+	}
+	if (!changes || !delombokChangedFiles(sourceDirectories, outputDirectory, *changes, runDelombok))
+	{
+		if (changes)
+		{
+			LOG_WARNING("Delombok of changed files failed, delomboking the whole tree.");
+		}
+		if (!delombokWholeTree(sourceDirectories, outputDirectory, runDelombok))
+		{
+			return false;
+		}
+	}
+
+	saveDelombokManifest(outputDirectory, current);
+	return true;
+}
+
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath, const FilePath& outputDirectoryPath, bool addTestDependencies)
 {
@@ -376,11 +591,11 @@ bool gradlePrepareLombokSources(
 	{
 		const auto jarIt = info.lombokJars.find(sourceSet);
 		if (jarIt != info.lombokJars.end() &&
-			!runDelombok(
-				projectDirectoryPath,
-				jarIt->second,
+			!delombokSourceSet(
 				directories,
-				getDelombokOutputDirectory(outputDirectoryPath, sourceSet)))
+				getDelombokOutputDirectory(outputDirectoryPath, sourceSet),
+				info.fingerprint,
+				createDelombokRunner(projectDirectoryPath, jarIt->second)))
 		{
 			return false;
 		}

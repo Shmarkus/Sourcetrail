@@ -140,3 +140,44 @@ TEST_CASE("directory sync reports files it cannot write")
 	REQUIRE(result.written == 0);
 	REQUIRE(f.read(f.target, "a/A.java") == "class A {}");
 }
+
+TEST_CASE("file sync writes only listed files whose bytes changed")
+{
+	SyncFixture f;
+	f.write(f.source, "A.java", "class A { int x; }");
+	f.write(f.source, "B.java", "class B {}");
+	f.write(f.target, "pkg/A.java", "class A {}");
+	f.write(f.target, "pkg/B.java", "class B {}");
+	f.write(f.target, "pkg/C.java", "class C {}");
+
+	const std::filesystem::path unchangedFile = std::filesystem::path(f.target.str()) / "pkg/B.java";
+	const auto past = std::filesystem::last_write_time(unchangedFile) - std::chrono::seconds(10);
+	std::filesystem::last_write_time(unchangedFile, past);
+
+	const utility::DirectorySyncResult result = utility::syncFiles(
+		{{f.source.getConcatenated(L"A.java"), f.target.getConcatenated(L"pkg/A.java")},
+		 {f.source.getConcatenated(L"B.java"), f.target.getConcatenated(L"pkg/B.java")},
+		 {f.source.getConcatenated(L"D.java"), f.target.getConcatenated(L"new/D.java")}});
+
+	REQUIRE(f.read(f.target, "pkg/A.java") == "class A { int x; }");
+	REQUIRE(std::filesystem::last_write_time(unchangedFile) == past);
+	REQUIRE(f.exists(f.target, "pkg/C.java"));
+	REQUIRE_FALSE(f.exists(f.target, "new/D.java"));
+	REQUIRE(result.written == 1);
+	REQUIRE(result.unchanged == 1);
+	REQUIRE(result.failed == 1);
+}
+
+TEST_CASE("directory sync fills a target that was checked before it existed")
+{
+	SyncFixture f;
+	f.write(f.source, "a/A.java", "class A {}");
+	const FilePath target = s_root.getConcatenated(L"fresh");
+	REQUIRE_FALSE(target.recheckExists());
+
+	const utility::DirectorySyncResult result = utility::syncDirectoryContents(f.source, target);
+
+	REQUIRE(f.read(target, "a/A.java") == "class A {}");
+	REQUIRE(result.written == 1);
+	REQUIRE(result.removed == 0);
+}

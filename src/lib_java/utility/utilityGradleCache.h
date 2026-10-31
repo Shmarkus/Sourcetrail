@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "FilePath.h"
@@ -35,6 +36,36 @@ void markGradleDependenciesExported(
 
 bool gradleDependenciesUpToDate(
 	const FilePath& outputDirectory, const FilePath& projectDirectory, bool includesTests);
+
+struct FileStamp
+{
+	uintmax_t size = 0;
+	long long mtime = 0;	// nanoseconds
+
+	bool operator==(const FileStamp& other) const;
+};
+
+// What a delombok output directory was last generated from.
+struct DelombokManifest
+{
+	std::string fingerprint;	// build-file fingerprint
+	std::vector<FilePath> sourceDirectories;
+	std::map<std::wstring, FileStamp> lombokConfigs;	// lombok.config files above the roots
+	std::map<std::pair<size_t, std::wstring>, FileStamp> files;	 // (root index, relative path) -> stamp
+
+	bool operator==(const DelombokManifest& other) const;
+};
+
+// Stamps every file in the roots and every lombok.config in the directories above them.
+DelombokManifest scanDelombokOriginals(
+	const std::vector<FilePath>& sourceDirectories, const std::string& fingerprint);
+
+// The manifest lives beside the delombok output directory, so the indexer never sees it.
+std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOutputDirectory);
+
+void saveDelombokManifest(const FilePath& delombokOutputDirectory, const DelombokManifest& manifest);
+
+void removeDelombokManifest(const FilePath& delombokOutputDirectory);
 }	 // namespace utility
 
 #endif	  // UTILITY_GRADLE_CACHE_H

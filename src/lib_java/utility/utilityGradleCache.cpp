@@ -1,6 +1,7 @@
 #include "utilityGradleCache.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,7 @@ namespace
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
 const char* const CACHE_VERSION = "3";
+const char* const MANIFEST_VERSION = "1";
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",
@@ -105,6 +107,42 @@ bool isBuildFile(const std::filesystem::path& path)
 std::string joinPath(const FilePath& path)
 {
 	return path.str();
+}
+
+std::filesystem::path getManifestPath(const FilePath& delombokOutputDirectory)
+{
+	return std::filesystem::path(delombokOutputDirectory.str() + ".manifest");
+}
+
+std::optional<FileStamp> stampFile(const std::filesystem::path& path)
+{
+	std::error_code sizeEc;
+	std::error_code timeEc;
+	const auto size = std::filesystem::file_size(path, sizeEc);
+	const auto mtime = std::filesystem::last_write_time(path, timeEc);
+	if (sizeEc || timeEc)
+	{
+		return std::nullopt;
+	}
+	return FileStamp {
+		size, std::chrono::duration_cast<std::chrono::nanoseconds>(mtime.time_since_epoch()).count()};
+}
+
+std::string formatStamp(const FileStamp& stamp)
+{
+	return std::to_string(stamp.size) + "\t" + std::to_string(stamp.mtime);
+}
+
+std::optional<FileStamp> parseStamp(const std::string& size, const std::string& mtime)
+{
+	try
+	{
+		return FileStamp {std::stoull(size), std::stoll(mtime)};
+	}
+	catch (const std::exception&)
+	{
+		return std::nullopt;
+	}
 }
 }	 // namespace
 
@@ -270,5 +308,169 @@ bool gradleDependenciesUpToDate(
 	std::ostringstream content;
 	content << stream.rdbuf();
 	return content.str() == exportedMarker(gradleBuildFingerprint(projectDirectory), includesTests);
+}
+
+bool FileStamp::operator==(const FileStamp& other) const
+{
+	return size == other.size && mtime == other.mtime;
+}
+
+bool DelombokManifest::operator==(const DelombokManifest& other) const
+{
+	return fingerprint == other.fingerprint && sourceDirectories == other.sourceDirectories &&
+		lombokConfigs == other.lombokConfigs && files == other.files;
+}
+
+DelombokManifest scanDelombokOriginals(
+	const std::vector<FilePath>& sourceDirectories, const std::string& fingerprint)
+{
+	DelombokManifest manifest;
+	manifest.fingerprint = fingerprint;
+	manifest.sourceDirectories = sourceDirectories;
+
+	for (size_t index = 0; index < sourceDirectories.size(); index++)
+	{
+		const std::filesystem::path root(sourceDirectories[index].str());
+
+		// Lombok looks for lombok.config in every directory up to the file system root
+		for (std::filesystem::path directory = root.parent_path(); !directory.empty();
+			 directory = directory.parent_path())
+		{
+			const std::filesystem::path config = directory / "lombok.config";
+			if (const std::optional<FileStamp> stamp = stampFile(config))
+			{
+				manifest.lombokConfigs[config.wstring()] = *stamp;
+			}
+			if (directory == directory.parent_path())
+			{
+				break;
+			}
+		}
+
+		std::error_code ec;
+		std::filesystem::recursive_directory_iterator it(
+			root, std::filesystem::directory_options::follow_directory_symlink, ec);
+		const std::filesystem::recursive_directory_iterator end;
+		for (; !ec && it != end; it.increment(ec))
+		{
+			std::error_code entryEc;
+			if (it->is_regular_file(entryEc))
+			{
+				if (const std::optional<FileStamp> stamp = stampFile(it->path()))
+				{
+					manifest.files[{index, it->path().lexically_relative(root).generic_wstring()}] = *stamp;
+				}
+			}
+		}
+	}
+	return manifest;
+}
+
+std::optional<DelombokManifest> loadDelombokManifest(const FilePath& delombokOutputDirectory)
+{
+	std::ifstream stream(getManifestPath(delombokOutputDirectory), std::ios::binary);
+	if (!stream)
+	{
+		return std::nullopt;
+	}
+
+	DelombokManifest manifest;
+	bool versionOk = false;
+	std::string line;
+	while (std::getline(stream, line))
+	{
+		const std::vector<std::string> parts = splitToVector(line, "\t");
+		if (parts.empty())
+		{
+			continue;
+		}
+
+		if (parts[0] == "version" && parts.size() == 2)
+		{
+			versionOk = parts[1] == MANIFEST_VERSION;
+		}
+		else if (parts[0] == "fp" && parts.size() >= 2)
+		{
+			manifest.fingerprint += line.substr(3) + "\n";
+		}
+		else if (parts[0] == "root" && parts.size() == 2)
+		{
+			manifest.sourceDirectories.push_back(FilePath(decodeFromUtf8(parts[1])));
+		}
+		else if (parts[0] == "config" && parts.size() == 4)
+		{
+			const std::optional<FileStamp> stamp = parseStamp(parts[2], parts[3]);
+			if (!stamp)
+			{
+				return std::nullopt;
+			}
+			manifest.lombokConfigs[decodeFromUtf8(parts[1])] = *stamp;
+		}
+		else if (parts[0] == "file" && parts.size() == 5)
+		{
+			const std::optional<FileStamp> stamp = parseStamp(parts[3], parts[4]);
+			size_t index = 0;
+			try
+			{
+				index = std::stoul(parts[1]);
+			}
+			catch (const std::exception&)
+			{
+				return std::nullopt;
+			}
+			if (!stamp || index >= manifest.sourceDirectories.size())
+			{
+				return std::nullopt;
+			}
+			manifest.files[{index, decodeFromUtf8(parts[2])}] = *stamp;
+		}
+		else
+		{
+			return std::nullopt;
+		}
+	}
+
+	if (!versionOk)
+	{
+		return std::nullopt;
+	}
+	return manifest;
+}
+
+void saveDelombokManifest(const FilePath& delombokOutputDirectory, const DelombokManifest& manifest)
+{
+	const std::filesystem::path path = getManifestPath(delombokOutputDirectory);
+	std::error_code ec;
+	std::filesystem::create_directories(path.parent_path(), ec);
+
+	std::ostringstream out;
+	out << "version\t" << MANIFEST_VERSION << "\n";
+	for (const std::string& fingerprintLine: splitToVector(manifest.fingerprint, "\n"))
+	{
+		if (!fingerprintLine.empty())
+		{
+			out << "fp\t" << fingerprintLine << "\n";
+		}
+	}
+	for (const FilePath& root: manifest.sourceDirectories)
+	{
+		out << "root\t" << joinPath(root) << "\n";
+	}
+	for (const auto& [config, stamp]: manifest.lombokConfigs)
+	{
+		out << "config\t" << encodeToUtf8(config) << "\t" << formatStamp(stamp) << "\n";
+	}
+	for (const auto& [file, stamp]: manifest.files)
+	{
+		out << "file\t" << file.first << "\t" << encodeToUtf8(file.second) << "\t" << formatStamp(stamp) << "\n";
+	}
+
+	writeFileAtomically(path, out.str(), delombokOutputDirectory);
+}
+
+void removeDelombokManifest(const FilePath& delombokOutputDirectory)
+{
+	std::error_code ec;
+	std::filesystem::remove(getManifestPath(delombokOutputDirectory), ec);
 }
 }	 // namespace utility

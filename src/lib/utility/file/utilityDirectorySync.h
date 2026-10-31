@@ -2,6 +2,8 @@
 #define UTILITY_DIRECTORY_SYNC_H
 
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 class FilePath;
 
@@ -20,6 +22,10 @@ struct DirectorySyncResult
 // together with directories left empty. Never throws; failures are logged and counted.
 DirectorySyncResult syncDirectoryContents(
 	const FilePath& sourceDirectory, const FilePath& targetDirectory);
+
+// Copies each source file over its target file the same way, touching no other file. A missing
+// source file counts as failed.
+DirectorySyncResult syncFiles(const std::vector<std::pair<FilePath, FilePath>>& sourceAndTargetFiles);
 }	 // namespace utility
 
 #endif	  // UTILITY_DIRECTORY_SYNC_H

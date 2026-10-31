@@ -142,6 +142,27 @@ for command in outline symbols-in at; do
     contains '--kind' err
 done
 
+# Delombok runs on changed originals only: an edited file nothing depends on is the only file re-indexed, an
+# edited Lombok file's copy is updated, and a deleted file's delombok copy and symbols are gone.
+manifest="$(find "$work/project/sourcetrail_dependencies" -path '*/gradle/delombok/main.manifest')"
+[ -n "$manifest" ] || assert "no delombok manifest beside delombok/main"
+delombok_main="${manifest%.manifest}"
+welcome=src/main/java/example/Welcome.java
+sed -i 's/return greeter.greeting(p);/return "Hi " + greeter.greeting(p);/' "$welcome"
+"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
+indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
+[ "$indexed" = "$delombok_main/example/Welcome.java" ] || assert "expected only Welcome.java re-indexed, got: $indexed"
+sed -i 's/^}$/    public int nameLength() { return name.length(); }\n}/' "$person"
+"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a Lombok file edit failed"
+grep -qF 'nameLength' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java not updated"
+grep -qF 'getName()' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java lacks the Lombok getter"
+run 0 find nameLength
+contains 'example.Person.nameLength()' out
+rm "$welcome"
+"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a deletion failed"
+[ ! -e "$delombok_main/example/Welcome.java" ] || assert "delombok copy of a deleted original kept"
+run 3 callers 'example.Welcome.welcome(example.Person)'
+
 # Exit codes.
 run 3 callers nope
 run 2 callers greeting

@@ -36,6 +36,16 @@ LombokRoots lombokRoots(const ProjectSettings& settings);
 ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 	const std::function<std::vector<std::string>(const FilePath&)>& readLines);
 
+// The original file behind a delombok file; nullopt outside the delombok directories or without exactly one original.
+std::optional<FilePath> toOriginalFile(const FilePath& generated, const LombokRoots& roots);
+
+// The delombok copy of an original file; nullopt outside the original roots or when several delombok roots hold one.
+std::optional<FilePath> toGeneratedFile(const FilePath& original, const LombokRoots& roots);
+
+// 1-based original line -> 1-based line of the delombok file; nullopt when the line has no counterpart there.
+std::optional<size_t> toGeneratedLine(const FilePath& original, const FilePath& generated, size_t line,
+	const std::function<std::vector<std::string>(const FilePath&)>& readLines);
+
 std::vector<std::string> readLinesFromDisk(const FilePath& file);
 }
 

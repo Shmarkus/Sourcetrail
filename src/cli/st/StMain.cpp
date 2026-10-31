@@ -28,6 +28,7 @@
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "Query.h"
+#include "StFiles.h"
 #include "StFreshness.h"
 #include "StFilter.h"
 #include "StGraph.h"
@@ -286,6 +287,107 @@ int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, 
 	return passing.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }
 
+bool isGiven(const FilePath& indexed, const std::wstring& path, const FilePath& cwd)
+{
+	const FilePath given(path);
+	const FilePath resolved = given.isAbsolute() ? given : cwd.getConcatenated(path);
+	return resolved.wstr() == indexed.wstr() || resolved.getCanonical().wstr() == indexed.wstr();
+}
+
+// `<path>:<line>`, anything after a second colon ignored.
+void splitLocation(const std::wstring& input, std::wstring* path, size_t* line)
+{
+	const size_t colon = input.find(L':');
+	const size_t end = colon == std::wstring::npos ? colon : input.find(L':', colon + 1);
+	const std::wstring digits = colon == std::wstring::npos ? L"" : input.substr(colon + 1, end - colon - 1);
+	if (colon == 0 || digits.empty() || digits.find_first_not_of(L"0123456789") != std::wstring::npos ||
+		digits.size() > 9 || std::stoul(digits) == 0)
+	{
+		throw UsageError("Expected <file>:<line>, got '" + utility::encodeToUtf8(input) + "'");
+	}
+	*path = input.substr(0, colon);
+	*line = std::stoul(digits);
+}
+
+// symbols-in: the symbols defined in each file. at: the symbol at each <file>:<line>.
+int inFiles(PersistentStorage& storage, const QString& command, const std::vector<std::wstring>& inputs,
+	const st::LombokRoots& lombok, const st::OutputOptions& options)
+{
+	std::set<Id> ids;
+	size_t skipped = 0;
+	bool ambiguous = false;
+	for (const std::wstring& input: inputs)
+	{
+		std::wstring path = input;
+		size_t line = 0;
+		if (command == "at")
+		{
+			splitLocation(input, &path, &line);
+		}
+		const std::vector<FilePath> matches = st::matchIndexedFiles(storage, path, options.cwd, &lombok);
+		if (matches.empty())
+		{
+			std::cerr << "st: not indexed: " << utility::encodeToUtf8(path) << '\n';
+			skipped++;
+			continue;
+		}
+		if (matches.size() > 1)
+		{
+			std::cerr << "st: ambiguous: " << utility::encodeToUtf8(path) << '\n';
+			for (const FilePath& file: matches)
+			{
+				std::cerr << utility::encodeToUtf8(st::displayPath(file, options.cwd)) << '\n';
+			}
+			ambiguous = true;
+			continue;
+		}
+		const FilePath& file = matches.front();
+		if (command == "symbols-in")
+		{
+			for (const Id id: st::definedInFile(storage, file))
+			{
+				ids.insert(id);
+			}
+			continue;
+		}
+		// A user reading the original source gives original line numbers.
+		const std::optional<FilePath> original = st::toOriginalFile(file, lombok);
+		if (original && !isGiven(file, path, options.cwd))
+		{
+			const auto generated = st::toGeneratedLine(*original, file, line, st::readLinesFromDisk);
+			if (!generated)
+			{
+				std::cerr << "st: " << utility::encodeToUtf8(path) << ':' << line
+						  << " has no counterpart in the indexed (delombok) file\n";
+				return st::EXIT_NOT_FOUND;
+			}
+			line = *generated;
+		}
+		if (const Id id = st::symbolAt(storage, file, line))
+		{
+			ids.insert(id);
+		}
+	}
+	if (ambiguous)
+	{
+		return st::EXIT_AMBIGUOUS;
+	}
+	if (skipped == inputs.size())
+	{
+		return st::EXIT_NOT_FOUND;
+	}
+	std::vector<st::ResultLine> lines;
+	for (const Id id: ids)
+	{
+		for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id))))
+		{
+			lines.push_back(std::move(line));
+		}
+	}
+	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
+	return st::printResults(std::move(lines), options, std::cout);
+}
+
 int status(PersistentStorage& storage, const st::Freshness& freshness)
 {
 	const StorageStats stats = storage.getStorageStats();
@@ -361,8 +463,9 @@ int run(QCoreApplication& app)
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter");
-	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted", "[symbol]");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter | symbols-in | at");
+	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted. symbols-in takes files "
+		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...])", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
 	parser.addOption({"project", "Project file (.srctrlprj); registers it for later use from its source tree", "file"});
 	parser.addOption({"limit", "Maximum result lines (default 50)", "count"});
@@ -387,11 +490,12 @@ int run(QCoreApplication& app)
 	const QStringList args = parser.positionalArguments();
 	const QString command = args.isEmpty() ? QString() : args[0];
 	const bool isGraph = GRAPH_COMMANDS.contains(command);
-	if ((command != "find" && command != "status" && command != "filter" && !isGraph) || args.size() > (command == "path" ? 3 : 2) ||
-		(command == "status" && args.size() != 1))
+	const bool isFiles = command == "symbols-in" || command == "at";
+	if ((command != "find" && command != "status" && command != "filter" && !isGraph && !isFiles) ||
+		(args.size() > (command == "path" ? 3 : 2) && command != "symbols-in") || (command == "status" && args.size() != 1))
 	{
 		throw UsageError(
-			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter> [symbol] [target] [--project P] "
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter|symbols-in|at> [symbol|file[:line]] [target] [--project P] "
 			"[--limit N] [--depth N] [--kind K] [--package P] [--annotated A] [--file G] [--not] [--no-source] "
 			"[--no-refresh]; see --help");
 	}
@@ -434,7 +538,14 @@ int run(QCoreApplication& app)
 		{
 			targets.push_back(args.last().toStdWString());
 		}
-		if (named == (command == "path" ? 2 : 1))
+		if (command == "symbols-in" && named >= 1)
+		{
+			for (int i = 1; i < args.size(); i++)
+			{
+				names.push_back(args[i].toStdWString());
+			}
+		}
+		else if (named == (command == "path" ? 2 : 1))
 		{
 			names.push_back(args[1].toStdWString());
 			inputLines.push_back({names.back(), utility::encodeToUtf8(names.back())});
@@ -563,6 +674,10 @@ int run(QCoreApplication& app)
 	if (command == "find")
 	{
 		return find(storage, names, kinds, options);
+	}
+	if (isFiles)
+	{
+		return inFiles(storage, command, names, lombok, options);
 	}
 	if (command == "filter")
 	{

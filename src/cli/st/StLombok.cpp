@@ -206,57 +206,130 @@ LombokRoots lombokRoots(const ProjectSettings& settings)
 	return roots;
 }
 
-ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
+namespace
+{
+struct Counterpart
+{
+	bool inside = false;
+	// Empty unless exactly one original root holds the file.
+	FilePath file;
+	std::vector<std::string> lines;
+};
+
+Counterpart findOriginal(const FilePath& generatedFile, const LombokRoots& roots,
 	const std::function<std::vector<std::string>(const FilePath&)>& readLines)
 {
+	Counterpart result;
 	for (const auto& entry: roots.delombokToOriginalRoots)
 	{
-		const auto relative = relativeTo(canonical(line.file), entry.first.getCanonical());
+		const auto relative = relativeTo(canonical(generatedFile), entry.first.getCanonical());
 		if (!relative)
 		{
 			continue;
 		}
-		auto cached = roots.alignments.find(line.file.wstr());
-		if (cached == roots.alignments.end())
+		result.inside = true;
+		size_t found = 0;
+		for (const FilePath& root: entry.second)
 		{
-			FilePath originalFile;
-			std::vector<std::string> original;
-			size_t found = 0;
-			for (const FilePath& root: entry.second)
+			const FilePath candidate = root.getConcatenated(*relative);
+			std::vector<std::string> lines = readLines(candidate);
+			if (!lines.empty() && found++ == 0)
 			{
-				const FilePath candidate = root.getConcatenated(*relative);
-				std::vector<std::string> lines = readLines(candidate);
-				if (!lines.empty() && found++ == 0)
-				{
-					originalFile = candidate;
-					original = std::move(lines);
-				}
+				result.file = candidate;
+				result.lines = std::move(lines);
 			}
-			std::vector<std::optional<size_t>> alignment;
-			if (found == 1)
-			{
-				alignment = alignLines(readLines(line.file), original);
-				roots.originalLines[originalFile.wstr()] = std::move(original);
-			}
-			else
-			{
-				originalFile = FilePath();
-			}
-			cached = roots.alignments.emplace(line.file.wstr(), std::make_pair(originalFile, std::move(alignment))).first;
 		}
-		const FilePath& originalFile = cached->second.first;
-		const auto& alignment = cached->second.second;
-		if (originalFile.empty() || line.line == 0 || line.line > alignment.size() || !alignment[line.line - 1])
+		if (found != 1)
 		{
-			return generated(line);
+			result.file = FilePath();
+			result.lines.clear();
 		}
-		ResultLine mapped = line;
-		mapped.file = originalFile;
-		mapped.line = *alignment[line.line - 1] + 1;
-		mapped.source = roots.originalLines[originalFile.wstr()][mapped.line - 1];
-		return mapped;
+		break;
 	}
-	return line;
+	return result;
+}
+}
+
+ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
+	const std::function<std::vector<std::string>(const FilePath&)>& readLines)
+{
+	auto cached = roots.alignments.find(line.file.wstr());
+	if (cached == roots.alignments.end())
+	{
+		Counterpart counterpart = findOriginal(line.file, roots, readLines);
+		if (!counterpart.inside)
+		{
+			return line;
+		}
+		std::vector<std::optional<size_t>> alignment;
+		if (!counterpart.file.empty())
+		{
+			alignment = alignLines(readLines(line.file), counterpart.lines);
+			roots.originalLines[counterpart.file.wstr()] = std::move(counterpart.lines);
+		}
+		cached = roots.alignments.emplace(line.file.wstr(), std::make_pair(counterpart.file, std::move(alignment))).first;
+	}
+	const FilePath& originalFile = cached->second.first;
+	const auto& alignment = cached->second.second;
+	if (originalFile.empty() || line.line == 0 || line.line > alignment.size() || !alignment[line.line - 1])
+	{
+		return generated(line);
+	}
+	ResultLine mapped = line;
+	mapped.file = originalFile;
+	mapped.line = *alignment[line.line - 1] + 1;
+	mapped.source = roots.originalLines[originalFile.wstr()][mapped.line - 1];
+	return mapped;
+}
+
+std::optional<FilePath> toOriginalFile(const FilePath& generatedFile, const LombokRoots& roots)
+{
+	const Counterpart counterpart = findOriginal(generatedFile, roots, readLinesFromDisk);
+	if (counterpart.file.empty())
+	{
+		return std::nullopt;
+	}
+	return counterpart.file;
+}
+
+std::optional<FilePath> toGeneratedFile(const FilePath& original, const LombokRoots& roots)
+{
+	std::vector<FilePath> found;
+	for (const auto& entry: roots.delombokToOriginalRoots)
+	{
+		for (const FilePath& root: entry.second)
+		{
+			const auto relative = relativeTo(canonical(original), root.getCanonical());
+			if (!relative)
+			{
+				continue;
+			}
+			const FilePath candidate = entry.first.getConcatenated(*relative);
+			if (candidate.exists() && std::find(found.begin(), found.end(), candidate) == found.end())
+			{
+				found.push_back(candidate);
+			}
+		}
+	}
+	if (found.size() != 1)
+	{
+		return std::nullopt;
+	}
+	return found.front();
+}
+
+std::optional<size_t> toGeneratedLine(const FilePath& originalFile, const FilePath& generatedFile, size_t line,
+	const std::function<std::vector<std::string>(const FilePath&)>& readLines)
+{
+	const auto alignment = alignLines(readLines(generatedFile), readLines(originalFile));
+	for (size_t i = 0; i < alignment.size(); i++)
+	{
+		if (line > 0 && alignment[i] && *alignment[i] == line - 1)
+		{
+			return i + 1;
+		}
+	}
+	return std::nullopt;
 }
 
 std::vector<std::string> readLinesFromDisk(const FilePath& file)

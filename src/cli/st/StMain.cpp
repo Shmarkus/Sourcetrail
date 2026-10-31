@@ -492,7 +492,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		}
 		if (*id)
 		{
-			ids[*id];
+			ids[*id].insert(file);
 		}
 	}
 	if (ambiguous)
@@ -506,8 +506,10 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 	std::vector<st::ResultLine> lines;
 	for (const auto& [id, files]: ids)
 	{
-		for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id)),
-				 files.empty() ? nullptr : &files))
+		const std::wstring key = st::symbolKey(storage.getNameHierarchyForNodeId(id));
+		std::vector<st::ResultLine> own = st::definitionLines(storage, id, key, &files);
+		// `at` on a use of a symbol declared elsewhere
+		for (auto& line: own.empty() ? st::definitionLines(storage, id, key) : own)
 		{
 			lines.push_back(std::move(line));
 		}

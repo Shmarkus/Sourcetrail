@@ -29,6 +29,8 @@ struct Scope
 struct Walked
 {
 	std::set<Id> nodes;
+	// The inputs and the nodes the walk went on from; result rows it stopped at are only in `nodes`.
+	std::set<Id> passed;
 	std::vector<Scope> scopes;
 	std::map<Id, Id> links;
 };
@@ -46,7 +48,7 @@ struct Gaps
 // build-generated class), unless it is an implicit member of a defined type (a default constructor, an enum's
 // valueOf). An error belongs to the innermost named symbol around it (anonymous and local classes skipped); at type
 // level to the fields declared on its line, if any; outside every scope (an import) to the file's top-level types.
-// A walked symbol or a type enclosing it that several files declare (a class two modules both have) is a gap too:
+// A passed symbol or a type enclosing it that several files declare (a class two modules both have) is a gap too:
 // users of the other copy may be bound to this one or missing.
 Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines);
 

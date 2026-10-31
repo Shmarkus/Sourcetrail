@@ -366,6 +366,7 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 	if (walked)
 	{
 		walked->nodes.insert(symbols.begin(), symbols.end());
+		walked->passed.insert(symbols.begin(), symbols.end());
 		walked->scopes.push_back({{symbols.begin(), symbols.end()}, ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT), 0});
 	}
 	for (const Id id: symbols)
@@ -432,6 +433,8 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 		walked->scopes.push_back({expanded, incoming ? horizontal : Edge::EDGE_OVERRIDE, incoming ? Edge::EDGE_OVERRIDE : horizontal});
 		walked->nodes.insert(inputs.begin(), inputs.end());
 		walked->nodes.insert(expanded.begin(), expanded.end());
+		walked->passed.insert(inputs.begin(), inputs.end());
+		walked->passed.insert(expanded.begin(), expanded.end());
 	}
 	std::vector<ResultLine> lines;
 	for (const auto& [node, reached]: results)
@@ -510,6 +513,7 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 		{
 			// Walking down follows links into the walked symbols, walking up links out of them.
 			walked->scopes.push_back({seen, direction == Direction::Incoming ? types : 0, direction == Direction::Outgoing ? types : 0});
+			walked->passed.insert(seen.begin(), seen.end());
 		}
 	}
 	std::vector<ResultLine> lines;
@@ -559,9 +563,10 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 					Site site = linkSite(storage, edge->getId());
 					if (site.file.empty())
 					{
-						for (const ResultLine& line: definitionLines(storage, hopTo, L""))
+						const auto definitions = definitionLines(storage, hopTo, L"");
+						if (!definitions.empty())
 						{
-							site = {line.file, line.line, line.column};
+							site = {definitions.front().file, definitions.front().line, definitions.front().column};
 						}
 					}
 					solved = solved && !isUnsolvedSymbol(storage, hopTo);
@@ -596,6 +601,8 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 		}
 		walked->nodes.insert(forward.from.begin(), forward.from.end());
 		walked->nodes.insert(targets.begin(), targets.end());
+		walked->passed.insert(forward.from.begin(), forward.from.end());
+		walked->passed.insert(targets.begin(), targets.end());
 		walked->scopes.push_back(std::move(forward));
 		walked->scopes.push_back({targets, types & ~Edge::LAYOUT_VERTICAL, types & Edge::LAYOUT_VERTICAL});
 	}

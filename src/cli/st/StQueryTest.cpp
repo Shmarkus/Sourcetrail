@@ -1262,7 +1262,8 @@ TEST_CASE("st definition lines list each file of a class declared in two modules
 
 TEST_CASE("st gaps count walked symbols whose type two modules declare")
 {
-	for (const bool twice: {false, true})
+	// none, the callee's class, or only the caller's class (a result row, which the walk did not go beyond)
+	for (const std::wstring twice: {L"", L"A", L"B"})
 	{
 		Code code;
 		const Id pkg = code.package(L"q");
@@ -1276,15 +1277,17 @@ TEST_CASE("st gaps count walked symbols whose type two modules declare")
 		addLocation(code.storage, pkg, code.file(L"B"), 1);
 		// Code puts a type and its members on one line, and a batched location query keeps one token per position
 		addLocation(code.storage, a, code.file(L"A"), 5);
-		if (twice)
+		addLocation(code.storage, b, code.file(L"B"), 5);
+		if (!twice.empty())
 		{
-			addLocation(code.storage, a, addFile(code.storage, L"/r/sub/q/A.java"), 2);
+			addLocation(code.storage, twice == L"A" ? a : b, addFile(code.storage, L"/r/sub/q/" + twice + L".java"), 2);
 		}
 		code.storage.buildCaches();
 
+		const bool warns = twice == L"A";
 		const st::Gaps gaps = gapsOfCalls(code, f, st::Direction::Incoming, 1);
-		CHECK(gaps.multiDeclared == (twice ? 1 : 0));
-		CHECK(printed(gaps) == (twice ? "st: incomplete: 1 symbols declared in several modules (see st status)\n" : ""));
+		CHECK(gaps.multiDeclared == (warns ? 1 : 0));
+		CHECK(printed(gaps) == (warns ? "st: incomplete: 1 symbols declared in several modules (see st status)\n" : ""));
 	}
 	CHECK(printed({2, 0, 1}) ==
 		"st: incomplete: 2 links to unresolved symbols, 1 symbols declared in several modules (see st status)\n");

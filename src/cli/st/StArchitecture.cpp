@@ -390,6 +390,7 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 
 	ImpactResult result;
 	result.walked.nodes = walk.walked();
+	result.walked.passed = result.walked.nodes;
 	result.walked.links = walk.links();
 	for (const Affected& symbol: affected)
 	{
@@ -496,6 +497,7 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 		if (walked)
 		{
 			walked->nodes.insert(own.begin(), own.end());
+			walked->passed.insert(own.begin(), own.end());
 		}
 		const std::vector<Id> ids(own.begin(), own.end());
 		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)

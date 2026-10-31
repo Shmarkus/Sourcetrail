@@ -395,7 +395,7 @@ size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const 
 }
 }
 
-// Walked symbols and the types enclosing them that more than one file declares: a class two modules both have,
+// Passed symbols and the types enclosing them that more than one file declares: a class two modules both have,
 // whose other copy's users may be bound to this one or missing.
 size_t multiDeclared(PersistentStorage& storage, const std::set<Id>& nodes)
 {
@@ -472,7 +472,7 @@ Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vecto
 		gaps.unresolvedLinks += unresolved.count(end);
 	}
 	gaps.indexErrors = indexErrors(storage, walked.nodes, lines);
-	gaps.multiDeclared = multiDeclared(storage, walked.nodes);
+	gaps.multiDeclared = multiDeclared(storage, walked.passed);
 	return gaps;
 }
 

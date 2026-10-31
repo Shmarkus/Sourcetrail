@@ -280,8 +280,41 @@ directory; it does not modify your projects or Java preferences.
 ## `st`: code navigation for agents
 
 `st` answers "who calls this", "what implements that", "how does A reach B" from an
-existing Sourcetrail index, as plain text lines that pipe into each other. Build it next
-to the other binaries and put it on your `PATH`:
+existing Sourcetrail index, as plain text lines that pipe into each other.
+
+### For agents
+
+| Question | Command |
+|---|---|
+| Who calls X? | `st callers OrderService.place --depth 2` |
+| What does X call? | `st callees OrderService.place` |
+| Implementations or overrides (and the reverse) | `st impls PaymentGateway`, `st impls PaymentGateway.charge`; `st supers CardGateway` |
+| How does A reach B? | `st path OrderController.create OrderRepository.save` |
+| What breaks if X changes? | `st impact OrderService.place --group file` |
+| A stack-trace line: its method and callers | `st at OrderService.java:42 \| st callers --depth 3` |
+| Members of a class or file | `st outline OrderService`, `st outline src/main/java/com/acme/shop/OrderService.java` |
+| Files in a git diff to symbols | `git diff --name-only \| st symbols-in` |
+| Package or class dependencies | `st deps com.acme.shop.order` (`--in` for incoming) |
+| Narrow a result by annotation, kind or file | `... \| st filter --annotated Test`, `--kind method`, `--not --file '*Test*'` |
+| Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
+
+Names are a short name (`OrderService.place`) or a key; parameters take simple type names: `'OrderService.place(Order, int)'`.
+- **Trust the answer.** No `st: incomplete:` line on stderr means the answer is complete as far as the index goes: don't re-read
+  source to confirm it. Only the [blind spots](#st-known-limits) need grep or reading: text, config and strings, code inside
+  Java records, the Lombok `@Builder` setter of a field, calls through a field of an unresolved type.
+- **Exit 1** means none. **Exit 2** (ambiguous): pick a key from the candidates on stderr and rerun.
+  **Exit 3** (not found): check the name, the parameters (count and simple type names; stderr lists the overloads), and the
+  project: `st` picks it from the current directory, `st find <name>` names it (`find: 0 (project shop)`), `--project` overrides.
+
+```bash
+st at OrderService.java:42 | st callers --depth 4 | st filter --annotated Test            # stack trace -> callers -> tests
+git diff --name-only | st symbols-in | st impact | st filter --not --file '*Test*'          # diff -> what it can break, tests left out
+st impls PaymentGateway.charge | st callers | st filter --annotated RestController           # interface -> impls -> annotated callers
+```
+
+### Build and reference
+
+Build it next to the other binaries and put it on your `PATH`:
 
 ```bash
 cmake --build build/Release --target st Sourcetrail Sourcetrail_cli -j 4
@@ -316,7 +349,7 @@ st find --kind interface Repository | st impls | st callers --depth 3
 st path com.acme.Controller.create com.acme.Repo.save
 ```
 
-**Phase 2 commands.**
+**More commands.**
 - `at <file>:<line>`: the symbol defined on that line (fields, declarations), else the innermost enclosing scope. A bare file
   name (`OrderService.java:42`, as in a stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr.
   An absolute path that does not exist here (a CI or container stack trace) matches the indexed files sharing the longest
@@ -364,6 +397,8 @@ not indexed; `at` exits 3 only when every input was skipped. If a piped command 
 grep -Hn 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package
 st find --kind class Controller | st filter --annotated RestController | st deps
 ```
+
+<a id="st-known-limits"></a>
 
 **Known limits.** Java records are not indexed as types by the bundled Java indexer: record types, constructors and
 components are missing from every answer, and calls made inside a record body are attributed to no symbol. Classes an

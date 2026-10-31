@@ -25,6 +25,7 @@
 #include "StorageNode.h"
 #include "StorageComponentAccess.h"
 #include "StorageSymbol.h"
+#include "utilityString.h"
 
 namespace st::test
 {
@@ -91,23 +92,42 @@ struct Code
 	}
 
 	// A package node; types created in it are its members, the way the Java indexer records name hierarchies.
+	// A dotted name is one node per prefix, each a member of the one before.
 	Id package(const std::wstring& name)
 	{
 		auto it = packages.find(name);
 		if (it == packages.end())
 		{
 			NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
-			hierarchy.push(name);
-			it = packages.emplace(name, add(storage, hierarchy, NODE_PACKAGE)).first;
+			for (const std::wstring& element: utility::splitToVector(name, L"."))
+			{
+				hierarchy.push(element);
+			}
+			const Id id = add(storage, hierarchy, NODE_PACKAGE);
+			const size_t dot = name.rfind(L'.');
+			if (dot != std::wstring::npos)
+			{
+				storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), package(name.substr(0, dot)), id));
+			}
+			it = packages.emplace(name, id).first;
 		}
 		return it->second;
+	}
+
+	static std::vector<std::wstring> packagePath(const std::wstring& packageName, const std::wstring& type)
+	{
+		std::vector<std::wstring> path = utility::splitToVector(packageName, L".");
+		path.push_back(type);
+		return path;
 	}
 
 	Id type(const std::wstring& packageName, const std::wstring& name, NodeKind kind = NODE_CLASS)
 	{
 		NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
-		hierarchy.push(packageName);
-		hierarchy.push(name);
+		for (const std::wstring& element: packagePath(packageName, name))
+		{
+			hierarchy.push(element);
+		}
 		const Id id = add(storage, hierarchy, kind);
 		addLocation(storage, id, file(name), 1);
 		storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), package(packageName), id));
@@ -120,8 +140,8 @@ struct Code
 	{
 		const auto owner = packageOfType.find(type);
 		const std::wstring packageName = owner == packageOfType.end() ? L"p" : owner->second;
-		const Id id = kind == NODE_METHOD ? add(storage, method({packageName, type}, name, L"void", parameters))
-										  : add(storage, method({packageName, type}, name, L"", L""), kind);
+		const Id id = kind == NODE_METHOD ? add(storage, method(packagePath(packageName, type), name, L"void", parameters))
+										  : add(storage, method(packagePath(packageName, type), name, L"", L""), kind);
 		addLocation(storage, id, file(type), 1);
 		storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), parent, id));
 		return id;

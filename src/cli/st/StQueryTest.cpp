@@ -590,7 +590,7 @@ TEST_CASE("st deps of a package rolls up to packages")
 	const auto lines = st::deps(code.storage, {code.package(L"web")}, st::Direction::Outgoing);
 	REQUIRE(lines.size() == 1);
 	CHECK(lines[0].key == L"domain");
-	CHECK(lines[0].kind.rfind(L"package, ", 0) == 0);
+	CHECK(lines[0].kind == L"package, 1 links");
 }
 
 TEST_CASE("st deps ignores links inside the input")
@@ -620,4 +620,40 @@ TEST_CASE("st deps incoming lists the dependants")
 	REQUIRE(lines.size() == 1);
 	CHECK(lines[0].key == L"web.Ctl");
 	CHECK(st::deps(code.storage, {code.package(L"domain")}, st::Direction::Incoming).front().key == L"web");
+}
+
+TEST_CASE("st deps never lists builtin types")
+{
+	Code code;
+	const Id svc = code.type(L"domain", L"Svc");
+	const Id a = code.member(svc, L"Svc", L"a");
+	NameHierarchy voidName(NAME_DELIMITER_JAVA);
+	voidName.push(L"void");
+	const Id voidType = add(code.storage, voidName, NODE_BUILTIN_TYPE);
+	code.link(Edge::EDGE_TYPE_USAGE, a, voidType, L"Svc", {2});
+	code.storage.buildCaches();
+
+	CHECK(st::deps(code.storage, {a}, st::Direction::Outgoing).empty());
+}
+
+TEST_CASE("st deps of a package covers its sub-packages")
+{
+	Code code;
+	const Id deep = code.type(L"d.x", L"Deep");
+	const Id run = code.member(deep, L"Deep", L"run");
+	const Id top = code.type(L"d", L"Top");
+	const Id topGo = code.member(top, L"Top", L"go");
+	const Id web = code.type(L"w", L"Web");
+	const Id serve = code.member(web, L"Web", L"serve");
+	code.link(Edge::EDGE_CALL, run, serve, L"Deep", {3});
+	code.link(Edge::EDGE_CALL, run, topGo, L"Deep", {4});
+	code.link(Edge::EDGE_CALL, serve, run, L"Web", {5});
+	code.storage.buildCaches();
+
+	const auto out = st::deps(code.storage, {code.package(L"d")}, st::Direction::Outgoing);
+	REQUIRE(out.size() == 1);
+	CHECK(out[0].key == L"w");
+	const auto in = st::deps(code.storage, {code.package(L"d")}, st::Direction::Incoming);
+	REQUIRE(in.size() == 1);
+	CHECK(in[0].key == L"w");
 }

@@ -19,8 +19,8 @@ namespace st
 namespace
 {
 const NodeKindMask PACKAGES = NODE_PACKAGE | NODE_NAMESPACE | NODE_MODULE;
-// Never results: files and packages are containers, type parameters are noise next to their owner.
-const NodeKindMask NOT_RESULTS = NODE_FILE | PACKAGES | NODE_TYPE_PARAMETER;
+// Never results: files and packages are containers, type parameters and builtin types (void, int, ...) are noise.
+const NodeKindMask NOT_RESULTS = NODE_FILE | PACKAGES | NODE_TYPE_PARAMETER | NODE_BUILTIN_TYPE;
 const size_t UNREACHED = std::numeric_limits<size_t>::max();
 
 struct Reach
@@ -254,7 +254,7 @@ private:
 	std::map<std::wstring, NodeKind> m_kinds;
 };
 
-// The input symbols plus what they own through member links; a package owns its types but not its sub-packages.
+// The input symbols plus what they own through member links; a package owns its sub-packages too.
 std::set<Id> owned(PersistentStorage& storage, const std::vector<Id>& symbols)
 {
 	std::set<Id> all(symbols.begin(), symbols.end());
@@ -271,9 +271,7 @@ std::set<Id> owned(PersistentStorage& storage, const std::vector<Id>& symbols)
 		std::vector<Id> members;
 		for (const StorageEdge& edge: storage.getEdgesForSourceIds(owners))
 		{
-			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER &&
-				!(storage.getNodeTypeForNodeWithId(edge.targetNodeId).getKind() & PACKAGES) &&
-				all.insert(edge.targetNodeId).second)
+			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER && all.insert(edge.targetNodeId).second)
 			{
 				members.push_back(edge.targetNodeId);
 			}
@@ -456,6 +454,12 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 		const NameHierarchy inputName = storage.getNameHierarchyForNodeId(input);
 		const std::wstring home = packageLevel ? inputName.getQualifiedName() : rowKey(inputName);
 
+		// A package input covers its sub-packages.
+		const auto inside = [&](const std::wstring& key) {
+			return key == home ||
+				(packageLevel && key.compare(0, home.size() + 1, home + inputName.getDelimiter()) == 0);
+		};
+
 		const std::set<Id> own = owned(storage, {input});
 		const std::vector<Id> ids(own.begin(), own.end());
 		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)
@@ -474,13 +478,13 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 				std::wstring key;
 				const NameHierarchy name = storage.getNameHierarchyForNodeId(other);
 				if (storage.getDefinitionKindForNodeId(other) != DEFINITION_NONE &&
-					!(storage.getNodeTypeForNodeWithId(other).getKind() & (NODE_FILE | PACKAGES)) && !isUnsolvedSymbol(name))
+					!(storage.getNodeTypeForNodeWithId(other).getKind() & (NOT_RESULTS & ~NODE_TYPE_PARAMETER)) && !isUnsolvedSymbol(name))
 				{
 					key = rowKey(name);
 				}
 				it = keyById.emplace(other, key).first;
 			}
-			if (!it->second.empty() && it->second != home)
+			if (!it->second.empty() && !inside(it->second))
 			{
 				Row& row = rows[it->second];
 				row.label = packageLevel ? L"package" : L"class";

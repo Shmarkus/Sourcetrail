@@ -158,7 +158,7 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
 	};
 	if (kinds & ~NODE_TYPE_PARAMETER)
 	{
-		// Type parameters (`failed<T>.T`) only show up when --kind asks for them.
+		// Type parameters (`failed<T>.T`) show up only when the mask is exactly the type-parameter kind (--kind takes one kind).
 		kinds &= ~NODE_TYPE_PARAMETER;
 	}
 	const std::wstring bare = withoutTypeParameters(text);

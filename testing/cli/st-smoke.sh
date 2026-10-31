@@ -94,7 +94,8 @@ grep -F 'example.Caller.shout(example.Person)' "$work/out" | grep -qF "$caller:"
 
 run 0 symbols-in src/main/java/example/Person.java
 contains 'example.Person' out
-grep -F 'example.Person' "$work/out" | grep -q 'src/main/java/example/Person.java:[0-9]' || assert "symbols-in lacks an original Person.java line: $(cat "$work/out")"
+person_line="$(grep -n 'class Person' src/main/java/example/Person.java | head -n1 | cut -d: -f1)"
+grep -F 'example.Person' "$work/out" | grep -qF "src/main/java/example/Person.java:$person_line" || assert "symbols-in lacks src/main/java/example/Person.java:$person_line: $(cat "$work/out")"
 
 run 0 outline example.Caller
 grep -F 'public method' "$work/out" | grep -qE ':[0-9]+-[0-9]+' || assert "outline lacks a public method with a range: $(cat "$work/out")"
@@ -107,11 +108,21 @@ grep -F 'example.Caller' "$work/out" | grep -qF 'class, ' || assert "deps lacks 
 
 "$st" find GreetingController 2> /dev/null | "$st" callees 2> /dev/null | "$st" filter --package example --not --kind field > "$work/out" 2> "$work/err" \
     || assert "find | callees | filter pipeline failed"
+contains 'example.Caller.greeting(example.Person)' out
+"$st" outline example.web.GreetingController 2> /dev/null > "$work/out" || assert "outline of the controller failed"
+contains 'example.web.GreetingController.caller' out
+"$st" filter --not --kind field < "$work/out" > "$work/out2" 2> "$work/err" || assert "filter --not --kind field failed"
+mv "$work/out2" "$work/out"
+contains 'example.web.GreetingController.greet(example.Person)' out
+! grep -qF 'example.web.GreetingController.caller' "$work/out" || assert "filter --not --kind field kept the field: $(cat "$work/out")"
 run 0 filter --annotated Endpoint 'example.web.GreetingController.greet(example.Person)'
 contains 'example.web.GreetingController' out
+run 1 filter --annotated Endpoint 'example.Caller.shout(example.Person)'
 
 run 64 path --edges calls example.Welcome 'example.Person.getName()'
+contains calls err
 run 64 impact --edges calls 'example.Person.getName()'
+contains calls err
 
 # Exit codes.
 run 3 callers nope

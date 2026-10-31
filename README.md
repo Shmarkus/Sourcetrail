@@ -316,24 +316,29 @@ st path com.acme.Controller.create com.acme.Repo.save
 ```
 
 **Phase 2 commands.**
-- `at <file>:<line>`: the innermost symbol defined around that line. A bare file name (`OrderService.java:42`, as in a
-  stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr. Text after a second colon is ignored,
-  so `grep -n` output pipes in.
+- `at <file>:<line>`: the symbol defined on that line (fields, declarations), else the innermost enclosing scope. A bare file
+  name (`OrderService.java:42`, as in a stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr.
+  Text after a second colon is ignored, so `grep -n` output pipes in.
 - `symbols-in <file>...`: symbols defined in the files, in line order (no packages, files or type parameters).
 - `outline <class|file>...`: a class's direct members, or a file's symbols, with `visibility kind` (`public method`) and a
   `path:line-endLine` range. An argument naming an existing file is a file, anything else a symbol.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
   counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
-  package. stderr gets `impact: N symbols in F files, P packages`.
+  package. Overrides are followed up and down, but not down again after going up. stderr gets `impact: N symbols in F files, P packages`.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
-  (`package, N links`). `--in` gives incoming. Links inside the input and external targets are not counted.
+  (`package, N links`; sub-packages are included). `--in` gives incoming. Links inside the input, external targets and builtin types
+  are not counted.
 - `filter`: keeps the stdin lines that pass, unchanged and in order: `--kind K`, `--package P` (keys under `P.`),
   `--annotated A` (the symbol or its enclosing type carries `@A`), `--file G` (wildcard; with a `/` it matches the path, else
-  the file name), `--not` negates the combination.
+  the file name), `--not` negates the combination. Passing lines print unchanged, identical lines once; unknown keys are skipped
+  with a stderr note.
 
 `--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
 name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.
 `--package`, `--annotated`, `--file`, `--not`, `--in`, `--group` and `--edges` on another command exit 64.
+
+**Names.** Type parameters may be left out: `Result.failed` finds `Result<T>.failed<T>(...)`. `find` hides type-parameter
+nodes unless `--kind` asks for them.
 
 **Input rules.** `filter`, `impact` and `deps` take symbols as arguments or keys on stdin; `symbols-in` takes paths; `at`
 takes `file:line`. With Lombok, give the original path and line: the file maps to its delombok copy and the line maps back

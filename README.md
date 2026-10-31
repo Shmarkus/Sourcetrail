@@ -320,7 +320,8 @@ st path com.acme.Controller.create com.acme.Repo.save
   name (`OrderService.java:42`, as in a stack trace) is matched as a path suffix; two matches exit 2 and list both on stderr.
   An absolute path that does not exist here (a CI or container stack trace) matches the indexed files sharing the longest
   path suffix with it.
-  Text after a second colon is ignored, so `grep -n` output pipes in.
+  Text after a second colon is ignored, so `grep -Hn` output pipes in (plain `grep -n` on a single file prints no path and
+  exits 64). `symbols-in` takes paths, so pipe `grep -l` into it.
 - `symbols-in <file>...`: symbols defined in the files, in line order (no packages, files or type parameters).
 - `outline <class|file>...`: a class's direct members, or a file's symbols, with `visibility kind` (`public method`) and a
   `path:line-endLine` range. An argument naming an existing file is a file, anything else a symbol.
@@ -328,12 +329,15 @@ st path com.acme.Controller.create com.acme.Repo.save
   `outline <class>` lists nested types but not their members.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
   counts every hop except override hops; a class stands for all its members, a package for every type and member in it and
-  its sub-packages (by name prefix, as in `deps`); the input's own symbols are not listed. `--group file|package` prints one line per file or
-  package. Overrides are followed up and down, but not down again after going up. Rows read `<kind>, depth <n>` (`depth 1` is a direct user); `--limit` keeps the lowest depths. stderr gets `impact: N symbols in F files, P packages`.
+  its sub-packages (by name prefix, as in `deps`); the input's own symbols are not listed. `--group file|package` prints one
+  line per file or package. Overrides are followed up and down, but not down again after going up. Rows read
+  `<kind>, depth <n>`: `depth 1` is a direct user, `depth 0` is reached through override links alone (such as an
+  implementation of an input interface method). `--limit` keeps the lowest depths. stderr gets
+  `impact: N symbols in F files, P packages`.
   `| st filter --not --file '*Test*'` leaves out tests.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
   (`package, N links`; sub-packages are included). `--in` gives incoming. Links inside the input, external targets and builtin types
-  are not counted.
+  are not counted; for a member input, its whole top-level class counts as inside, so links to sibling members don't count.
 - `filter`: keeps the stdin lines that pass, unchanged and in order: `--kind K`, `--package P` (keys under `P.`),
   `--annotated A` (the symbol or its enclosing type carries `@A`), `--file G` (wildcard; with a `/` it matches the path, else
   the file name), `--not` negates the combination. Passing lines print unchanged, identical lines once; unknown keys are skipped
@@ -355,7 +359,7 @@ gets the symbol of the nearest mapped lines above and below when both give the s
 not indexed; `at` exits 3 only when every input was skipped. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
 
 ```bash
-grep -n 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package
+grep -Hn 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package
 st find --kind class Controller | st filter --annotated RestController | st deps
 ```
 
@@ -375,7 +379,8 @@ row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no
 and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The
 `<project>.srctrlst` marker beside the project file records the last refresh so edits made during one are not lost.
 `--no-refresh` skips this and exits 5 when stale; `--wait <ms>` bounds the wait for the project lock (default 30000).
-Timestamps have one-second resolution, so a file saved in the same second a refresh started is refreshed once more.
+File times are compared below the second; only a file saved within about 20 ms before a refresh started is refreshed once
+more.
 
 Tests for `st`: `ctest --test-dir build/Release -R cli.st` for the unit tests, and an end-to-end smoke test
 (isolated home, copied fixture, JDK 21):

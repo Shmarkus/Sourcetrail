@@ -79,9 +79,9 @@ public class Caller implements Greeter {
 }
 J
 mv src/main/java/example/Caller.java.new src/main/java/example/Caller.java
-# Timestamps have 1s resolution and a file written in the same second a refresh starts is conservatively
-# refreshed once more, so let the edit settle first.
-sleep 2
+# A file written within the safety margin (20 ms) before a refresh starts is refreshed once more; an edit and a
+# query in the same second are not.
+sleep 0.2
 run 0 callers 'example.Person.getName()'
 contains refreshed err
 contains 'example.Caller.shout(example.Person)' out

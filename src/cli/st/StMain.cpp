@@ -127,13 +127,24 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 
 const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
+// Prints on stderr the gaps of the index the results touch; a failure to tell leaves the answer as it is.
+void printGaps(PersistentStorage& storage, const st::Walked& walked, const std::vector<st::ResultLine>& lines)
+{
+	try
+	{
+		st::printGaps(st::findGaps(storage, walked, lines), std::cerr);
+	}
+	catch (...)
+	{
+	}
+}
+
 // Prints the results, then on stderr the gaps of the index they touch.
-int printWithGaps(PersistentStorage& storage, std::vector<st::ResultLine> lines, const st::Walked& walked,
+int printWithGaps(PersistentStorage& storage, const std::vector<st::ResultLine>& lines, const st::Walked& walked,
 	const st::OutputOptions& options)
 {
-	const st::Gaps gaps = st::findGaps(storage, walked, lines);
-	const int code = st::printResults(std::move(lines), options, std::cout);
-	st::printGaps(gaps, std::cerr);
+	const int code = st::printResults(lines, options, std::cout);
+	printGaps(storage, walked, lines);
 	return code;
 }
 
@@ -207,7 +218,6 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 			hops.push_back({L"", L"", hop.file, hop.line, ""});
 		}
 	}
-	const st::Gaps gaps = st::findGaps(storage, walked, hops);
 	std::cerr << "path: " << chains.size() << '\n';
 	const auto location = [&](const FilePath& file, size_t line, size_t column) {
 		st::ResultLine mapped{L"", L"", file, line, ""};
@@ -239,7 +249,7 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 	{
 		std::cout << "(+" << chains.size() - options.limit << " more paths, --limit)\n";
 	}
-	st::printGaps(gaps, std::cerr);
+	printGaps(storage, walked, hops);
 	return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }
 
@@ -256,7 +266,7 @@ int impact(PersistentStorage& storage, const std::vector<Id>& ids, size_t depth,
 			? st::displayPath(st::toOriginalFile(line.file, lombok).value_or(line.file), options.cwd)
 			: line.key;
 	}
-	return printWithGaps(storage, std::move(result.lines), result.walked, options);
+	return printWithGaps(storage, result.lines, result.walked, options);
 }
 
 int deps(PersistentStorage& storage, const std::vector<Id>& ids, st::Direction direction, const st::OutputOptions& options)
@@ -264,7 +274,7 @@ int deps(PersistentStorage& storage, const std::vector<Id>& ids, st::Direction d
 	st::Walked walked;
 	std::vector<st::ResultLine> lines = st::deps(storage, ids, direction, &walked);
 	std::cerr << "deps: " << lines.size() << '\n';
-	return printWithGaps(storage, std::move(lines), walked, options);
+	return printWithGaps(storage, lines, walked, options);
 }
 
 int graph(PersistentStorage& storage, const QString& command, const std::vector<Id>& ids, size_t depth,
@@ -286,7 +296,7 @@ int graph(PersistentStorage& storage, const QString& command, const std::vector<
 		lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing, &walked);
 	}
 	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
-	return printWithGaps(storage, std::move(lines), walked, options);
+	return printWithGaps(storage, lines, walked, options);
 }
 
 // Whether the symbol named by `key` passes; a key that doesn't resolve exactly is reported, fails and sets `unknown`.

@@ -35,20 +35,21 @@ struct Walked
 struct Gaps
 {
 	size_t unresolvedLinks = 0;
-	size_t errorFiles = 0;
+	size_t indexErrors = 0;
 };
 
-// Followed links whose other end the index could not resolve, and incomplete files (files with index errors)
-// holding a walked node's definition or a result location. A symbol is unresolved when it is the
-// unsolved-symbol placeholder, or has no definition and is named inside a package the project defines types in
-// (a Java record, a build-generated class), unless it is an implicit member of a defined type (a default
-// constructor, an enum's valueOf).
+// Followed links whose other end the index could not resolve, and index errors belonging to a walked symbol or to
+// the symbol enclosing a result row. A symbol is unresolved when it is the unsolved-symbol placeholder, or has no
+// definition and its package is one the project defines types in or declares below one (a Java record, a
+// build-generated class), unless it is an implicit member of a defined type (a default constructor, an enum's
+// valueOf). An error belongs to the innermost named symbol around it (anonymous and local classes skipped); at type
+// level to the fields declared on its line, if any; outside every scope (an import) to the file's top-level types.
 Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines);
 
 // Unresolved symbols in the whole index, by the rule of findGaps.
 size_t countUnresolved(PersistentStorage& storage);
 
-// `st: incomplete: <n> links to unresolved symbols, <m> files with index errors (see st status)` on `out`,
+// `st: incomplete: <n> links to unresolved symbols, <m> index errors (see st status)` on `out`,
 // leaving out a zero part; nothing when both are zero.
 void printGaps(const Gaps& gaps, std::ostream& out);
 }

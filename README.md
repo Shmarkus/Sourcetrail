@@ -370,12 +370,17 @@ annotation processor generates during the build (JPA metamodel `Order_`, MapStru
 Field reads and writes are not distinguished (both are `usage`).
 
 **Incomplete answers.** When an answer of `callers`, `callees`, `refs`, `impls`, `supers`, `path`, `impact` or `deps` touches such
-a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M files with index errors (see st status)`
-(a zero part is left out); stdout and the exit code stay the same. N counts the links the command followed from the symbols
-it walked whose other end the index could not resolve: the indexer's `unsolved-symbol` placeholder, or a symbol without a
-definition named inside a package the project defines types in (library symbols and implicit members such as default
-constructors don't count). M counts the files with index errors holding a result location or the definition of a walked
-symbol. `st status` adds the index-wide totals, `files_with_errors` and `unresolved_symbols`.
+a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M index errors (see st status)` (a zero part is
+left out); stdout and the exit code stay the same. N counts the links the command followed from the symbols it walked whose
+other end the index could not resolve: the indexer's `unsolved-symbol` placeholder, or a symbol without a definition whose
+package is one the project defines types in, or declares below one (library symbols and implicit members such as default
+constructors don't count). M counts the index errors that belong to a walked symbol or to the symbol enclosing a result row: an
+error belongs to the innermost named method or type around it (anonymous and local classes are skipped), at class level to a
+field declared on its line, and outside every scope (an import) to the file's top-level types. `st status` adds the index-wide
+totals, `files_with_errors` and `unresolved_symbols`.
+The warning can stay silent where a gap is real: the Java indexer reports an unresolved type once, where it is declared (a
+field of a generated type), so calls through that field vanish without an error in the calling method; and `refs` of an
+entity field misses its JPA metamodel uses (`Order_.status`) without a warning.
 
 **Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
 5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.

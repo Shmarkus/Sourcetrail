@@ -1,10 +1,12 @@
 #include "StGaps.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "DefinitionKind.h"
+#include "ErrorInfo.h"
 #include "NameHierarchy.h"
 #include "NodeKind.h"
 #include "PersistentStorage.h"
@@ -24,34 +26,67 @@ const NodeKindMask CONTAINERS = NODE_FILE | NODE_PACKAGE | NODE_NAMESPACE | NODE
 // Never a gap: containers, type parameters and builtin types.
 const NodeKindMask NEVER_UNRESOLVED = CONTAINERS | NODE_TYPE_PARAMETER | NODE_BUILTIN_TYPE;
 
-// Packages the project defines a type in.
-std::set<std::wstring> ownPackages(PersistentStorage& storage)
+// What the project itself declares, read from every node once.
+struct Project
 {
-	std::set<std::wstring> packages;
-	std::vector<NameHierarchy> types;
-	for (const StorageNode& node: storage.getStorageNodes())
+	explicit Project(PersistentStorage& storage)
 	{
-		const NodeKind kind = intToNodeKind(node.type);
-		if (kind & CONTAINERS & ~NODE_FILE)
+		std::vector<NameHierarchy> types;
+		for (const StorageNode& node: storage.getStorageNodes())
 		{
-			packages.insert(NameHierarchy::deserialize(node.serializedName).getQualifiedName());
+			const NodeKind kind = intToNodeKind(node.type);
+			const bool defined = storage.getDefinitionKindForNodeId(node.id) != DEFINITION_NONE;
+			if (kind & CONTAINERS & ~NODE_FILE)
+			{
+				packages[NameHierarchy::deserialize(node.serializedName).getQualifiedName()] = defined;
+			}
+			else if ((kind & (TYPES | NODE_ANNOTATION)) && defined)
+			{
+				types.push_back(NameHierarchy::deserialize(node.serializedName));
+				definedTypes.insert(types.back().getQualifiedName());
+			}
 		}
-		else if ((kind & (TYPES | NODE_ANNOTATION)) && storage.getDefinitionKindForNodeId(node.id) != DEFINITION_NONE)
+		for (const NameHierarchy& type: types)
 		{
-			types.push_back(NameHierarchy::deserialize(node.serializedName));
+			const std::wstring package = type.size() > 1 ? type.getRange(0, type.size() - 1).getQualifiedName() : L"";
+			if (packages.count(package))
+			{
+				own.insert(package);
+			}
 		}
 	}
-	std::set<std::wstring> own;
-	for (const NameHierarchy& type: types)
+
+	// Whether the package enclosing `name` (its longest prefix naming a package) is one the project defines a type
+	// in, or one it declares below such a package.
+	bool owns(const NameHierarchy& name) const
 	{
-		const std::wstring package = type.size() > 1 ? type.getRange(0, type.size() - 1).getQualifiedName() : L"";
-		if (packages.count(package))
+		for (size_t size = name.size() - 1; size >= 1; size--)
 		{
-			own.insert(package);
+			const auto package = packages.find(name.getRange(0, size).getQualifiedName());
+			if (package == packages.end())
+			{
+				continue;
+			}
+			if (own.count(package->first))
+			{
+				return true;
+			}
+			for (size_t outer = 1; package->second && outer < size; outer++)
+			{
+				if (own.count(name.getRange(0, outer).getQualifiedName()))
+				{
+					return true;
+				}
+			}
+			return false;
 		}
+		return false;
 	}
-	return own;
-}
+
+	std::map<std::wstring, bool> packages;	// qualified name to whether the project declares it
+	std::set<std::wstring> own;				// packages the project defines a type in
+	std::set<std::wstring> definedTypes;
+};
 
 class Unresolved
 {
@@ -104,39 +139,28 @@ public:
 		{
 			return true;
 		}
-		if (!inOwnPackage(name))
+		if (name.size() < 2 || !project().owns(name))
 		{
 			return false;
 		}
-		if (kind & (TYPES | NODE_ANNOTATION | NODE_SYMBOL))
-		{
-			return true;
-		}
 		// A member of a defined type without a definition is implicit: a default constructor, an enum's valueOf.
-		const Id parent = m_storage.getNodeIdForNameHierarchy(name.getRange(0, name.size() - 1));
-		return !parent || m_storage.getDefinitionKindForNodeId(parent) == DEFINITION_NONE;
+		return (kind & (TYPES | NODE_ANNOTATION | NODE_SYMBOL)) ||
+			!project().definedTypes.count(name.getRange(0, name.size() - 1).getQualifiedName());
 	}
 
 private:
-	bool inOwnPackage(const NameHierarchy& name)
+	const Project& project()
 	{
-		if (!m_ownPackages)
+		if (!m_project)
 		{
-			m_ownPackages = std::make_unique<std::set<std::wstring>>(ownPackages(m_storage));
+			m_project = std::make_unique<Project>(m_storage);
 		}
-		for (size_t size = 1; size < name.size(); size++)
-		{
-			if (m_ownPackages->count(name.getRange(0, size).getQualifiedName()))
-			{
-				return true;
-			}
-		}
-		return false;
+		return *m_project;
 	}
 
 	PersistentStorage& m_storage;
 	const Id m_placeholder;
-	std::unique_ptr<std::set<std::wstring>> m_ownPackages;
+	std::unique_ptr<Project> m_project;
 };
 
 bool definesNames(const SourceLocation& location)
@@ -144,17 +168,142 @@ bool definesNames(const SourceLocation& location)
 	return location.isScopeLocation() || location.getType() == LOCATION_TOKEN;
 }
 
-size_t errorFiles(PersistentStorage& storage, const std::set<Id>& nodes, const std::vector<ResultLine>& lines)
+// A symbol named in a file: whether it can own an index error (not anonymous, local or a placeholder), and its kind.
+struct Named
 {
+	bool owner = false;
+	NodeKind kind = NODE_SYMBOL;
+};
+
+bool isOwner(const NameHierarchy& name)
+{
+	if (name.size() == 0 || isUnsolvedSymbol(name) || name.back().getName().rfind(L"anonymous class", 0) == 0)
+	{
+		return false;
+	}
+	// Inside a method: a local class, or a member of one.
+	for (size_t i = 0; i + 1 < name.size(); i++)
+	{
+		if (!name[i].getSignature().getParameterString().empty())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+// The symbols of one file an index error or a result row belongs to: the innermost named scope around it; at type
+// level the fields declared on the line, if any; outside every scope the file's top-level types.
+class Owners
+{
+public:
+	Owners(const SourceLocationFile& file, const std::map<Id, Named>& named)
+	{
+		file.forEachStartSourceLocation([&](SourceLocation* location) {
+			if (!definesNames(*location))
+			{
+				return;
+			}
+			for (const Id id: location->getTokenIds())
+			{
+				const auto it = named.find(id);
+				if (it == named.end() || !it->second.owner)
+				{
+					continue;
+				}
+				if (location->isScopeLocation())
+				{
+					const SourceLocation* end = location->getOtherLocation();
+					m_scopes.push_back({id, it->second.kind, location->getLineNumber(), location->getColumnNumber(),
+						end ? end->getLineNumber() : location->getLineNumber(), end ? end->getColumnNumber() : 0});
+				}
+				else if (it->second.kind & (NODE_FIELD | NODE_ENUM_CONSTANT))
+				{
+					m_fields[location->getLineNumber()].push_back(id);
+				}
+			}
+		});
+		for (const Span& span: m_scopes)
+		{
+			const bool nested = std::any_of(m_scopes.begin(), m_scopes.end(), [&](const Span& other) {
+				return &other != &span && other.contains(span.firstLine, span.firstColumn) &&
+					std::make_pair(other.firstLine, other.firstColumn) < std::make_pair(span.firstLine, span.firstColumn);
+			});
+			if (!nested && (span.kind & (TYPES | NODE_ANNOTATION)))
+			{
+				m_topLevel.push_back(span.id);
+			}
+		}
+	}
+
+	// Column 0 stands for the whole line.
+	std::vector<Id> at(size_t line, size_t column) const
+	{
+		const Span* innermost = nullptr;
+		for (const Span& span: m_scopes)
+		{
+			if (span.contains(line, column) &&
+				(!innermost ||
+					std::make_pair(span.firstLine, span.firstColumn) > std::make_pair(innermost->firstLine, innermost->firstColumn)))
+			{
+				innermost = &span;
+			}
+		}
+		if (!innermost)
+		{
+			return m_topLevel;
+		}
+		const auto fields = m_fields.find(line);
+		if ((innermost->kind & (TYPES | NODE_ANNOTATION)) && fields != m_fields.end())
+		{
+			return fields->second;
+		}
+		return {innermost->id};
+	}
+
+private:
+	struct Span
+	{
+		Id id;
+		NodeKind kind;
+		size_t firstLine;
+		size_t firstColumn;
+		size_t lastLine;
+		size_t lastColumn;
+
+		bool contains(size_t line, size_t column) const
+		{
+			if (!column)
+			{
+				return firstLine <= line && line <= lastLine;
+			}
+			return std::make_pair(firstLine, firstColumn) <= std::make_pair(line, column) &&
+				std::make_pair(line, column) <= std::make_pair(lastLine, lastColumn);
+		}
+	};
+
+	std::vector<Span> m_scopes;
+	std::map<size_t, std::vector<Id>> m_fields;
+	std::vector<Id> m_topLevel;
+};
+
+// Index errors belonging to a walked symbol or to the symbol enclosing a result row. Only the files with errors that
+// hold a result row or a walked symbol's definition are read; the errors themselves only when there are such files.
+size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const std::vector<ResultLine>& lines)
+{
+	// The indexer marks every file it reported errors in incomplete.
 	const std::set<FilePath> incomplete = storage.getIncompleteFiles();
 	if (incomplete.empty())
 	{
 		return 0;
 	}
-	std::set<FilePath> touched;
+	std::set<FilePath> files;
 	for (const ResultLine& line: lines)
 	{
-		touched.insert(line.file);
+		if (incomplete.count(line.file))
+		{
+			files.insert(line.file);
+		}
 	}
 	std::vector<Id> defined;
 	for (const Id id: nodes)
@@ -164,36 +313,81 @@ size_t errorFiles(PersistentStorage& storage, const std::set<Id>& nodes, const s
 			defined.push_back(id);
 		}
 	}
-	// The definitions of a few symbols, or what the incomplete files define for a wide walk: reading the
-	// locations of thousands of symbols costs more than reading a few dozen files.
+	// Reading the locations of thousands of symbols costs more than reading every file with errors.
 	if (defined.size() >= 10 * incomplete.size())
 	{
-		for (const FilePath& file: incomplete)
-		{
-			storage.getSourceLocationsForFile(file)->forEachStartSourceLocation([&](SourceLocation* location) {
-				for (const Id id: location->getTokenIds())
-				{
-					if (definesNames(*location) && nodes.count(id))
-					{
-						touched.insert(file);
-					}
-				}
-			});
-		}
+		files = incomplete;
 	}
 	else if (!defined.empty())
 	{
 		storage.getSourceLocationsForTokenIds(defined)->forEachSourceLocation([&](SourceLocation* location) {
-			if (location->isStartLocation() && definesNames(*location))
+			if (location->isStartLocation() && definesNames(*location) && incomplete.count(location->getFilePath()))
 			{
-				touched.insert(location->getFilePath());
+				files.insert(location->getFilePath());
 			}
 		});
 	}
-	size_t count = 0;
-	for (const FilePath& file: touched)
+	if (files.empty())
 	{
-		count += incomplete.count(file);
+		return 0;
+	}
+	std::map<FilePath, std::vector<std::pair<size_t, size_t>>> errors;
+	for (const ErrorInfo& error: storage.getErrorInfos())
+	{
+		const FilePath file(error.filePath);
+		if (files.count(file))
+		{
+			errors[file].push_back({error.lineNumber, error.columnNumber});
+		}
+	}
+
+	std::map<FilePath, std::shared_ptr<SourceLocationFile>> locations;
+	std::set<Id> ids;
+	for (const auto& [file, fileErrors]: errors)
+	{
+		locations[file] = storage.getSourceLocationsForFile(file);
+		locations[file]->forEachStartSourceLocation([&](SourceLocation* location) {
+			for (const Id id: location->getTokenIds())
+			{
+				if (definesNames(*location) && storage.getDefinitionKindForNodeId(id) != DEFINITION_NONE)
+				{
+					ids.insert(id);
+				}
+			}
+		});
+	}
+	std::map<Id, Named> named;
+	for (const StorageNode& node: storage.getStorageNodesForIds(std::vector<Id>(ids.begin(), ids.end())))
+	{
+		const NodeKind kind = intToNodeKind(node.type);
+		named[node.id] = {!(kind & CONTAINERS) && isOwner(NameHierarchy::deserialize(node.serializedName)), kind};
+	}
+
+	std::map<FilePath, Owners> owners;
+	for (const auto& [file, located]: locations)
+	{
+		owners.emplace(file, Owners(*located, named));
+	}
+	std::set<Id> wanted = nodes;
+	for (const ResultLine& line: lines)
+	{
+		const auto it = owners.find(line.file);
+		if (it != owners.end())
+		{
+			for (const Id id: it->second.at(line.line, line.column))
+			{
+				wanted.insert(id);
+			}
+		}
+	}
+	size_t count = 0;
+	for (const auto& [file, fileOwners]: owners)
+	{
+		for (const auto& [line, column]: errors.at(file))
+		{
+			const std::vector<Id> belongs = fileOwners.at(line, column);
+			count += std::any_of(belongs.begin(), belongs.end(), [&](Id id) { return wanted.count(id) > 0; });
+		}
 	}
 	return count;
 }
@@ -241,7 +435,7 @@ Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vecto
 	{
 		gaps.unresolvedLinks += unresolved.count(end);
 	}
-	gaps.errorFiles = errorFiles(storage, walked.nodes, lines);
+	gaps.indexErrors = indexErrors(storage, walked.nodes, lines);
 	return gaps;
 }
 
@@ -260,18 +454,18 @@ size_t countUnresolved(PersistentStorage& storage)
 
 void printGaps(const Gaps& gaps, std::ostream& out)
 {
-	if (!gaps.unresolvedLinks && !gaps.errorFiles)
+	if (!gaps.unresolvedLinks && !gaps.indexErrors)
 	{
 		return;
 	}
 	out << "st: incomplete: ";
 	if (gaps.unresolvedLinks)
 	{
-		out << gaps.unresolvedLinks << " links to unresolved symbols" << (gaps.errorFiles ? ", " : "");
+		out << gaps.unresolvedLinks << " links to unresolved symbols" << (gaps.indexErrors ? ", " : "");
 	}
-	if (gaps.errorFiles)
+	if (gaps.indexErrors)
 	{
-		out << gaps.errorFiles << " files with index errors";
+		out << gaps.indexErrors << " index errors";
 	}
 	out << " (see st status)\n";
 }

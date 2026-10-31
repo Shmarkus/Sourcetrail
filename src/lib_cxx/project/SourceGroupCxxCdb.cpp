@@ -21,7 +21,7 @@ SourceGroupCxxCdb::SourceGroupCxxCdb(std::shared_ptr<SourceGroupSettingsCxxCdb> 
 {
 }
 
-bool SourceGroupCxxCdb::prepareIndexing()
+bool SourceGroupCxxCdb::prepareIndexing(bool fullRefresh)
 {
 	FilePath cdbPath = m_settings->getCompilationDatabasePathExpandedAndAbsolute();
 	if (!cdbPath.empty() && !cdbPath.exists())

@@ -25,7 +25,8 @@ class SourceGroup
 public:
 	virtual ~SourceGroup() = default;
 
-	virtual bool prepareIndexing();
+	// fullRefresh: the refresh reindexes all files, so caches derived from the sources are rebuilt
+	virtual bool prepareIndexing(bool fullRefresh);
 	virtual bool allowsPartialClearing() const;
 	virtual bool allowsShallowIndexing() const;
 

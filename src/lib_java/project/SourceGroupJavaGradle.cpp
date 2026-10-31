@@ -16,14 +16,14 @@ SourceGroupJavaGradle::SourceGroupJavaGradle(std::shared_ptr<SourceGroupSettings
 {
 }
 
-bool SourceGroupJavaGradle::prepareIndexing()
+bool SourceGroupJavaGradle::prepareIndexing(bool fullRefresh)
 {
 	if (!utility::prepareJavaEnvironmentAndDisplayOccurringErrors())
 	{
 		return false;
 	}
 
-	if (!prepareGradleData())
+	if (!prepareGradleData(fullRefresh))
 	{
 		return false;
 	}
@@ -66,7 +66,7 @@ std::shared_ptr<const SourceGroupSettings> SourceGroupJavaGradle::getSourceGroup
 	return m_settings;
 }
 
-bool SourceGroupJavaGradle::prepareGradleData()
+bool SourceGroupJavaGradle::prepareGradleData(bool wholeLombokTree)
 {
 	if (m_settings && m_settings->getGradleProjectFilePathExpandedAndAbsolute().exists())
 	{
@@ -93,7 +93,8 @@ bool SourceGroupJavaGradle::prepareGradleData()
 			success = utility::gradlePrepareLombokSources(
 				projectRootPath,
 				m_settings->getGradleDependenciesDirectoryPath(),
-				m_settings->getShouldIndexGradleTests());
+				m_settings->getShouldIndexGradleTests(),
+				wholeLombokTree);
 		}
 
 		return success;

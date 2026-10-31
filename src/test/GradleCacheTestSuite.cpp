@@ -346,9 +346,9 @@ struct DelombokFixture: public GradleCacheFixture
 		fingerprint = utility::gradleBuildFingerprint(project);
 	}
 
-	bool run(FakeDelombok& fake, const FilePath& target) const
+	bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false) const
 	{
-		return utility::delombokSourceSet(roots, target, fingerprint, fake.runner());
+		return utility::delombokSourceSet(roots, target, fingerprint, fake.runner(), wholeTree);
 	}
 
 	bool run(FakeDelombok& fake) const
@@ -508,6 +508,23 @@ TEST_CASE("delombok runs on the whole tree when the manifest is missing")
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.runs.size() == 2);
 	REQUIRE(fake.lastRunWasWholeTree());
+}
+
+TEST_CASE("delombok runs on the whole tree when asked to despite a current manifest")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	REQUIRE(f.run(fake));
+
+	// an output changed out of band is invisible to the manifest
+	std::filesystem::remove(std::filesystem::path(f.delombok.str()) / "pkg/B.java");
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == 1);
+
+	REQUIRE(f.run(fake, f.delombok, true));
+	REQUIRE(fake.runs.size() == 2);
+	REQUIRE(fake.lastRunWasWholeTree());
+	REQUIRE(readTree(f.delombok)["pkg/B.java"] == "// delomboked\nclass B {}");
 }
 
 TEST_CASE("delombok removes the copy of a deleted original")

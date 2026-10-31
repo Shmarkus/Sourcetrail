@@ -506,7 +506,8 @@ bool delombokSourceSet(
 	const std::vector<FilePath>& sourceDirectories,
 	const FilePath& outputDirectory,
 	const std::string& fingerprint,
-	const DelombokRunner& runDelombok)
+	const DelombokRunner& runDelombok,
+	bool wholeTree)
 {
 	if (sourceDirectories.empty())
 	{
@@ -516,7 +517,7 @@ bool delombokSourceSet(
 	const std::optional<DelombokManifest> previous = loadDelombokManifest(outputDirectory);
 	const DelombokManifest current = scanDelombokOriginals(sourceDirectories, fingerprint, previous);
 	const bool outputExists = outputDirectory.recheckExists();
-	if (previous && outputExists && *previous == current)
+	if (!wholeTree && previous && outputExists && *previous == current)
 	{
 		LOG_INFO(L"Delombok output is up to date: " + outputDirectory.wstr());
 		return true;
@@ -525,7 +526,7 @@ bool delombokSourceSet(
 	// a run that fails half way must not leave a manifest claiming its outputs are current
 	removeDelombokManifest(outputDirectory);
 
-	const std::optional<DelombokChanges> changes = previous && outputExists
+	const std::optional<DelombokChanges> changes = !wholeTree && previous && outputExists
 		? getDelombokChanges(*previous, current)
 		: std::nullopt;
 	if (changes)
@@ -593,7 +594,8 @@ bool gradleCopyDependencies(
 bool gradlePrepareLombokSources(
 	const FilePath& projectDirectoryPath,
 	const FilePath& outputDirectoryPath,
-	bool addTestSources)
+	bool addTestSources,
+	bool wholeTree)
 {
 	const GradleProjectInfo info = getGradleProjectInfo(projectDirectoryPath, outputDirectoryPath, addTestSources);
 	if (info.lombokJars.empty())
@@ -610,7 +612,8 @@ bool gradlePrepareLombokSources(
 				directories,
 				getDelombokOutputDirectory(outputDirectoryPath, sourceSet),
 				info.fingerprint,
-				createDelombokRunner(projectDirectoryPath, jarIt->second)))
+				createDelombokRunner(projectDirectoryPath, jarIt->second),
+				wholeTree))
 		{
 			return false;
 		}

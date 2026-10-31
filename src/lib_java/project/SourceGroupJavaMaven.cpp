@@ -18,7 +18,7 @@ SourceGroupJavaMaven::SourceGroupJavaMaven(std::shared_ptr<SourceGroupSettingsJa
 {
 }
 
-bool SourceGroupJavaMaven::prepareIndexing()
+bool SourceGroupJavaMaven::prepareIndexing(bool fullRefresh)
 {
 	if (!utility::prepareJavaEnvironmentAndDisplayOccurringErrors())
 	{

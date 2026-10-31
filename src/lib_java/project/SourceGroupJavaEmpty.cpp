@@ -8,7 +8,7 @@ SourceGroupJavaEmpty::SourceGroupJavaEmpty(std::shared_ptr<SourceGroupSettingsJa
 {
 }
 
-bool SourceGroupJavaEmpty::prepareIndexing()
+bool SourceGroupJavaEmpty::prepareIndexing(bool fullRefresh)
 {
 	if (!utility::prepareJavaEnvironmentAndDisplayOccurringErrors())
 	{

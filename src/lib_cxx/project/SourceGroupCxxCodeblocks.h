@@ -13,7 +13,7 @@ class SourceGroupCxxCodeblocks: public SourceGroup
 public:
 	SourceGroupCxxCodeblocks(std::shared_ptr<SourceGroupSettingsCxxCodeblocks> settings);
 
-	bool prepareIndexing() override;
+	bool prepareIndexing(bool fullRefresh) override;
 	std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const override;
 	std::set<FilePath> getAllSourceFilePaths() const override;
 	std::shared_ptr<IndexerCommandProvider> getIndexerCommandProvider(

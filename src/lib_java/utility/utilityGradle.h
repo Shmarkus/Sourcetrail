@@ -20,12 +20,13 @@ using DelombokRunner = std::function<bool(
 
 // Brings outputDirectory up to date with the source set's roots. Delomboks only the originals
 // that changed since the last successful run, or the whole tree when the manifest is missing,
-// the roots, the build fingerprint, a lombok.config or any non-Java file changed.
+// the roots, the build fingerprint, a lombok.config or any non-Java file changed, or wholeTree is set.
 bool delombokSourceSet(
 	const std::vector<FilePath>& sourceDirectories,
 	const FilePath& outputDirectory,
 	const std::string& fingerprint,
-	const DelombokRunner& runDelombok);
+	const DelombokRunner& runDelombok,
+	bool wholeTree = false);
 
 bool gradleCopyDependencies(
 	const FilePath& projectDirectoryPath,
@@ -35,7 +36,8 @@ bool gradleCopyDependencies(
 bool gradlePrepareLombokSources(
 	const FilePath& projectDirectoryPath,
 	const FilePath& outputDirectoryPath,
-	bool addTestSources);
+	bool addTestSources,
+	bool wholeTree = false);
 
 std::vector<FilePath> gradleGetAllSourceDirectories(
 	const FilePath& projectDirectoryPath,

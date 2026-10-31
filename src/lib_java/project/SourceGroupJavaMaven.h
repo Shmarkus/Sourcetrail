@@ -13,7 +13,7 @@ class SourceGroupJavaMaven: public SourceGroupJava
 {
 public:
 	SourceGroupJavaMaven(std::shared_ptr<SourceGroupSettingsJavaMaven> settings);
-	bool prepareIndexing() override;
+	bool prepareIndexing(bool fullRefresh) override;
 
 private:
 	std::vector<FilePath> getAllSourcePaths() const override;

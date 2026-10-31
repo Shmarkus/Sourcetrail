@@ -15,7 +15,7 @@ SourceGroupCxxCodeblocks::SourceGroupCxxCodeblocks(
 {
 }
 
-bool SourceGroupCxxCodeblocks::prepareIndexing()
+bool SourceGroupCxxCodeblocks::prepareIndexing(bool fullRefresh)
 {
 	FilePath codeblocksProjectPath = m_settings->getCodeblocksProjectPathExpandedAndAbsolute();
 	if (!codeblocksProjectPath.empty() && !codeblocksProjectPath.exists())

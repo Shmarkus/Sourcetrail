@@ -12,7 +12,7 @@ class SourceGroupJavaEmpty: public SourceGroupJava
 {
 public:
 	SourceGroupJavaEmpty(std::shared_ptr<SourceGroupSettingsJavaEmpty> settings);
-	bool prepareIndexing() override;
+	bool prepareIndexing(bool fullRefresh) override;
 
 private:
 	std::vector<FilePath> getAllSourcePaths() const override;

@@ -394,15 +394,6 @@ void Project::refresh(
 
 	m_sourceGroups = SourceGroupFactory::getInstance()->createSourceGroups(
 		m_settings->getAllSourceGroupSettings());
-	for (const std::shared_ptr<SourceGroup>& sourceGroup: m_sourceGroups)
-	{
-		if (sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED && !sourceGroup->prepareIndexing())
-		{
-			MessageStatus(L"Source preparation failed; indexing aborted.", true, false).dispatch();
-			m_refreshStage = RefreshStageType::NONE;
-			return;
-		}
-	}
 
 	if (needsFullRefresh || fullRefresh)
 	{
@@ -411,6 +402,17 @@ void Project::refresh(
 	else if (refreshMode == REFRESH_NONE)
 	{
 		refreshMode = REFRESH_UPDATED_FILES;
+	}
+
+	for (const std::shared_ptr<SourceGroup>& sourceGroup: m_sourceGroups)
+	{
+		if (sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED &&
+			!sourceGroup->prepareIndexing(refreshMode == REFRESH_ALL_FILES))
+		{
+			MessageStatus(L"Source preparation failed; indexing aborted.", true, false).dispatch();
+			m_refreshStage = RefreshStageType::NONE;
+			return;
+		}
 	}
 
 	bool allowsShallowIndexing = false;

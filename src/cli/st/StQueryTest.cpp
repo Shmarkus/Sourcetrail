@@ -1228,3 +1228,34 @@ TEST_CASE("st reports a failed gap check as incomplete")
 		"st: incomplete: gap check failed (no such table: error)\n");
 	CHECK(printedOf([]() -> st::Gaps { throw 1; }) == "st: incomplete: gap check failed (unknown error)\n");
 }
+
+TEST_CASE("st definition lines list each file of a class declared in two modules")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id field = code.member(a, L"A", L"f", NODE_FIELD);
+	const Id other = addFile(code.storage, L"/r/sub/p/A.java");
+	addLocation(code.storage, a, other, 3);
+	addLocation(code.storage, field, other, 4);
+	// a qualifier in a third file is a use, not a definition
+	const Id user = addFile(code.storage, L"/r/q/User.java");
+	addLocation(code.storage, a, user, 7, LOCATION_QUALIFIER);
+	code.storage.buildCaches();
+
+	const auto lines = st::definitionLines(code.storage, a, L"p.A");
+	REQUIRE(lines.size() == 2);
+	CHECK(lines[0].file.wstr() == L"/r/p/A.java");
+	CHECK(lines[0].line == 1);
+	CHECK(lines[1].file.wstr() == L"/r/sub/p/A.java");
+	CHECK(lines[1].line == 3);
+	REQUIRE(st::outline(code.storage, {field}).size() == 2);
+
+	// a file's symbols list only that file's line
+	const std::set<FilePath> sub = {FilePath(L"/r/sub/p/A.java")};
+	const auto inSub = st::definitionLines(code.storage, a, L"p.A", &sub);
+	REQUIRE(inSub.size() == 1);
+	CHECK(inSub[0].line == 3);
+	const auto outlined = st::outline(code.storage, {field}, {{field, sub}});
+	REQUIRE(outlined.size() == 1);
+	CHECK(outlined[0].file.wstr() == L"/r/sub/p/A.java");
+}

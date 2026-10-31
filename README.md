@@ -404,6 +404,9 @@ st find --kind class Controller | st filter --annotated RestController | st deps
 components are missing from every answer, and calls made inside a record body are attributed to no symbol. Classes an
 annotation processor generates during the build (JPA metamodel `Order_`, MapStruct `...MapperImpl`) are not indexed either.
 Field reads and writes are not distinguished (both are `usage`).
+A class two modules both declare (same package and name, e.g. a test helper) is one symbol listed at both files; a third
+module resolves it to the first copy on the class path, so its calls to members only the other copy has are missing
+without a warning (module-aware resolution is a tracked follow-up).
 
 **Incomplete answers.** When an answer of `callers`, `callees`, `refs`, `impls`, `supers`, `path`, `impact` or `deps` touches such
 a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M index errors (see st status)` (a zero part is

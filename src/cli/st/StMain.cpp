@@ -232,9 +232,10 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 		const Id start = chains[i].front().from;
 		const std::wstring startKey = st::symbolKey(storage.getNameHierarchyForNodeId(start));
 		std::cout << i + 1 << ". " << utility::encodeToUtf8(startKey);
-		for (const auto& line: st::definitionLines(storage, start, startKey))
+		const auto definitions = st::definitionLines(storage, start, startKey);
+		if (!definitions.empty())
 		{
-			std::cout << '\t' << location(line.file, line.line, line.column);
+			std::cout << '\t' << location(definitions.front().file, definitions.front().line, definitions.front().column);
 		}
 		std::cout << '\n';
 		for (const st::PathHop& hop: chains[i])
@@ -310,21 +311,28 @@ bool keeps(PersistentStorage& storage, const std::wstring& key, const st::Filter
 		return false;
 	}
 	const Id id = resolved.ids.front();
-	std::wstring path;
-	if (!filterOptions.filePattern.empty())
+	if (filterOptions.filePattern.empty())
 	{
-		const auto definitions = st::definitionLines(storage, id, key);
-		if (!definitions.empty())
+		return st::matchesFilter(storage, id, filterOptions, L"");
+	}
+	// a symbol declared in several files passes when one of them matches
+	const auto definitions = st::definitionLines(storage, id, key);
+	if (definitions.empty())
+	{
+		return st::matchesFilter(storage, id, filterOptions, L"");
+	}
+	for (st::ResultLine definition: definitions)
+	{
+		if (options.mapLocation)
 		{
-			st::ResultLine definition = definitions.front();
-			if (options.mapLocation)
-			{
-				definition = options.mapLocation(definition);
-			}
-			path = st::displayPath(definition.file, options.cwd);
+			definition = options.mapLocation(definition);
+		}
+		if (st::matchesFilter(storage, id, filterOptions, st::displayPath(definition.file, options.cwd)))
+		{
+			return true;
 		}
 	}
-	return st::matchesFilter(storage, id, filterOptions, path);
+	return false;
 }
 
 // Whether a result line printed by st stays generated: the marker ends its kind or its location column.
@@ -438,7 +446,7 @@ FileLookup lookupFile(const st::IndexedFiles& indexed, const std::wstring& path,
 int inFiles(PersistentStorage& storage, const QString& command, const std::vector<std::wstring>& inputs,
 	const st::LombokRoots& lombok, const st::OutputOptions& options)
 {
-	std::set<Id> ids;
+	std::map<Id, std::set<FilePath>> ids;	// symbols-in: the files each is listed for
 	const st::IndexedFiles indexed = st::indexedFiles(storage, &lombok);
 	size_t skipped = 0;
 	bool ambiguous = false;
@@ -466,7 +474,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		{
 			for (const Id id: st::definedInFile(storage, file))
 			{
-				ids.insert(id);
+				ids[id].insert(file);
 			}
 			continue;
 		}
@@ -484,7 +492,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		}
 		if (*id)
 		{
-			ids.insert(*id);
+			ids[*id];
 		}
 	}
 	if (ambiguous)
@@ -496,9 +504,10 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		return st::EXIT_NOT_FOUND;
 	}
 	std::vector<st::ResultLine> lines;
-	for (const Id id: ids)
+	for (const auto& [id, files]: ids)
 	{
-		for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id))))
+		for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id)),
+				 files.empty() ? nullptr : &files))
 		{
 			lines.push_back(std::move(line));
 		}
@@ -513,6 +522,7 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 {
 	const st::IndexedFiles indexed = st::indexedFiles(storage, &lombok);
 	std::vector<Id> ids;
+	std::map<Id, std::set<FilePath>> inFiles;	// symbols listed for a file show only that file's lines
 	std::vector<std::wstring> symbolNames;
 	size_t skipped = 0;
 	bool ambiguous = false;
@@ -532,6 +542,10 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 		{
 			const std::vector<Id> defined = st::definedInFile(storage, file);
 			ids.insert(ids.end(), defined.begin(), defined.end());
+			for (const Id id: defined)
+			{
+				inFiles[id].insert(file);
+			}
 		}
 		skipped += found == FileLookup::NotIndexed;
 		ambiguous |= found == FileLookup::Ambiguous;
@@ -552,15 +566,20 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 		{
 			const std::vector<Id> members = st::directMembers(storage, id);
 			ids.insert(ids.end(), members.begin(), members.end());
+			for (const Id member: members)
+			{
+				inFiles.erase(member);
+			}
 		}
 		else
 		{
 			ids.push_back(id);
+			inFiles.erase(id);
 		}
 	}
 	std::set<Id> seen;
 	ids.erase(std::remove_if(ids.begin(), ids.end(), [&](Id id) { return !seen.insert(id).second; }), ids.end());
-	std::vector<st::ResultLine> lines = st::outline(storage, ids);
+	std::vector<st::ResultLine> lines = st::outline(storage, ids, inFiles);
 	countLine(options, "outline: " + std::to_string(lines.size()));
 	return st::printResults(std::move(lines), options, std::cout);
 }

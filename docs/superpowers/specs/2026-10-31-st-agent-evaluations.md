@@ -236,11 +236,13 @@ Status after run 2: items marked *done* were confirmed in the current binary or 
    marker. That would let an agent dismiss the H5 warning, which came from a test base class.
 4. **Add a depth column to `callers`/`callees --depth` (st, new).** `impact` already prints `depth <n>`. In U6 the
    flat list cost a re-run and a source read to split direct callers from transitive ones.
-5. **Fix delombok output collisions across modules (indexer, new).** Same-named files with the same package in two
+5. ~~**Fix delombok output collisions across modules (indexer, new).**~~ *Done* (Phase 2.5 Task 8). Same-named files with the same package in two
    modules' test (or main) source sets overwrite each other in the shared delombok tree. One copy silently drops out of
    the index, and the other is reported under its delombok path.
-   - Fix: delombok each module into its own tree, or keep the module in the relative path.
-   - Until then, `st status` should count such collisions.
+   - Fix: each source root is delomboked into its own `delombok/<set>/<root>` tree, a file's own
+     root comes first on its class path, and `st` lists a symbol at every file that declares it.
+   - Remains: both copies are one merged symbol, and a third module resolves the class to the first copy on the class
+     path (module-aware resolution, parked as a follow-up).
 6. **Explain record misses (st).** Still open. `symbol not found` on a record accessor gives no reason. Suggested
    message: `st: <Type> is declared in <file> but not indexed (Java record? see README Known limits)`.
 7. **Connect Lombok builder setters to their field (st).** Still open in `st`. The snippet now lists `@Builder` setters

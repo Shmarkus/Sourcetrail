@@ -2,7 +2,9 @@
 #define ST_FILES_H
 
 #include <functional>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,7 +22,9 @@ struct LombokRoots;
 std::vector<Id> definedInFile(PersistentStorage& storage, const FilePath& indexedFile);
 
 // One line per symbol: kind is "<access> <kind>" (just the kind without stored access), endLine the end of the scope.
-std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id>& symbols);
+// A symbol listed in `inFiles` shows only its lines in those files.
+std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id>& symbols,
+	const std::map<Id, std::set<FilePath>>& inFiles = {});
 
 // Classes, interfaces, enums, structs and unions.
 bool isTypeSymbol(PersistentStorage& storage, Id id);

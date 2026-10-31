@@ -56,6 +56,15 @@ grep -F 'example.Options.enabled' "$work/out" | grep -qF $'\tsrc/test/java/examp
 grep -F 'example.Options.level' "$work/out" | grep -qF $'\tsub/src/test/java/example/Options.java:7' \
     || assert "sub module's Options.level not at its original: $(cat "$work/out")"
 ! grep -qF 'delombok' "$work/out" || assert "find Options printed a delombok path: $(cat "$work/out")"
+# The class is one symbol declared in two files: find lists both, symbols-in of one file only its own line.
+run 0 find example.Options
+grep -F $'example.Options\tclass\tsrc/test/java/example/Options.java:6' "$work/out" > /dev/null \
+    || assert "find example.Options lacks the root module's class: $(cat "$work/out")"
+grep -F $'example.Options\tclass\tsub/src/test/java/example/Options.java:6' "$work/out" > /dev/null \
+    || assert "find example.Options lacks the sub module's class: $(cat "$work/out")"
+run 0 symbols-in sub/src/test/java/example/Options.java
+contains 'sub/src/test/java/example/Options.java:6' out
+! grep -qP '\tsrc/test/java/example/Options.java' "$work/out" || assert "symbols-in of sub listed the root module's file: $(cat "$work/out")"
 
 run 0 find getName
 "$st" find getName 2> /dev/null | "$st" callers > "$work/out" 2> "$work/err" || assert "find | callers failed"

@@ -4,6 +4,7 @@
 #include <deque>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 
 #include "Graph.h"
@@ -285,14 +286,70 @@ std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector
 	return sites;
 }
 
-std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key)
+namespace
 {
-	const auto sites = definitionSites(storage, {id});
-	if (sites.empty())
+// Per declaring file in path order, the name's line. Without a declaring location, the first location of any kind.
+std::vector<Site> declarationSites(PersistentStorage& storage, Id id)
+{
+	std::map<std::wstring, std::pair<Site, bool>> byFile;	 // file -> site, whether it is a scope's
+	std::optional<Site> any;
+	storage.getSourceLocationsForTokenIds({id})->forEachSourceLocation([&](SourceLocation* location) {
+		const auto& tokens = location->getTokenIds();
+		if (!location->isStartLocation() || std::find(tokens.begin(), tokens.end(), id) == tokens.end())
+		{
+			return;
+		}
+		const Site site{location->getFilePath(), location->getLineNumber(), location->getColumnNumber()};
+		if (!location->isScopeLocation() && location->getType() != LOCATION_TOKEN)
+		{
+			if (!any)
+			{
+				any = site;
+			}
+			return;
+		}
+		auto it = byFile.find(site.file.wstr());
+		if (it == byFile.end())
+		{
+			byFile.emplace(site.file.wstr(), std::make_pair(site, location->isScopeLocation()));
+		}
+		else if (!location->isScopeLocation() && it->second.second)
+		{
+			it->second = {site, false};
+		}
+	});
+	std::vector<Site> sites;
+	for (const auto& entry: byFile)
 	{
-		return {};
+		sites.push_back(entry.second.first);
 	}
-	return {resultLine(storage, key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), sites.begin()->second)};
+	if (sites.empty() && any)
+	{
+		sites.push_back(*any);
+	}
+	return sites;
+}
+}
+
+std::vector<ResultLine> definitionLines(
+	PersistentStorage& storage, Id id, const std::wstring& key, const std::set<FilePath>* files)
+{
+	const NodeType type = storage.getNodeTypeForNodeWithId(id);
+	std::vector<Site> sites = declarationSites(storage, id);
+	// every file of a package declares it
+	if (sites.size() > 1 && (type.getKind() & (NODE_PACKAGE | NODE_MODULE | NODE_NAMESPACE)))
+	{
+		sites.resize(1);
+	}
+	std::vector<ResultLine> lines;
+	for (const Site& site: sites)
+	{
+		if (!files || files->count(site.file))
+		{
+			lines.push_back(resultLine(storage, key, type.getReadableTypeWString(), site));
+		}
+	}
+	return lines;
 }
 
 std::vector<ResultLine> references(PersistentStorage& storage, const std::vector<Id>& symbols, Walked* walked)

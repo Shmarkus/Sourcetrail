@@ -1,6 +1,7 @@
 #ifndef ST_GRAPH_H
 #define ST_GRAPH_H
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -24,7 +25,9 @@ enum class Direction
 std::wstring linkKind(Edge::EdgeType type);
 
 // Scope location when there is one, else the first token location.
-std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const std::wstring& key);
+// One line per file that declares the symbol (two modules may declare the same class), limited to `files` if given.
+std::vector<ResultLine> definitionLines(
+	PersistentStorage& storage, Id id, const std::wstring& key, const std::set<FilePath>* files = nullptr);
 
 // One line per reference location, keyed by the using symbol; kind is the link kind ("call", "usage", "type usage", ...).
 // `walked`, when given, receives what the query walked (for findGaps); likewise below.

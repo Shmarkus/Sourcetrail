@@ -448,6 +448,9 @@ TEST_CASE("delombok keeps originals with the same relative path in different roo
 	f.write("b/src/main/java/pkg/A.java", "class OtherA {}");
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.lastRunWasWholeTree());
+	// one run per group of roots without shared paths, each seeing every root's sources
+	REQUIRE(fake.runs == std::vector<std::vector<FilePath>>{{f.roots[0]}, {f.roots[1]}});
+	REQUIRE(fake.sourcePaths == std::vector<std::vector<FilePath>>{f.roots, f.roots});
 	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A {}");
 	REQUIRE(readTree(f.delombok)["b_src_main_java/pkg/A.java"] == "// delomboked\nclass OtherA {}");
 	REQUIRE(readTree(f.delombok)["b_src_main_java/other/C.java"] == "// delomboked\nclass C {}");
@@ -486,6 +489,8 @@ TEST_CASE("incremental delombok matches a full run")
 	FakeDelombok fake;
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.lastRunWasWholeTree());
+	REQUIRE(fake.runs.back() == f.roots);
+	REQUIRE(fake.sourcePaths.back().empty());
 	const auto unchangedMtime =
 		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "a_src_main_java/pkg/B.java");
 

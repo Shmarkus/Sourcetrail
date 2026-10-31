@@ -128,7 +128,8 @@ std::vector<Id> definedInFile(PersistentStorage& storage, const FilePath& indexe
 	return ids;
 }
 
-std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id>& symbols)
+std::vector<ResultLine> outline(
+	PersistentStorage& storage, const std::vector<Id>& symbols, const std::map<Id, std::set<FilePath>>& inFiles)
 {
 	std::vector<ResultLine> lines;
 	for (const Id id: symbols)
@@ -142,7 +143,9 @@ std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id
 		{
 			access = ACCESS_NONE;
 		}
-		for (ResultLine& line: definitionLines(storage, id, symbolKey(storage.getNameHierarchyForNodeId(id))))
+		const auto restricted = inFiles.find(id);
+		for (ResultLine& line: definitionLines(storage, id, symbolKey(storage.getNameHierarchyForNodeId(id)),
+				 restricted == inFiles.end() ? nullptr : &restricted->second))
 		{
 			if (access != ACCESS_NONE)
 			{

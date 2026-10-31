@@ -1,6 +1,7 @@
 #include "StKey.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <set>
 
 #include "DefinitionKind.h"
@@ -22,6 +23,7 @@ struct Candidate
 	std::wstring delimiter;
 	std::wstring bareKey;		// key and qualified name without type parameters
 	std::wstring bareQualified;
+	std::vector<std::wstring> parameters;
 };
 
 // Removes every balanced `<...>` group, nested ones included.
@@ -64,6 +66,53 @@ bool endsWithName(const std::wstring& full, const std::wstring& suffix, const st
 		full.compare(full.size() - suffix.size() - delimiter.size(), delimiter.size(), delimiter) == 0;
 }
 
+// Parameter types of the first `(...)` list, without type parameters or whitespace.
+std::vector<std::wstring> parameterTypes(const std::wstring& text)
+{
+	std::vector<std::wstring> result;
+	const size_t open = text.find(L'(');
+	const size_t close = text.rfind(L')');
+	if (open == std::wstring::npos || close == std::wstring::npos || close < open)
+	{
+		return result;
+	}
+	std::wstring current;
+	for (const wchar_t c: withoutTypeParameters(text.substr(open + 1, close - open - 1)))
+	{
+		if (c == L',')
+		{
+			result.push_back(current);
+			current.clear();
+		}
+		else if (!std::iswspace(c))
+		{
+			current += c;
+		}
+	}
+	if (!current.empty() || !result.empty())
+	{
+		result.push_back(current);
+	}
+	return result;
+}
+
+// Equal counts; each wanted type equals the key's or is a dot-boundary suffix of it.
+bool parametersMatch(const std::vector<std::wstring>& wanted, const std::vector<std::wstring>& actual)
+{
+	if (wanted.size() != actual.size())
+	{
+		return false;
+	}
+	for (size_t i = 0; i < wanted.size(); i++)
+	{
+		if (!endsWithName(actual[i], wanted[i], L"."))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& query, NodeKindMask kinds)
 {
 	std::vector<Candidate> result;
@@ -85,7 +134,7 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 			const std::wstring key = symbolKey(name);
 			const std::wstring qualified = name.getQualifiedName();
 			result.push_back({id, key, qualified, name.getDelimiter(), withoutTypeParameters(key),
-				withoutTypeParameters(qualified)});
+				withoutTypeParameters(qualified), parameterTypes(key)});
 		}
 	}
 	return result;
@@ -95,6 +144,8 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
 {
 	const bool hasParameters = text.find(L'(') != std::wstring::npos;
 	const std::wstring bare = withoutTypeParameters(text);
+	const std::wstring bareName = hasParameters ? withoutTypeParameters(text.substr(0, text.find(L'('))) : bare;
+	const std::vector<std::wstring> wanted = parameterTypes(text);
 	std::vector<Id> ids;
 	auto gather = [&](auto matches) {
 		for (const auto& candidate: candidates)
@@ -105,9 +156,12 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
 	};
 	if (gather([&](const Candidate& c) { return c.key == text; }) ||
 		gather([&](const Candidate& c) { return c.qualified == text; }) ||
-		gather([&](const Candidate& c) { return (hasParameters ? c.bareKey : c.bareQualified) == bare; }) ||
 		gather([&](const Candidate& c) {
-			return endsWithName(hasParameters ? c.bareKey : c.bareQualified, bare, c.delimiter);
+			return c.bareQualified == bareName && (!hasParameters || parametersMatch(wanted, c.parameters));
+		}) ||
+		gather([&](const Candidate& c) {
+			return endsWithName(c.bareQualified, bareName, c.delimiter) &&
+				(!hasParameters || parametersMatch(wanted, c.parameters));
 		}))
 	{
 		return {ids.size() == 1 ? Resolution::Found : Resolution::Ambiguous, ids};

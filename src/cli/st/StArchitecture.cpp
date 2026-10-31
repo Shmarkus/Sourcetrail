@@ -421,7 +421,9 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 			{
 				continue;
 			}
-			result.lines.push_back({symbolKey(symbol.name), storage.getNodeTypeForNodeWithId(symbol.id).getReadableTypeWString(),
+			result.lines.push_back({symbolKey(symbol.name),
+				storage.getNodeTypeForNodeWithId(symbol.id).getReadableTypeWString() + L", depth " +
+					std::to_wstring(reached.at(symbol.id).cost),
 				symbol.site.file, symbol.site.line, sourceText(storage, symbol.site)});
 		}
 	}
@@ -460,7 +462,21 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 				(packageLevel && key.compare(0, home.size() + 1, home + inputName.getDelimiter()) == 0);
 		};
 
-		const std::set<Id> own = owned(storage, {input});
+		std::vector<Id> roots = {input};
+		if (packageLevel)
+		{
+			// The index lacks some package-to-sub-package member links, so sub-packages are found by name.
+			const std::wstring prefix = home + inputName.getDelimiter();
+			for (const StorageNode& node: storage.getStorageNodes())
+			{
+				if (intToNodeKind(node.type) == NODE_PACKAGE && node.id != input &&
+					storage.getNameHierarchyForNodeId(node.id).getQualifiedName().compare(0, prefix.size(), prefix) == 0)
+				{
+					roots.push_back(node.id);
+				}
+			}
+		}
+		const std::set<Id> own = owned(storage, roots);
 		const std::vector<Id> ids(own.begin(), own.end());
 		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)
 																				: storage.getEdgesForTargetIds(ids);

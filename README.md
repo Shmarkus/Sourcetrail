@@ -326,7 +326,7 @@ st path com.acme.Controller.create com.acme.Repo.save
   `outline <class>` lists nested types but not their members.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
   counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
-  package. Overrides are followed up and down, but not down again after going up. stderr gets `impact: N symbols in F files, P packages`.
+  package. Overrides are followed up and down, but not down again after going up. Rows read `<kind>, depth <n>` (`depth 1` is a direct user). stderr gets `impact: N symbols in F files, P packages`.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
   (`package, N links`; sub-packages are included). `--in` gives incoming. Links inside the input, external targets and builtin types
   are not counted.

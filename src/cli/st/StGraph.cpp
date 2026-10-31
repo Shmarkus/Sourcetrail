@@ -129,7 +129,9 @@ std::map<Id, Reached> walkCalls(const Graph& graph, Id start, Direction directio
 	}
 	for (auto it = printable.begin(); it != printable.end();)
 	{
-		it = isKind(graph.getNodeById(it->first), CALLABLE) ? std::next(it) : printable.erase(it);
+		// A field whose initializer calls the symbol is a caller; it is reported but never walked further.
+		const NodeKindMask reported = direction == Direction::Incoming ? CALLABLE | NODE_FIELD : CALLABLE;
+		it = isKind(graph.getNodeById(it->first), reported) ? std::next(it) : printable.erase(it);
 	}
 	return printable;
 }

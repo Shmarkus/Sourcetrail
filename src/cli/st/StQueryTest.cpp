@@ -498,7 +498,7 @@ TEST_CASE("st impact reaches callers through interfaces and subtypes")
 	CHECK_FALSE(keys(ofRun.lines).count(L"p.Other.run()"));
 	REQUIRE(lineFor(ofRun.lines, L"p.Client.use()"));
 	CHECK(lineFor(ofRun.lines, L"p.Client.use()")->line == 4);
-	CHECK(lineFor(ofRun.lines, L"p.Client.use()")->kind == L"method");
+	CHECK(lineFor(ofRun.lines, L"p.Client.use()")->kind == L"method, depth 1");
 
 	const auto ofImpl = impactKeys(code, {impl});
 	CHECK(includes(ofImpl, {L"p.Sub", L"p.Holder.field", L"p.Client.use()"}));
@@ -719,6 +719,82 @@ TEST_CASE("st deps of a package covers its sub-packages")
 	const auto in = st::deps(code.storage, {code.package(L"d")}, st::Direction::Incoming);
 	REQUIRE(in.size() == 1);
 	CHECK(in[0].key == L"w");
+}
+
+TEST_CASE("st callers keeps a field whose initializer calls the symbol")
+{
+	Code code;
+	const Id rules = code.type(L"p", L"F");
+	const Id required = code.member(rules, L"F", L"required");
+	const Id schema = code.type(L"p", L"ShopSchema");
+	const Id field = code.member(schema, L"ShopSchema", L"SCHEMA", NODE_FIELD);
+	const Id user = code.member(code.type(L"p", L"User"), L"User", L"use");
+	code.link(Edge::EDGE_CALL, field, required, L"ShopSchema", {4});
+	code.link(Edge::EDGE_CALL, user, field, L"User", {5});
+	code.storage.buildCaches();
+
+	const auto lines = st::calls(code.storage, {required}, st::Direction::Incoming, 0);
+	REQUIRE(lines.size() == 1);
+	CHECK(lines[0].key == L"p.ShopSchema.SCHEMA");
+	CHECK(lines[0].line == 4);
+}
+
+TEST_CASE("st deps covers a sub-package without a member link")
+{
+	Code code;
+	const Id d = code.package(L"d");
+	NameHierarchy lone(NAME_DELIMITER_JAVA);
+	lone.push(L"d");
+	lone.push(L"x");
+	code.packages[L"d.x"] = add(code.storage, lone, NODE_PACKAGE);	// no member edge from d
+	const Id deep = code.type(L"d.x", L"Deep");
+	const Id run = code.member(deep, L"Deep", L"run");
+	const Id web = code.type(L"w", L"Web");
+	const Id serve = code.member(web, L"Web", L"serve");
+	code.link(Edge::EDGE_CALL, run, serve, L"Deep", {3});
+	code.storage.buildCaches();
+
+	const auto out = st::deps(code.storage, {d}, st::Direction::Outgoing);
+	REQUIRE(out.size() == 1);
+	CHECK(out[0].key == L"w");
+}
+
+TEST_CASE("st resolves parameters by their simple names")
+{
+	Code code;
+	const Id service = code.type(L"p", L"PaymentService");
+	const Id full = code.member(service, L"PaymentService", L"sendPayments",
+		NODE_METHOD, L"(java.util.UUID, p.PaymentPlan, java.util.Collection<p.Payment>)");
+	code.member(service, L"PaymentService", L"sendPayments", NODE_METHOD, L"(java.util.UUID, java.util.List<p.X>)");
+	code.storage.buildCaches();
+
+	auto resolved = st::resolveSymbol(code.storage,
+		L"p.PaymentService.sendPayments(UUID, PaymentPlan, Collection<Payment>)", NODE_METHOD);
+	REQUIRE(resolved.status == st::Resolution::Found);
+	CHECK(resolved.ids == std::vector<Id>{full});
+	resolved = st::resolveSymbol(code.storage, L"sendPayments(UUID, PaymentPlan, Collection)", NODE_METHOD);
+	CHECK(resolved.status == st::Resolution::Found);
+	CHECK(st::resolveSymbol(code.storage, L"sendPayments(ID, PaymentPlan, Collection)", NODE_METHOD).status ==
+		st::Resolution::NotFound);
+	CHECK(st::resolveSymbol(code.storage, L"sendPayments(UUID)", NODE_METHOD).status == st::Resolution::NotFound);
+}
+
+TEST_CASE("st impact rows carry the walk depth")
+{
+	Code code;
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	const Id c = code.member(code.type(L"C"), L"C", L"c");
+	code.link(Edge::EDGE_CALL, a, b, L"A", {2});
+	code.link(Edge::EDGE_CALL, b, c, L"B", {2});
+	code.storage.buildCaches();
+
+	const auto lines = st::impact(code.storage, {c}, 0, st::IMPACT_EDGES, st::Group::None).lines;
+	REQUIRE(lines.size() == 2);
+	for (const auto& line: lines)
+	{
+		CHECK(line.kind == (line.key == L"p.B.b()" ? L"method, depth 1" : L"method, depth 2"));
+	}
 }
 
 TEST_CASE("st find hides type parameters unless the kind asks for them")

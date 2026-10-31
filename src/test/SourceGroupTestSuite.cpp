@@ -501,7 +501,7 @@ TEST_CASE("java class path puts the source file's own root first")
 		FilePath(L"/p/b/src/test/java/gen")};
 
 	REQUIRE(
-		utility::withOwnRootFirst(classPath, FilePath(L"/p/b/src/test/java/q/TestUtil.java")) ==
+		utility::withOwnRootFirst(classPath, FilePath(L"/p/b/src/test/java/q/Helper.java")) ==
 		std::vector<FilePath>{
 			FilePath(L"/p/b/src/test/java"),
 			FilePath(L"/p/a/src/test/java"),

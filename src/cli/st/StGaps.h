@@ -55,8 +55,9 @@ Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vecto
 // Unresolved symbols in the whole index, by the rule of findGaps.
 size_t countUnresolved(PersistentStorage& storage);
 
-// `st: incomplete: <n> links to unresolved symbols, <m> index errors, <k> symbols declared in several modules
-// (see st status)` on `out`, leaving out a zero part; nothing when all are zero.
+// `st: incomplete: <k> symbols declared in several modules, <n> links to unresolved symbols, <m> index errors
+// (see st status)` on `out`, leaving out a zero part, and the st status hint when only the first is left; nothing
+// when all are zero.
 void printGaps(const Gaps& gaps, std::ostream& out);
 
 // printGaps of what `findGaps` returns; when it throws, `st: incomplete: gap check failed (<what>)` instead, since

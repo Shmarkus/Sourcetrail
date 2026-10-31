@@ -20,7 +20,7 @@ namespace
 {
 bool passes(Code& code, Id id, const st::FilterOptions& options, const std::wstring& path = L"src/A.java")
 {
-	return st::matchesFilter(code.storage, id, options, path);
+	return st::matchesFilter(code.storage, id, options, path.empty() ? std::vector<std::wstring>() : std::vector<std::wstring>{path});
 }
 
 std::set<std::wstring> impactKeys(Code& code, const std::vector<Id>& ids, size_t depth = 0)
@@ -155,6 +155,24 @@ TEST_CASE("st filter matches file patterns against the name or the displayed pat
 	REQUIRE(passes(code, a, options, L"src/ATest.java"));
 	REQUIRE_FALSE(passes(code, a, options, L"lib/A.java"));
 	REQUIRE_FALSE(passes(code, a, options, L""));
+}
+
+TEST_CASE("st filter of a symbol declared in two files negates the match of any file once")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	code.storage.buildCaches();
+	const std::vector<std::wstring> paths = {L"src/test/java/p/A.java", L"sub/src/test/java/p/A.java"};
+
+	st::FilterOptions options;
+	options.filePattern = L"sub/*";
+	REQUIRE(st::matchesFilter(code.storage, a, options, paths));
+	options.invert = true;
+	REQUIRE_FALSE(st::matchesFilter(code.storage, a, options, paths));
+	options.filePattern = L"other/*";
+	REQUIRE(st::matchesFilter(code.storage, a, options, paths));
+	options.invert = false;
+	REQUIRE_FALSE(st::matchesFilter(code.storage, a, options, paths));
 }
 
 TEST_CASE("st filter keeps every passing input line unchanged")
@@ -1287,8 +1305,8 @@ TEST_CASE("st gaps count walked symbols whose type two modules declare")
 		const bool warns = twice == L"A";
 		const st::Gaps gaps = gapsOfCalls(code, f, st::Direction::Incoming, 1);
 		CHECK(gaps.multiDeclared == (warns ? 1 : 0));
-		CHECK(printed(gaps) == (warns ? "st: incomplete: 1 symbols declared in several modules (see st status)\n" : ""));
+		CHECK(printed(gaps) == (warns ? "st: incomplete: 1 symbols declared in several modules\n" : ""));
 	}
 	CHECK(printed({2, 0, 1}) ==
-		"st: incomplete: 2 links to unresolved symbols, 1 symbols declared in several modules (see st status)\n");
+		"st: incomplete: 1 symbols declared in several modules, 2 links to unresolved symbols (see st status)\n");
 }

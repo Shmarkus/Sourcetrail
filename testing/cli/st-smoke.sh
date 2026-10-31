@@ -62,13 +62,18 @@ grep -F $'example.Options\tclass\tsrc/test/java/example/Options.java:6' "$work/o
     || assert "find example.Options lacks the root module's class: $(cat "$work/out")"
 grep -F $'example.Options\tclass\tsub/src/test/java/example/Options.java:6' "$work/out" > /dev/null \
     || assert "find example.Options lacks the sub module's class: $(cat "$work/out")"
+# A file filter keeps the class when one copy is in the pattern, and --not drops it then.
+run 0 filter --file 'sub/*' example.Options
+contains 'example.Options' out
+run 1 filter --not --file 'sub/*' example.Options
 # at on the class line of one copy names that copy only.
 run 0 at sub/src/test/java/example/Options.java:6
 [ "$(wc -l < "$work/out")" = 1 ] || assert "at on a duplicated class line printed $(wc -l < "$work/out") rows: $(cat "$work/out")"
 contains $'\tsub/src/test/java/example/Options.java:6' out
 # Callers of a member of that class may be bound to the other copy or missing: st says so.
 run 1 callers 'example.Options.isEnabled()'
-contains 'st: incomplete: 1 symbols declared in several modules (see st status)' err
+contains 'st: incomplete: 1 symbols declared in several modules' err
+! grep -qF '(see st status)' "$work/err" || assert "several-modules part alone points to st status: $(cat "$work/err")"
 run 0 symbols-in sub/src/test/java/example/Options.java
 contains 'sub/src/test/java/example/Options.java:6' out
 ! grep -qP '\tsrc/test/java/example/Options.java' "$work/out" || assert "symbols-in of sub listed the root module's file: $(cat "$work/out")"

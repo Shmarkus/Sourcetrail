@@ -299,9 +299,9 @@ existing Sourcetrail index, as plain text lines that pipe into each other.
 | Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
 
 Names are a short name (`OrderService.place`) or a key; parameters take simple type names: `'OrderService.place(Order, int)'`.
-- **Trust the answer.** No `st: incomplete:` line on stderr means the answer is complete as far as the index goes: don't re-read
-  source to confirm it. Only the [blind spots](#st-known-limits) need grep or reading: text, config and strings, code inside
-  Java records, the Lombok `@Builder` setter of a field, calls through a field of an unresolved type.
+- **Trust the answer.** No `st: incomplete:` line on stderr means the answer is complete as far as the index goes: don't
+  re-read source to confirm it. Only the [blind spots](#st-known-limits) need grep or reading: text, config, strings, Java records,
+  Lombok `@Builder` setters of a field, JPA metamodel uses (`Order_.status`), calls through a field of an unresolved type.
 - **Exit 1** means none. **Exit 2** (ambiguous): pick a key from the candidates on stderr and rerun.
   **Exit 3** (not found): check the name, the parameters (count and simple type names; stderr lists the overloads), and the
   project: `st` picks it from the current directory, `st find <name>` names it (`find: 0 (project shop)`), `--project` overrides.
@@ -340,7 +340,8 @@ Ambiguous names exit 2 and list the candidates; a bare class name that matches o
 (`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9 (project shop)`, the project file's base name)
 goes to stderr; a `+N more (--limit)` overflow line ends stdout. Calls through an
 interface show as `method via pkg.Iface.method()`. With `--depth` above 1 (or 0) `callers` and `callees` append
-`, depth <n>` to the kind (`method, depth 2`; `--limit` keeps the lowest depths). `--limit` (default 50), `--depth`, `--kind` shape results.
+`, depth <n>` to the kind (`method, depth 2`; `depth 0` is reached through override links alone, such as the implementation
+`callees` reaches through an interface method; `--limit` keeps the lowest depths). `--limit` (default 50), `--depth`, `--kind` shape results.
 `find` ranks exact, then suffix, then substring matches. External (library) symbols are hidden.
 
 ```bash
@@ -419,9 +420,11 @@ constructors don't count). M counts the index errors that belong to a walked sym
 error belongs to the innermost named method or type around it (anonymous and local classes are skipped), at class level to a
 field declared on its line, and outside every scope (an import) to the file's top-level types. `st status` adds the index-wide
 totals, `files_with_errors` and `unresolved_symbols`.
-A third part, `K symbols declared in several modules`, counts the inputs and the symbols the walk went on from, or types
-enclosing one, that more than one file declares (a class two modules both have): their callers may be bound to the other
-copy or missing. A result row in such a class does not count.
+A further part, `K symbols declared in several modules` (listed first; `st status` has no total for it, so the line drops
+the hint when it is the only part), counts the inputs and the symbols the walk went on from, or types enclosing one, that
+more than one file declares (a class two modules both have): their callers may be bound to the other copy or missing. A
+result row in such a class does not count. The check assumes Java: in C and C++ a declaration in a header and a
+definition in a source file count as several files, so `st` on C/C++ indexes is untested and may warn wrongly.
 The warning can stay silent where a gap is real: the Java indexer reports an unresolved type once, where it is declared (a
 field of a generated type), so calls through that field vanish without an error in the calling method; and `refs` of an
 entity field misses its JPA metamodel uses (`Order_.status`) without a warning. `refs` and `impact` of a field of a Lombok

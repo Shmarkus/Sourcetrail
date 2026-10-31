@@ -311,28 +311,20 @@ bool keeps(PersistentStorage& storage, const std::wstring& key, const st::Filter
 		return false;
 	}
 	const Id id = resolved.ids.front();
-	if (filterOptions.filePattern.empty())
+	// a symbol declared in several files is in a file pattern when one of them is
+	std::vector<std::wstring> paths;
+	if (!filterOptions.filePattern.empty())
 	{
-		return st::matchesFilter(storage, id, filterOptions, L"");
-	}
-	// a symbol declared in several files passes when one of them matches
-	const auto definitions = st::definitionLines(storage, id, key);
-	if (definitions.empty())
-	{
-		return st::matchesFilter(storage, id, filterOptions, L"");
-	}
-	for (st::ResultLine definition: definitions)
-	{
-		if (options.mapLocation)
+		for (st::ResultLine definition: st::definitionLines(storage, id, key))
 		{
-			definition = options.mapLocation(definition);
-		}
-		if (st::matchesFilter(storage, id, filterOptions, st::displayPath(definition.file, options.cwd)))
-		{
-			return true;
+			if (options.mapLocation)
+			{
+				definition = options.mapLocation(definition);
+			}
+			paths.push_back(st::displayPath(definition.file, options.cwd));
 		}
 	}
-	return false;
+	return st::matchesFilter(storage, id, filterOptions, paths);
 }
 
 // Whether a result line printed by st stays generated: the marker ends its kind or its location column.

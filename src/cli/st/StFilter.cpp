@@ -1,5 +1,7 @@
 #include "StFilter.h"
 
+#include <algorithm>
+
 #include <QRegExp>
 #include <QString>
 
@@ -61,7 +63,7 @@ bool hasAnnotation(PersistentStorage& storage, Id id, const std::wstring& annota
 }
 
 bool matchesFilter(PersistentStorage& storage, Id id, const FilterOptions& options,
-	const std::wstring& displayedDefinitionPath)
+	const std::vector<std::wstring>& displayedDefinitionPaths)
 {
 	bool matches = (storage.getNodeTypeForNodeWithId(id).getKind() & options.kinds) != 0;
 	if (matches && !options.package.empty())
@@ -76,10 +78,11 @@ bool matchesFilter(PersistentStorage& storage, Id id, const FilterOptions& optio
 	if (matches && !options.filePattern.empty())
 	{
 		const bool hasPath = options.filePattern.find(L'/') != std::wstring::npos;
-		matches = !displayedDefinitionPath.empty() &&
-			wildcard(options.filePattern,
-				hasPath ? displayedDefinitionPath
-						: displayedDefinitionPath.substr(displayedDefinitionPath.find_last_of(L'/') + 1));
+		matches = std::any_of(displayedDefinitionPaths.begin(), displayedDefinitionPaths.end(),
+			[&](const std::wstring& path) {
+				return !path.empty() &&
+					wildcard(options.filePattern, hasPath ? path : path.substr(path.find_last_of(L'/') + 1));
+			});
 	}
 	return matches != options.invert;
 }

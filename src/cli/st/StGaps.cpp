@@ -492,6 +492,10 @@ size_t countUnresolved(PersistentStorage& storage)
 void printGaps(const Gaps& gaps, std::ostream& out)
 {
 	std::vector<std::string> parts;
+	if (gaps.multiDeclared)
+	{
+		parts.push_back(std::to_string(gaps.multiDeclared) + " symbols declared in several modules");
+	}
 	if (gaps.unresolvedLinks)
 	{
 		parts.push_back(std::to_string(gaps.unresolvedLinks) + " links to unresolved symbols");
@@ -499,10 +503,6 @@ void printGaps(const Gaps& gaps, std::ostream& out)
 	if (gaps.indexErrors)
 	{
 		parts.push_back(std::to_string(gaps.indexErrors) + " index errors");
-	}
-	if (gaps.multiDeclared)
-	{
-		parts.push_back(std::to_string(gaps.multiDeclared) + " symbols declared in several modules");
 	}
 	if (parts.empty())
 	{
@@ -513,7 +513,8 @@ void printGaps(const Gaps& gaps, std::ostream& out)
 	{
 		out << (i ? ", " : "") << parts[i];
 	}
-	out << " (see st status)\n";
+	// st status totals the unresolved symbols and index errors, not the symbols several modules declare
+	out << (gaps.unresolvedLinks || gaps.indexErrors ? " (see st status)\n" : "\n");
 }
 
 void printGaps(const std::function<Gaps()>& findGaps, std::ostream& out)

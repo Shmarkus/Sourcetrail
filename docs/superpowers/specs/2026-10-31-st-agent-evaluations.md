@@ -234,7 +234,8 @@ Status after run 2: items marked *done* were confirmed in the current binary or 
 3. **Name the project and the error owners (st).** The project name on the count line is *done*. Still open: the
    `incomplete:` line, or `st status <symbol>`, should name the symbols the index errors belong to, with a test or main
    marker. That would let an agent dismiss the H5 warning, which came from a test base class.
-4. **Add a depth column to `callers`/`callees --depth` (st, new).** `impact` already prints `depth <n>`. In U6 the
+4. ~~**Add a depth column to `callers`/`callees --depth` (st, new).**~~ *Done* (Phase 2.5 Task 9): with `--depth` other
+   than 1 the kind ends `, depth <n>`, and `--limit` keeps the lowest depths. `impact` already prints `depth <n>`. In U6 the
    flat list cost a re-run and a source read to split direct callers from transitive ones.
 5. ~~**Fix delombok output collisions across modules (indexer, new).**~~ *Done* (Phase 2.5 Task 8). Same-named files with the same package in two
    modules' test (or main) source sets overwrite each other in the shared delombok tree. One copy silently drops out of
@@ -246,7 +247,8 @@ Status after run 2: items marked *done* were confirmed in the current binary or 
 6. **Explain record misses (st).** Still open. `symbol not found` on a record accessor gives no reason. Suggested
    message: `st: <Type> is declared in <file> but not indexed (Java record? see README Known limits)`.
 7. **Connect Lombok builder setters to their field (st).** Still open in `st`. The snippet now lists `@Builder` setters
-   as a blind spot, which covers agents that read it.
+   as a blind spot, which covers agents that read it, and the README gives the workaround query
+   `<Type>.<Type>Builder.<field>`.
 8. **Allow a parameter prefix (st, optional).** Exit 3 with the overload list cost one extra call in both unprompted
    runs (U5). This is low priority.
 9. **Package walks include tests (st, optional).** `deps`/`impact` of a package also walk the test classes in that

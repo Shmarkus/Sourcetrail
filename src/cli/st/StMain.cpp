@@ -265,14 +265,15 @@ int graph(PersistentStorage& storage, const QString& command, const std::vector<
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
-// Whether the symbol named by `key` passes; a key that doesn't resolve exactly is reported and fails.
+// Whether the symbol named by `key` passes; a key that doesn't resolve exactly is reported, fails and sets `unknown`.
 bool keeps(PersistentStorage& storage, const std::wstring& key, const st::FilterOptions& filterOptions,
-	const st::OutputOptions& options)
+	const st::OutputOptions& options, bool& unknown)
 {
 	const st::Resolved resolved = st::resolveSymbol(storage, key, ~NodeKindMask(0));
 	if (resolved.status != st::Resolution::Found || resolved.ids.size() != 1)
 	{
 		std::cerr << "st: symbol not found: " << utility::encodeToUtf8(key) << '\n';
+		unknown = true;
 		return false;
 	}
 	const Id id = resolved.ids.front();
@@ -309,11 +310,12 @@ bool isGeneratedRow(const std::string& raw)
 	return false;
 }
 
-// Prints the input lines whose symbol passes; keys that don't resolve exactly are reported and skipped.
+// Prints the input lines whose symbol passes; keys that don't resolve exactly are reported, skipped and exit 3.
 int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, const st::FilterOptions& filterOptions,
 	const st::OutputOptions& options)
 {
 	std::vector<const st::InputLine*> passing;
+	bool unknown = false;
 	std::map<std::wstring, bool> verdicts;	// per distinct key: refs-style input repeats keys across many lines
 	for (const st::InputLine& line: input)
 	{
@@ -324,7 +326,7 @@ int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, 
 		auto verdict = verdicts.find(line.key);
 		if (verdict == verdicts.end())
 		{
-			verdict = verdicts.emplace(line.key, keeps(storage, line.key, filterOptions, options)).first;
+			verdict = verdicts.emplace(line.key, keeps(storage, line.key, filterOptions, options, unknown)).first;
 		}
 		if (verdict->second)
 		{
@@ -339,6 +341,10 @@ int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, 
 	if (passing.size() > options.limit)
 	{
 		std::cout << '+' << passing.size() - options.limit << " more (--limit)\n";
+	}
+	if (unknown)
+	{
+		return st::EXIT_NOT_FOUND;
 	}
 	return passing.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }

@@ -340,8 +340,9 @@ st path com.acme.Controller.create com.acme.Repo.save
   are not counted; for a member input, its whole top-level class counts as inside, so links to sibling members don't count.
 - `filter`: keeps the stdin lines that pass, unchanged and in order: `--kind K`, `--package P` (keys under `P.`),
   `--annotated A` (the symbol or its enclosing type carries `@A`), `--file G` (wildcard; with a `/` it matches the path, else
-  the file name), `--not` negates the combination. Passing lines print unchanged, identical lines once; unknown keys are skipped
-  with a stderr note.
+  the file name), `--not` negates the combination. Passing lines print unchanged, identical lines once. A key that is unknown or
+  ambiguous, or a row that is not a symbol (an `impact --group` line), is named once on stderr (`st: symbol not found: <key>`), its
+  lines are dropped, and the exit is 3 even when other lines pass; otherwise 0 with output, 1 without.
 
 `--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
 name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.

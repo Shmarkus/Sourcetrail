@@ -132,6 +132,12 @@ run 0 filter --annotated Endpoint 'example.web.GreetingController.greet(example.
 contains 'example.web.GreetingController' out
 run 1 filter --annotated Endpoint 'example.Caller.shout(example.Person)'
 ! grep -qF 'symbol not found' "$work/err" || assert "negative filter reported a missing symbol: $(cat "$work/err")"
+printf '%s\n' 'example.web.GreetingController.greet(example.Person)' example.NoSuchTypo > "$work/in"
+code=0
+"$st" filter --annotated Endpoint < "$work/in" > "$work/out" 2> "$work/err" || code=$?
+[ "$code" = 3 ] || assert "filter with a typo key exited $code, expected 3"
+contains 'example.web.GreetingController.greet(example.Person)' out
+contains 'st: symbol not found: example.NoSuchTypo' err
 
 run 64 path --edges calls example.Welcome 'example.Person.getName()'
 contains "'calls'" err

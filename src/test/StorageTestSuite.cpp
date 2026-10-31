@@ -420,3 +420,112 @@ TEST_CASE("storage finds importers by the file declaring the imported symbol")
 	REQUIRE(storage.getReferencing({FilePath(L"/project/p/A.java")}).count(FilePath(L"/project/p/B.java")) == 0);
 	REQUIRE(storage.getReferenced({FilePath(L"/project/p/B.java")}).count(FilePath(L"/project/p/A.java")) == 0);
 }
+
+TEST_CASE("storage keeps the edges of a symbol a cleared file only qualifies")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id declaring = addJavaFile(storage, L"/project/p/A.java");
+	const Id qualifying = addJavaFile(storage, L"/project/p/B.java");
+
+	const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+	const Id method = addJavaSymbol(storage, NODE_METHOD, L"p.A.size");
+	const Id caller = addJavaSymbol(storage, NODE_METHOD, L"p.B.run");
+	addTokenLocation(storage, classA, declaring, 2);
+	addTokenLocation(storage, method, declaring, 3);
+	addTokenLocation(storage, caller, qualifying, 3);
+	const Id member = storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, classA, method));
+
+	// B calls A.size(), naming the class as a qualifier.
+	addLocation(storage, classA, qualifying, 4, LOCATION_QUALIFIER);
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, method)), qualifying, 4);
+	storage.buildCaches();
+
+	storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+
+	const std::vector<StorageEdge> edges = storage.getEdgesForSourceIds({classA});
+	REQUIRE(edges.size() == 1);
+	REQUIRE(edges.front().id == member);
+	REQUIRE(storage.getEdgesForSourceIds({caller}).empty());
+}
+
+TEST_CASE("storage counts errors injected after clearing files with errors")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id file = addJavaFile(storage, L"/project/p/B.java");
+	for (const std::wstring& message: {L"first", L"second"})
+	{
+		addLocation(storage, storage.addError(StorageErrorData(message, L"/project/p/B.java", false, true)), file, 1, LOCATION_ERROR);
+	}
+	storage.buildCaches();
+
+	// A first pass injects no errors, then a second pass clears B.java and injects a new error.
+	CHECK(storage.getErrorCount().total == 2);
+	IntermediateStorage firstPass;
+	storage.inject(&firstPass);
+	storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+	storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+	CHECK(storage.getErrorCount().total == 0);
+	storage.setMode(SqliteIndexStorage::STORAGE_MODE_WRITE);
+	IntermediateStorage secondPass;
+	const Id injectedFile = secondPass.addNode(StorageNodeData(nodeKindToInt(NODE_FILE),
+		NameHierarchy::serialize(NameHierarchy(L"/project/p/B.java", NAME_DELIMITER_FILE)))).first;
+	secondPass.addFile(StorageFile(injectedFile, L"/project/p/B.java", L"java", "2026-10-30 12:00:00", true, true));
+	secondPass.addOccurrence(StorageOccurrence(
+		secondPass.addError(StorageErrorData(L"third", L"/project/p/B.java", false, true)),
+		secondPass.addSourceLocation(StorageSourceLocationData(injectedFile, 1, 1, 1, 5, locationTypeToInt(LOCATION_ERROR)))));
+	storage.inject(&secondPass);
+
+	REQUIRE(storage.getErrorCount().total == 1);
+}
+
+TEST_CASE("storage removes a symbol once the files declaring and referencing it are cleared one after the other")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id declaring = addJavaFile(storage, L"/project/p/A.java");
+	const Id referencing = addJavaFile(storage, L"/project/p/B.java");
+
+	const Id method = addJavaSymbol(storage, NODE_METHOD, L"p.A.size");
+	const Id caller = addJavaSymbol(storage, NODE_METHOD, L"p.B.run");
+	addTokenLocation(storage, method, declaring, 3);
+	addTokenLocation(storage, caller, referencing, 3);
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, method)), referencing, 4);
+	storage.buildCaches();
+
+	storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+	storage.clearFileElements({FilePath(L"/project/p/A.java")}, [](int) {});
+	REQUIRE(storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A.size", NAME_DELIMITER_JAVA)) == method);
+
+	storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+	REQUIRE(storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A.size", NAME_DELIMITER_JAVA)) == 0);
+}
+
+TEST_CASE("storage keeps the members a symbol declared in several files has outside a cleared file")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id fileA = addJavaFile(storage, L"/project/p/A.java");
+	const Id fileB = addJavaFile(storage, L"/project/p/B.java");
+
+	// Both files declare package p, each with its class.
+	const Id package = addJavaSymbol(storage, NODE_PACKAGE, L"p");
+	const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+	const Id classB = addJavaSymbol(storage, NODE_CLASS, L"p.B");
+	addTokenLocation(storage, package, fileA, 1);
+	addTokenLocation(storage, package, fileB, 1);
+	addTokenLocation(storage, classA, fileA, 2);
+	addTokenLocation(storage, classB, fileB, 2);
+	storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, classA));
+	const Id memberB = storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, classB));
+	storage.buildCaches();
+
+	storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+	storage.clearFileElements({FilePath(L"/project/p/A.java")}, [](int) {});
+
+	const std::vector<StorageEdge> members = storage.getEdgesForSourceIds({package});
+	REQUIRE(members.size() == 1);
+	REQUIRE(members.front().id == memberB);
+	REQUIRE(storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A", NAME_DELIMITER_JAVA)) == 0);
+}

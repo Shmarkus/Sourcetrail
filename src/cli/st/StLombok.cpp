@@ -361,8 +361,8 @@ LombokRoots lombokRoots(const ProjectSettings& settings)
 			continue;
 		}
 		const FilePath output = gradle->getGradleDependenciesDirectoryPath();
-		const auto info = utility::loadGradleProjectInfo(output,
-			gradle->getGradleProjectFilePathExpandedAndAbsolute().getParentDirectory(), gradle->getShouldIndexGradleTests());
+		const FilePath project = gradle->getGradleProjectFilePathExpandedAndAbsolute().getParentDirectory();
+		const auto info = utility::loadGradleProjectInfo(output, project, gradle->getShouldIndexGradleTests());
 		if (!info)
 		{
 			continue;
@@ -377,8 +377,13 @@ LombokRoots lombokRoots(const ProjectSettings& settings)
 					existing.push_back(root);
 				}
 			}
-			roots.delombokToOriginalRoots.emplace_back(
-				utility::getDelombokOutputDirectory(output, sourceSet.first), existing);
+			// every root has its own delombok directory, named the way the indexer names it
+			const std::vector<FilePath> generated = utility::getDelombokRootDirectories(
+				utility::getDelombokOutputDirectory(output, sourceSet.first), existing, project);
+			for (size_t i = 0; i < existing.size(); i++)
+			{
+				roots.delombokToOriginalRoots.emplace_back(generated[i], std::vector<FilePath>{existing[i]});
+			}
 		}
 	}
 	return roots;

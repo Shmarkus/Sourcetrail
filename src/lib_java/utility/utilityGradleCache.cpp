@@ -19,7 +19,7 @@ namespace
 const char* const CACHE_FILE_NAME = "sourcetrail-gradle-project.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-gradle-exported.cache";
 const char* const CACHE_VERSION = "3";
-const char* const MANIFEST_VERSION = "3";
+const char* const MANIFEST_VERSION = "4";	 // 4: one output directory per root
 
 const std::set<std::string> BUILD_FILE_NAMES = {
 	"build.gradle",

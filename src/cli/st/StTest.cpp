@@ -35,6 +35,7 @@
 #include "StorageFile.h"
 #include "StorageSymbol.h"
 #include "TimeStamp.h"
+#include "utilityGradle.h"
 #include "utilityGradleCache.h"
 
 using namespace st::test;
@@ -752,6 +753,52 @@ TEST_CASE("lombok alignment keeps a duplicated line only where its neighbours ag
 	const auto aligned = st::alignLines(generated, original);
 	CHECK(aligned[2] == 2);
 	CHECK_FALSE(aligned[5].has_value());
+}
+
+TEST_CASE("lombok roots map each root's delombok directory to that root alone")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/build.gradle", "plugins {}");
+	write(repo + "/a/src/test/java/p/Same.java", "class Same {}");
+	write(repo + "/b/src/test/java/p/Same.java", "class Same { int x; }");
+	write(base + "/prj/x.srctrlprj", QString(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+		"<gradle><project_file_path>" + repo + "/build.gradle</project_file_path><should_index_tests>1</should_index_tests></gradle>"
+		"<source_extensions><source_extension>.java</source_extension></source_extensions>"
+		"<status>enabled</status><type>Java Source Group from Gradle</type>"
+		"</source_group_g1></source_groups><version>8</version></config>\n").toUtf8());
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+	const FilePath project(repo.toStdWString());
+	const FilePath output((base + "/prj/sourcetrail_dependencies/g1/gradle").toStdWString());
+	utility::GradleProjectInfo info;
+	info.fingerprint = utility::gradleBuildFingerprint(project);
+	info.includesTests = true;
+	const std::vector<FilePath> roots = {project.getConcatenated(L"a/src/test/java"), project.getConcatenated(L"b/src/test/java")};
+	info.sourceDirectories[L"test"] = roots;
+	utility::saveGradleProjectInfo(output, info);
+	const std::vector<FilePath> generated = utility::getDelombokRootDirectories(
+		utility::getDelombokOutputDirectory(output, L"test"), roots, project);
+	REQUIRE(generated.size() == 2);
+	REQUIRE(generated[0] != generated[1]);
+	for (const FilePath& directory: generated)
+	{
+		write(QString::fromStdWString(directory.wstr()) + "/p/Same.java", "class Same {}");
+	}
+
+	const st::LombokRoots lombok = st::lombokRoots(settings);
+	for (size_t i = 0; i < 2; i++)
+	{
+		const auto original = st::toOriginalFile(generated[i].getConcatenated(L"p/Same.java"), lombok);
+		REQUIRE(original.has_value());
+		CHECK(original->wstr() == roots[i].getConcatenated(L"p/Same.java").wstr());
+		const auto copy = st::toGeneratedFile(roots[i].getConcatenated(L"p/Same.java"), lombok);
+		REQUIRE(copy.has_value());
+		CHECK(copy->wstr() == generated[i].getConcatenated(L"p/Same.java").wstr());
+	}
 }
 
 TEST_CASE("lombok location whose path exists under two original roots stays generated")

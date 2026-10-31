@@ -1,6 +1,7 @@
 #include "utilityGradle.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <set>
@@ -214,23 +215,129 @@ DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const 
 	};
 }
 
+// Lombok writes all directory inputs of a run below one output directory, so roots sharing a relative path run in
+// separate groups. Returns the root indices of each group.
+std::vector<std::vector<size_t>> groupRootsByRelativePath(const DelombokManifest& manifest)
+{
+	std::vector<std::set<std::wstring>> rootPaths(manifest.sourceDirectories.size());
+	for (const auto& entry: manifest.files)
+	{
+		rootPaths[entry.first.first].insert(entry.first.second);
+	}
+
+	std::vector<std::vector<size_t>> groups;
+	std::vector<std::set<std::wstring>> groupPaths;
+	for (size_t root = 0; root < rootPaths.size(); root++)
+	{
+		size_t group = 0;
+		while (group < groups.size() &&
+			   std::any_of(rootPaths[root].begin(), rootPaths[root].end(), [&](const std::wstring& path) {
+				   return groupPaths[group].count(path) > 0;
+			   }))
+		{
+			group++;
+		}
+		if (group == groups.size())
+		{
+			groups.emplace_back();
+			groupPaths.emplace_back();
+		}
+		groups[group].push_back(root);
+		groupPaths[group].insert(rootPaths[root].begin(), rootPaths[root].end());
+	}
+	return groups;
+}
+
+// Moves each file of a run's output into the staging directory of the root holding its relative path.
+bool distributeDelombokOutput(
+	const FilePath& runOutputPath,
+	const std::vector<size_t>& group,
+	const DelombokManifest& manifest,
+	const std::vector<FilePath>& stagingDirectories)
+{
+	std::map<std::wstring, size_t> owners;
+	for (const auto& entry: manifest.files)
+	{
+		if (std::count(group.begin(), group.end(), entry.first.first))
+		{
+			owners[entry.first.second] = entry.first.first;
+		}
+	}
+
+	namespace fs = std::filesystem;
+	const fs::path runOutput(runOutputPath.wstr());
+	std::error_code ec;
+	for (fs::recursive_directory_iterator it(runOutput, ec), end; !ec && it != end; it.increment(ec))
+	{
+		std::error_code entryEc;
+		if (!it->is_regular_file(entryEc))
+		{
+			continue;
+		}
+		const std::wstring relativePath = it->path().lexically_relative(runOutput).generic_wstring();
+		const auto owner = owners.find(relativePath);
+		if (owner == owners.end() && group.size() > 1)
+		{
+			// added after the scan, so the next run sees it as changed
+			LOG_WARNING(L"Delombok output without an original in the scanned roots: " + relativePath);
+			continue;
+		}
+
+		const fs::path target = fs::path(
+			stagingDirectories[owner != owners.end() ? owner->second : group.front()].wstr()) / relativePath;
+		fs::create_directories(target.parent_path(), entryEc);
+		if (!entryEc)
+		{
+			fs::rename(it->path(), target, entryEc);
+		}
+		if (entryEc)
+		{
+			LOG_ERROR(L"Failed to move delombok output to: " + target.wstring());
+			return false;
+		}
+	}
+	return !ec;
+}
+
 bool delombokWholeTree(
 	const std::vector<FilePath>& sourceDirectories,
 	const FilePath& outputDirectoryPath,
+	const FilePath& projectDirectoryPath,
+	const DelombokManifest& manifest,
 	const DelombokRunner& runDelombok)
 {
 	const FilePath temporaryOutputPath(outputDirectoryPath.wstr() + L".tmp");
-	if (!prepareTemporaryDirectory(temporaryOutputPath) ||
-		!runDelombok(sourceDirectories, {}, temporaryOutputPath))
+	const FilePath runOutputPath(outputDirectoryPath.wstr() + L".run");
+	const std::vector<FilePath> stagingDirectories =
+		getDelombokRootDirectories(temporaryOutputPath, sourceDirectories, projectDirectoryPath);
+	if (!prepareTemporaryDirectory(temporaryOutputPath))
 	{
 		return false;
 	}
+
+	const std::vector<std::vector<size_t>> groups = groupRootsByRelativePath(manifest);
+	for (const std::vector<size_t>& group: groups)
+	{
+		std::vector<FilePath> inputs;
+		for (size_t root: group)
+		{
+			inputs.push_back(sourceDirectories[root]);
+		}
+		// the other groups' roots stay visible to type resolution
+		if (!prepareTemporaryDirectory(runOutputPath) ||
+			!runDelombok(inputs, groups.size() > 1 ? sourceDirectories : std::vector<FilePath>(), runOutputPath) ||
+			!distributeDelombokOutput(runOutputPath, group, manifest, stagingDirectories))
+		{
+			return false;
+		}
+	}
+	removeTemporaryDirectory(runOutputPath);
 
 	// only touch files whose delombok output changed, so refreshes re-index just those
 	const DirectorySyncResult syncResult = syncDirectoryContents(temporaryOutputPath, outputDirectoryPath);
 	LOG_INFO_STREAM(
 		<< "Delombok output synced: " << syncResult.written << " written, " << syncResult.unchanged
-		<< " unchanged, " << syncResult.removed << " removed");
+		<< " unchanged, " << syncResult.removed << " removed in " << groups.size() << " runs");
 
 	removeTemporaryDirectory(temporaryOutputPath);
 
@@ -248,7 +355,7 @@ using DelombokOriginal = std::pair<size_t, std::wstring>;	 // (root index, relat
 struct DelombokChanges
 {
 	std::vector<DelombokOriginal> changed;	  // changed or added
-	std::vector<std::wstring> removed;	  // relative paths
+	std::vector<DelombokOriginal> removed;
 };
 
 // Returns nullopt when only a whole-tree run is safe.
@@ -277,18 +384,8 @@ std::optional<DelombokChanges> getDelombokChanges(
 	{
 		if (current.files.count(original) == 0)
 		{
-			changes.removed.push_back(original.second);
+			changes.removed.push_back(original);
 			touched.push_back(original);
-		}
-	}
-
-	// roots share one output tree, so a relative path found in two roots maps to one output file
-	std::map<std::wstring, std::set<size_t>> rootsByRelativePath;
-	for (const DelombokManifest* manifest: {&previous, &current})
-	{
-		for (const auto& entry: manifest->files)
-		{
-			rootsByRelativePath[entry.first.second].insert(entry.first.first);
 		}
 	}
 
@@ -310,8 +407,7 @@ std::optional<DelombokChanges> getDelombokChanges(
 	for (const DelombokOriginal& original: touched)
 	{
 		// a lombok.config changes other files' output, and only a whole-tree run copies non-Java files
-		if (!utility::isPostfix<std::wstring>(L".java", original.second) ||
-			rootsByRelativePath[original.second].size() > 1)
+		if (!utility::isPostfix<std::wstring>(L".java", original.second))
 		{
 			return std::nullopt;
 		}
@@ -322,6 +418,7 @@ std::optional<DelombokChanges> getDelombokChanges(
 bool delombokChangedFiles(
 	const std::vector<FilePath>& sourceDirectories,
 	const FilePath& outputDirectoryPath,
+	const std::vector<FilePath>& rootOutputDirectories,
 	const DelombokChanges& changes,
 	const DelombokRunner& runDelombok)
 {
@@ -350,7 +447,7 @@ bool delombokChangedFiles(
 			inputs.push_back(sourceDirectories[original.first].getConcatenated(original.second));
 			outputs.emplace_back(
 				temporaryOutputPath.getConcatenated(fileName),
-				outputDirectoryPath.getConcatenated(original.second));
+				rootOutputDirectories[original.first].getConcatenated(original.second));
 		}
 
 		if (!prepareTemporaryDirectory(temporaryOutputPath) ||
@@ -370,9 +467,9 @@ bool delombokChangedFiles(
 	}
 	removeTemporaryDirectory(temporaryOutputPath);
 
-	for (const std::wstring& relativePath: changes.removed)
+	for (const auto& [root, relativePath]: changes.removed)
 	{
-		const FilePath outputFile = outputDirectoryPath.getConcatenated(relativePath);
+		const FilePath outputFile = rootOutputDirectories[root].getConcatenated(relativePath);
 		if (outputFile.recheckExists() && !FileSystem::remove(outputFile))
 		{
 			LOG_ERROR(L"Failed to remove delombok output: " + outputFile.wstr());
@@ -381,7 +478,7 @@ bool delombokChangedFiles(
 
 		// non-recursive remove fails on non-empty directories, which is what we want here
 		for (FilePath directory = outputFile.getParentDirectory();
-			 directory.wstr().size() > outputDirectoryPath.wstr().size() && FileSystem::remove(directory);
+			 directory.wstr().size() > rootOutputDirectories[root].wstr().size() && FileSystem::remove(directory);
 			 directory = directory.getParentDirectory())
 		{
 		}
@@ -502,9 +599,52 @@ FilePath getDelombokOutputDirectory(const FilePath& outputDirectoryPath, const s
 	return outputDirectoryPath.getConcatenated(L"delombok").getConcatenated(sourceSetName);
 }
 
+std::vector<FilePath> getDelombokRootDirectories(
+	const FilePath& delombokOutputDirectory,
+	const std::vector<FilePath>& sourceDirectories,
+	const FilePath& projectDirectoryPath)
+{
+	namespace fs = std::filesystem;
+	const fs::path project = fs::absolute(fs::path(projectDirectoryPath.wstr())).lexically_normal();
+
+	std::set<std::wstring> taken;
+	std::vector<FilePath> directories;
+	for (const FilePath& root: sourceDirectories)
+	{
+		const fs::path absoluteRoot = fs::absolute(fs::path(root.wstr())).lexically_normal();
+		fs::path relativeRoot = absoluteRoot.lexically_relative(project);
+		if (relativeRoot.empty() || *relativeRoot.begin() == "..")
+		{
+			relativeRoot = absoluteRoot.relative_path();
+		}
+
+		std::wstring name;
+		for (const fs::path& part: relativeRoot)
+		{
+			if (!part.empty() && part != ".")
+			{
+				name += (name.empty() ? L"" : L"_") + part.wstring();
+			}
+		}
+		if (name.empty())
+		{
+			name = L"root";
+		}
+
+		std::wstring uniqueName = name;
+		for (size_t suffix = 2; !taken.insert(uniqueName).second; suffix++)
+		{
+			uniqueName = name + L"_" + std::to_wstring(suffix);
+		}
+		directories.push_back(delombokOutputDirectory.getConcatenated(uniqueName));
+	}
+	return directories;
+}
+
 bool delombokSourceSet(
 	const std::vector<FilePath>& sourceDirectories,
 	const FilePath& outputDirectory,
+	const FilePath& projectDirectoryPath,
 	const std::string& fingerprint,
 	const DelombokRunner& runDelombok,
 	bool wholeTree)
@@ -535,13 +675,19 @@ bool delombokSourceSet(
 			<< "Delomboking " << changes->changed.size() << " changed files, removing "
 			<< changes->removed.size() << " outputs");
 	}
-	if (!changes || !delombokChangedFiles(sourceDirectories, outputDirectory, *changes, runDelombok))
+	if (!changes ||
+		!delombokChangedFiles(
+			sourceDirectories,
+			outputDirectory,
+			getDelombokRootDirectories(outputDirectory, sourceDirectories, projectDirectoryPath),
+			*changes,
+			runDelombok))
 	{
 		if (changes)
 		{
 			LOG_WARNING("Delombok of changed files failed, delomboking the whole tree.");
 		}
-		if (!delombokWholeTree(sourceDirectories, outputDirectory, runDelombok))
+		if (!delombokWholeTree(sourceDirectories, outputDirectory, projectDirectoryPath, current, runDelombok))
 		{
 			return false;
 		}
@@ -611,6 +757,7 @@ bool gradlePrepareLombokSources(
 			!delombokSourceSet(
 				directories,
 				getDelombokOutputDirectory(outputDirectoryPath, sourceSet),
+				projectDirectoryPath,
 				info.fingerprint,
 				createDelombokRunner(projectDirectoryPath, jarIt->second),
 				wholeTree))
@@ -634,10 +781,15 @@ std::vector<FilePath> gradleGetAllSourceDirectories(
 	{
 		if (info.lombokJars.count(sourceSet) > 0)
 		{
-			const FilePath delombokDirectory = getDelombokOutputDirectory(outputDirectoryPath, sourceSet);
-			if (delombokDirectory.exists())
+			for (const FilePath& delombokDirectory: getDelombokRootDirectories(
+					 getDelombokOutputDirectory(outputDirectoryPath, sourceSet),
+					 sourceSetDirectories,
+					 projectDirectoryPath))
 			{
-				directories.push_back(delombokDirectory);
+				if (delombokDirectory.exists())
+				{
+					directories.push_back(delombokDirectory);
+				}
 			}
 		}
 		else

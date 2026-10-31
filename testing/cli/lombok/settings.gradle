@@ -1,1 +1,3 @@
 rootProject.name = 'sourcetrail-cli-lombok'
+// a second module whose test source set holds a class with the same package and name as the root's
+include 'sub'

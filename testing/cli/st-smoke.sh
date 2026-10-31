@@ -49,6 +49,14 @@ grep -F 'example.Welcome.welcome(example.Person)' "$work/out" | grep -qF 'method
 grep -F 'example.CallerIntegrationTest.greetsPerson()' "$work/out" | grep -qF 'src/integrationTest/java/example/CallerIntegrationTest.java:10' \
     || assert "integration-test caller missing"
 
+# Two modules' test source sets hold example/Options.java; each copy is indexed and maps back to its own file.
+run 0 find Options
+grep -F 'example.Options.enabled' "$work/out" | grep -qF $'\tsrc/test/java/example/Options.java:7' \
+    || assert "root module's Options.enabled not at its original: $(cat "$work/out")"
+grep -F 'example.Options.level' "$work/out" | grep -qF $'\tsub/src/test/java/example/Options.java:7' \
+    || assert "sub module's Options.level not at its original: $(cat "$work/out")"
+! grep -qF 'delombok' "$work/out" || assert "find Options printed a delombok path: $(cat "$work/out")"
+
 run 0 find getName
 "$st" find getName 2> /dev/null | "$st" callers > "$work/out" 2> "$work/err" || assert "find | callers failed"
 line="$(grep -F 'example.Caller.greeting(example.Person)' "$work/out" | head -n1)"
@@ -155,7 +163,7 @@ done
 # edited Lombok file's copy is updated, and a deleted file's delombok copy and symbols are gone.
 manifest="$(find "$work/project/sourcetrail_dependencies" -path '*/gradle/delombok/main.manifest')"
 [ -n "$manifest" ] || assert "no delombok manifest beside delombok/main"
-delombok_main="${manifest%.manifest}"
+delombok_main="${manifest%.manifest}/src_main_java"
 welcome=src/main/java/example/Welcome.java
 sed -i 's/return greeter.greeting(p);/return "Hi " + greeter.greeting(p);/' "$welcome"
 "$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"

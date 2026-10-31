@@ -36,7 +36,7 @@ std::vector<std::optional<size_t>> alignLines(
 
 struct LombokRoots
 {
-	// Delombok output directory -> the declared original roots of the same source set.
+	// Delombok output directory of each root -> that original root.
 	std::vector<std::pair<FilePath, std::vector<FilePath>>> delombokToOriginalRoots;
 	// By delombok file for the duration of one command: its original (empty without exactly one), alignSpans and lines.
 	mutable std::map<std::wstring, FilePath> originalFiles;

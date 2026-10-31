@@ -255,8 +255,8 @@ Sourcetrail_cli read-source /absolute/path/project.srctrlprj /indexed/path/File.
   indicate truncation. `read-source` accepts indexed paths and at most 1000 lines,
   preferring stored index content and explicitly marking any disk fallback.
 - In a project that uses Lombok, every source file is indexed from its delombok copy
-  under `sourcetrail_dependencies/.../delombok/`, not just the generated members.
-  Delombok rewrites the whole class (adds a header and generated members, removes
+  under `sourcetrail_dependencies/.../delombok/<source set>/<root>/`, not just the
+  generated members. Delombok rewrites the whole class (adds a header and generated members, removes
   Lombok imports and annotations), so line numbers from any result do not match the
   original source file. Read the returned delombok path with `read-source`, or find
   the code in the original file by its content rather than by line number.

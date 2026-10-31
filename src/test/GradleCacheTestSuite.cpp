@@ -348,7 +348,7 @@ struct DelombokFixture: public GradleCacheFixture
 
 	bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false) const
 	{
-		return utility::delombokSourceSet(roots, target, fingerprint, fake.runner(), wholeTree);
+		return utility::delombokSourceSet(roots, target, project, fingerprint, fake.runner(), wholeTree);
 	}
 
 	bool run(FakeDelombok& fake) const
@@ -416,10 +416,68 @@ TEST_CASE("delombok manifest of an older version is unreadable")
 	content << in.rdbuf();
 	in.close();
 	std::string text = content.str();
-	text.replace(0, text.find('\n'), "version\t0");
+	text.replace(0, text.find('\n'), "version\t3");	// the shared output tree of all roots
 	std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
 
 	REQUIRE_FALSE(utility::loadDelombokManifest(f.delombok).has_value());
+}
+
+TEST_CASE("delombok output directories are named after their roots")
+{
+	DelombokFixture f;
+	REQUIRE(
+		utility::getDelombokRootDirectories(f.delombok, f.roots, f.project) ==
+		std::vector<FilePath>{
+			f.delombok.getConcatenated(L"a_src_main_java"), f.delombok.getConcatenated(L"b_src_main_java")});
+
+	// a root outside the project is named after its absolute path, a name taken twice gets a suffix
+	const std::vector<FilePath> roots = {
+		f.project.getConcatenated(L"a/src"), f.project.getConcatenated(L"a_src"), FilePath(L"/elsewhere/java")};
+	REQUIRE(
+		utility::getDelombokRootDirectories(f.delombok, roots, f.project) ==
+		std::vector<FilePath>{
+			f.delombok.getConcatenated(L"a_src"),
+			f.delombok.getConcatenated(L"a_src_2"),
+			f.delombok.getConcatenated(L"elsewhere_java")});
+}
+
+TEST_CASE("delombok keeps originals with the same relative path in different roots apart")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	f.write("b/src/main/java/pkg/A.java", "class OtherA {}");
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.lastRunWasWholeTree());
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A {}");
+	REQUIRE(readTree(f.delombok)["b_src_main_java/pkg/A.java"] == "// delomboked\nclass OtherA {}");
+	REQUIRE(readTree(f.delombok)["b_src_main_java/other/C.java"] == "// delomboked\nclass C {}");
+
+	f.edit("b/src/main/java/pkg/A.java", "class OtherA { int x; }");
+	const size_t runs = fake.runs.size();
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.runs.size() == runs + 1);
+	REQUIRE_FALSE(fake.lastRunWasWholeTree());
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A {}");
+	REQUIRE(readTree(f.delombok)["b_src_main_java/pkg/A.java"] == "// delomboked\nclass OtherA { int x; }");
+
+	std::filesystem::remove(std::filesystem::path(f.project.str()) / "b/src/main/java/pkg/A.java");
+	REQUIRE(f.run(fake));
+	REQUIRE(readTree(f.delombok).count("b_src_main_java/pkg/A.java") == 0);
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A {}");
+}
+
+TEST_CASE("delombok replaces the shared output tree of an older version")
+{
+	DelombokFixture f;
+	FakeDelombok fake;
+	const std::filesystem::path stale = std::filesystem::path(f.delombok.str()) / "pkg/A.java";
+	std::filesystem::create_directories(stale.parent_path());
+	std::ofstream(stale, std::ios::binary) << "class A {}";
+
+	REQUIRE(f.run(fake));
+	REQUIRE(fake.lastRunWasWholeTree());
+	REQUIRE_FALSE(std::filesystem::exists(stale.parent_path()));
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A {}");
 }
 
 TEST_CASE("incremental delombok matches a full run")
@@ -429,7 +487,7 @@ TEST_CASE("incremental delombok matches a full run")
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.lastRunWasWholeTree());
 	const auto unchangedMtime =
-		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "pkg/B.java");
+		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "a_src_main_java/pkg/B.java");
 
 	f.edit("a/src/main/java/pkg/A.java", "class A { int x; }");
 	f.write("b/src/main/java/other/D.java", "class D {}");
@@ -440,7 +498,7 @@ TEST_CASE("incremental delombok matches a full run")
 	REQUIRE(fake.sourcePaths.back() == f.roots);
 	REQUIRE_FALSE(fake.lastRunWasWholeTree());
 	REQUIRE(
-		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "pkg/B.java") ==
+		std::filesystem::last_write_time(std::filesystem::path(f.delombok.str()) / "a_src_main_java/pkg/B.java") ==
 		unchangedMtime);
 
 	FakeDelombok full;
@@ -448,7 +506,7 @@ TEST_CASE("incremental delombok matches a full run")
 	REQUIRE(f.run(full, fullOutput));
 	REQUIRE(full.lastRunWasWholeTree());
 	REQUIRE(readTree(f.delombok) == readTree(fullOutput));
-	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { int x; }");
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A { int x; }");
 }
 
 TEST_CASE("delombok skips the run when no original changed")
@@ -517,14 +575,14 @@ TEST_CASE("delombok runs on the whole tree when asked to despite a current manif
 	REQUIRE(f.run(fake));
 
 	// an output changed out of band is invisible to the manifest
-	std::filesystem::remove(std::filesystem::path(f.delombok.str()) / "pkg/B.java");
+	std::filesystem::remove(std::filesystem::path(f.delombok.str()) / "a_src_main_java/pkg/B.java");
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.runs.size() == 1);
 
 	REQUIRE(f.run(fake, f.delombok, true));
 	REQUIRE(fake.runs.size() == 2);
 	REQUIRE(fake.lastRunWasWholeTree());
-	REQUIRE(readTree(f.delombok)["pkg/B.java"] == "// delomboked\nclass B {}");
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/B.java"] == "// delomboked\nclass B {}");
 }
 
 TEST_CASE("delombok removes the copy of a deleted original")
@@ -532,14 +590,14 @@ TEST_CASE("delombok removes the copy of a deleted original")
 	DelombokFixture f;
 	FakeDelombok fake;
 	REQUIRE(f.run(fake));
-	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "other/C.java"));
+	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "b_src_main_java/other/C.java"));
 
 	std::filesystem::remove(std::filesystem::path(f.project.str()) / "b/src/main/java/other/C.java");
 	REQUIRE(f.run(fake));
 
 	REQUIRE(fake.runs.size() == 1);
-	REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "other"));
-	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "pkg/A.java"));
+	REQUIRE_FALSE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "b_src_main_java/other"));
+	REQUIRE(std::filesystem::exists(std::filesystem::path(f.delombok.str()) / "a_src_main_java/pkg/A.java"));
 
 	REQUIRE(f.run(fake));
 	REQUIRE(fake.runs.size() == 1);
@@ -557,8 +615,8 @@ TEST_CASE("delombok runs files sharing a name in separate batches")
 	REQUIRE(f.run(fake));
 
 	REQUIRE(fake.runs.size() == 3);
-	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { int z; }");
-	REQUIRE(readTree(f.delombok)["other/A.java"] == "// delomboked\nclass OtherA { int z; }");
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A { int z; }");
+	REQUIRE(readTree(f.delombok)["b_src_main_java/other/A.java"] == "// delomboked\nclass OtherA { int z; }");
 }
 
 TEST_CASE("delombok runs on the whole tree when an unchanged file uses a cross-file annotation")
@@ -651,7 +709,7 @@ TEST_CASE("delombok falls back to the whole tree when an incremental run fails")
 
 	REQUIRE(fake.runs.size() == 3);
 	REQUIRE(fake.lastRunWasWholeTree());
-	REQUIRE(readTree(f.delombok)["pkg/A.java"] == "// delomboked\nclass A { long x; }");
+	REQUIRE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A { long x; }");
 }
 
 #endif

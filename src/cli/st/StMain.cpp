@@ -670,6 +670,10 @@ int run(QCoreApplication& app)
 	{
 		throw UsageError("--edges applies to path and impact only");
 	}
+	if ((isFiles || command == "outline") && parser.isSet("kind"))
+	{
+		throw UsageError("--kind does not apply to " + command.toStdString() + "; pipe into st filter --kind");
+	}
 	Edge::TypeMask edges = command == "path" ? st::PATH_EDGES : st::IMPACT_EDGES;
 	if (parser.isSet("edges"))
 	{

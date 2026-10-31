@@ -339,7 +339,8 @@ st path com.acme.Controller.create com.acme.Repo.save
 
 `--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
 name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.
-`--package`, `--annotated`, `--file`, `--not`, `--in`, `--group` and `--edges` on another command exit 64.
+`--package`, `--annotated`, `--file`, `--not`, `--in`, `--group` and `--edges` on another command exit 64, as does `--kind`
+on `outline`, `symbols-in` and `at` (pipe into `st filter --kind` instead).
 
 **Names.** Type parameters may be left out: `Result.failed` finds `Result<T>.failed<T>(...)`. `find` hides type-parameter
 nodes unless `--kind` asks for them.
@@ -366,7 +367,7 @@ components are missing from every answer. Field reads and writes are not disting
 file and line, mapping only lines whose text matches the original unambiguously. Unchanged copies map line for line; a
 location in a statement delombok joined onto one line maps to the original line holding its column. Generated members and other lines without an
 original line print the original path without a line, `src/.../Order.java (generated)`; if there is no original file, the
-row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no-generated` (any command) drops those rows.
+row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no-generated` (every command except `path`) drops those rows.
 
 **Auto-refresh.** Before each query `st` compares source (and Gradle build file) times with the last index
 and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The

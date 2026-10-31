@@ -137,6 +137,10 @@ run 64 path --edges calls example.Welcome 'example.Person.getName()'
 contains "'calls'" err
 run 64 impact --edges calls 'example.Person.getName()'
 contains "'calls'" err
+for command in outline symbols-in at; do
+    run 64 "$command" --kind field src/main/java/example/Caller.java:5
+    contains '--kind' err
+done
 
 # Exit codes.
 run 3 callers nope

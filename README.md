@@ -300,10 +300,10 @@ afterwards `st` works from anywhere in the tree without the flag.
 `symbols-in`, `at`, `outline` (see `st --help`).
 The symbol is a name or a full key (`pkg.Class.method(pkg.Arg)`); without one, `st` reads
 keys from stdin, one per line or the first tab-separated column, so commands pipe.
-Ambiguous names exit 2 and list the candidates. A parameter list matching no overload exits 3 and lists the overloads.
+Ambiguous names exit 2 and list the candidates; a bare class name that matches only the class and its own constructors resolves to the class. A parameter list matching no overload exits 3 and lists the overloads.
 
 **Output.** One tab-separated line per result: `key`, `kind`, `path:line`, source line
-(`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9`)
+(`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9 (project batch)`, the project file's base name)
 goes to stderr; a `+N more (--limit)` overflow line ends stdout. Calls through an
 interface show as `method via pkg.Iface.method()`. `--limit` (default 50), `--depth`, `--kind` shape results.
 `find` ranks exact, then suffix, then substring matches. External (library) symbols are hidden.
@@ -333,7 +333,7 @@ st path com.acme.Controller.create com.acme.Repo.save
   line per file or package. Overrides are followed up and down, but not down again after going up. Rows read
   `<kind>, depth <n>`: `depth 1` is a direct user, `depth 0` is reached through override links alone (such as an
   implementation of an input interface method). `--limit` keeps the lowest depths. stderr gets
-  `impact: N symbols in F files, P packages`.
+  `impact: N symbols in F files, P packages (project <name>)`.
   `| st filter --not --file '*Test*'` leaves out tests.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
   (`package, N links`; sub-packages are included). `--in` gives incoming. Links inside the input, external targets and builtin types
@@ -371,7 +371,7 @@ Field reads and writes are not distinguished (both are `usage`).
 
 **Incomplete answers.** When an answer of `callers`, `callees`, `refs`, `impls`, `supers`, `path`, `impact` or `deps` touches such
 a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M index errors (see st status)` (a zero part is
-left out); stdout and the exit code stay the same. N counts the links the command followed from the symbols it walked whose
+left out); stdout and the exit code stay the same. No `st: incomplete:` line means the answer is complete as far as the index goes; there is no need to re-read the source to confirm it. N counts the links the command followed from the symbols it walked whose
 other end the index could not resolve: the indexer's `unsolved-symbol` placeholder, or a symbol without a definition whose
 package is one the project defines types in, or declares below one (library symbols and implicit members such as default
 constructors don't count). M counts the index errors that belong to a walked symbol or to the symbol enclosing a result row: an
@@ -381,6 +381,8 @@ totals, `files_with_errors` and `unresolved_symbols`.
 The warning can stay silent where a gap is real: the Java indexer reports an unresolved type once, where it is declared (a
 field of a generated type), so calls through that field vanish without an error in the calling method; and `refs` of an
 entity field misses its JPA metamodel uses (`Order_.status`) without a warning.
+
+`symbol not found` on a Java record or one of its members means records aren't indexed.
 
 **Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
 5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.

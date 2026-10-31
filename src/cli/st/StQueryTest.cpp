@@ -524,6 +524,34 @@ TEST_CASE("st keeps overloads of a generic method ambiguous")
 	CHECK(st::resolveSymbol(code.storage, L"Result.failed(int)", NODE_METHOD).status == st::Resolution::Found);
 }
 
+TEST_CASE("st resolves a bare class name with constructors to the class")
+{
+	Code code;
+	const Id foo = code.type(L"Foo");
+	code.member(foo, L"Foo", L"Foo", NODE_METHOD, L"(int)");
+	code.member(foo, L"Foo", L"Foo", NODE_METHOD, L"(long)");
+	code.storage.buildCaches();
+
+	for (const wchar_t* text: {L"Foo", L"p.Foo"})
+	{
+		const auto resolved = st::resolveSymbol(code.storage, text, ~NodeKindMask(0));
+		REQUIRE(resolved.status == st::Resolution::Found);
+		CHECK(resolved.ids == std::vector<Id>{foo});
+	}
+}
+
+TEST_CASE("st keeps a type and a same-named method of another type ambiguous")
+{
+	Code code;
+	const Id foo = code.type(L"Foo");
+	code.member(foo, L"Foo", L"Foo", NODE_METHOD, L"(int)");
+	const Id bar = code.type(L"Bar");
+	code.member(bar, L"Bar", L"Foo", NODE_METHOD, L"(int)");
+	code.storage.buildCaches();
+
+	CHECK(st::resolveSymbol(code.storage, L"Foo", ~NodeKindMask(0)).status == st::Resolution::Ambiguous);
+}
+
 TEST_CASE("st hides the unsolved-symbol pseudo node")
 {
 	Code code;

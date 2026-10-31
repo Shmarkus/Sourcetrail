@@ -42,6 +42,7 @@ run 0 find getName
 [ "$(head -n1 "$work/out" | cut -f1)" = "example.Person.getName()" ] || assert "first find column: $(head -n1 "$work/out")"
 
 run 0 callers 'example.Caller.greeting(example.Person)'
+grep -qx 'callers: [0-9]* (project project)' "$work/err" || assert "callers count line lacks the project: $(cat "$work/err")"
 grep -F 'example.Welcome.welcome(example.Person)' "$work/out" | grep -qF 'method via example.Greeter.greeting(example.Person)' \
     || assert "interface-dispatch caller missing"
 # A Lombok source set other than main and test is indexed and maps back to its original file.
@@ -123,6 +124,8 @@ grep -F 'example.Caller' "$work/out" | grep -qF 'class, ' || assert "deps lacks 
     || assert "find | callees | filter pipeline failed"
 contains 'example.Caller.greeting(example.Person)' out
 "$st" outline example.web.GreetingController 2> /dev/null > "$work/out" || assert "outline of the controller failed"
+contains 'example.web.GreetingController.caller' out
+run 0 outline GreetingController
 contains 'example.web.GreetingController.caller' out
 "$st" filter --not --kind field < "$work/out" > "$work/out2" 2> "$work/err" || assert "filter --not --kind field failed"
 mv "$work/out2" "$work/out"

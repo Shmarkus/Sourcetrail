@@ -45,6 +45,8 @@ struct OutputOptions
 	// Drops lines that stay generated after mapLocation, and says how many on stderr.
 	bool hideGenerated = false;
 	FilePath cwd;
+	// Base name of the project file; ends the stderr count line so a query against the wrong project shows.
+	std::string project;
 	// Applied to every line before sorting; identity when empty.
 	std::function<ResultLine(const ResultLine&)> mapLocation;
 };

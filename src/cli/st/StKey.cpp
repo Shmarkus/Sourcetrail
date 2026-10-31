@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <optional>
 #include <set>
 
 #include "DefinitionKind.h"
@@ -18,6 +19,7 @@ namespace
 struct Candidate
 {
 	Id id;
+	NodeKind kind;
 	std::wstring key;
 	std::wstring qualified;
 	std::wstring delimiter;
@@ -133,11 +135,45 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 			}
 			const std::wstring key = symbolKey(name);
 			const std::wstring qualified = name.getQualifiedName();
-			result.push_back({id, key, qualified, name.getDelimiter(), withoutTypeParameters(key),
+			result.push_back({id, storage.getNodeTypeForNodeWithId(id).getKind(), key, qualified, name.getDelimiter(), withoutTypeParameters(key),
 				withoutTypeParameters(qualified), parameterTypes(key)});
 		}
 	}
 	return result;
+}
+
+// A type together with its own constructors (methods named like it, directly inside it) stands for the type.
+std::optional<Id> typeWithConstructors(const std::vector<Candidate>& candidates, const std::vector<Id>& ids)
+{
+	const Candidate* type = nullptr;
+	for (const Candidate& candidate: candidates)
+	{
+		if (std::find(ids.begin(), ids.end(), candidate.id) == ids.end() ||
+			!(candidate.kind & (NODE_CLASS | NODE_INTERFACE | NODE_STRUCT | NODE_ENUM)))
+		{
+			continue;
+		}
+		if (type)
+		{
+			return std::nullopt;
+		}
+		type = &candidate;
+	}
+	if (!type)
+	{
+		return std::nullopt;
+	}
+	const size_t split = type->bareQualified.rfind(type->delimiter);
+	const std::wstring name = split == std::wstring::npos ? type->bareQualified : type->bareQualified.substr(split + type->delimiter.size());
+	for (const Candidate& candidate: candidates)
+	{
+		if (candidate.id != type->id && std::find(ids.begin(), ids.end(), candidate.id) != ids.end() &&
+			(candidate.kind != NODE_METHOD || candidate.bareQualified != type->bareQualified + type->delimiter + name))
+		{
+			return std::nullopt;
+		}
+	}
+	return type->id;
 }
 
 Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text)
@@ -164,6 +200,13 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
 				(!hasParameters || parametersMatch(wanted, c.parameters));
 		}))
 	{
+		if (ids.size() > 1)
+		{
+			if (const std::optional<Id> type = typeWithConstructors(candidates, ids))
+			{
+				return {Resolution::Found, {*type}};
+			}
+		}
 		return {ids.size() == 1 ? Resolution::Found : Resolution::Ambiguous, ids};
 	}
 	return {Resolution::NotFound, {}};

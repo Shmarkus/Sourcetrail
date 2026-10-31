@@ -106,6 +106,11 @@ NodeKindMask kindMask(const QCommandLineParser& parser)
 	return kind;
 }
 
+void countLine(const st::OutputOptions& options, const std::string& count)
+{
+	std::cerr << count << " (project " << options.project << ")\n";
+}
+
 int find(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
 	const st::OutputOptions& options)
 {
@@ -121,7 +126,7 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 			}
 		}
 	}
-	std::cerr << "find: " << lines.size() << '\n';
+	countLine(options, "find: " + std::to_string(lines.size()));
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
@@ -218,7 +223,7 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 			hops.push_back({L"", L"", hop.file, hop.line, ""});
 		}
 	}
-	std::cerr << "path: " << chains.size() << '\n';
+	countLine(options, "path: " + std::to_string(chains.size()));
 	const auto location = [&](const FilePath& file, size_t line, size_t column) {
 		st::ResultLine mapped{L"", L"", file, line, ""};
 		mapped.column = column;
@@ -257,8 +262,8 @@ int impact(PersistentStorage& storage, const std::vector<Id>& ids, size_t depth,
 	const st::LombokRoots& lombok, const st::OutputOptions& options)
 {
 	st::ImpactResult result = st::impact(storage, ids, depth, types, group);
-	std::cerr << "impact: " << result.symbols << " symbols in " << result.files << " files, " << result.packages
-			  << " packages\n";
+	countLine(options, "impact: " + std::to_string(result.symbols) + " symbols in " + std::to_string(result.files) +
+			" files, " + std::to_string(result.packages) + " packages");
 	// A file line is keyed by its displayed path: the original of a delombok file.
 	for (st::ResultLine& line: result.lines)
 	{
@@ -273,7 +278,7 @@ int deps(PersistentStorage& storage, const std::vector<Id>& ids, st::Direction d
 {
 	st::Walked walked;
 	std::vector<st::ResultLine> lines = st::deps(storage, ids, direction, &walked);
-	std::cerr << "deps: " << lines.size() << '\n';
+	countLine(options, "deps: " + std::to_string(lines.size()));
 	return printWithGaps(storage, lines, walked, options);
 }
 
@@ -295,7 +300,7 @@ int graph(PersistentStorage& storage, const QString& command, const std::vector<
 	{
 		lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing, &walked);
 	}
-	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
+	countLine(options, command.toStdString() + ": " + std::to_string(lines.size()));
 	return printWithGaps(storage, lines, walked, options);
 }
 
@@ -367,7 +372,7 @@ int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, 
 			passing.push_back(&line);
 		}
 	}
-	std::cerr << "filter: " << passing.size() << '\n';
+	countLine(options, "filter: " + std::to_string(passing.size()));
 	for (size_t i = 0; i < passing.size() && i < options.limit; i++)
 	{
 		std::cout << passing[i]->raw << '\n';
@@ -504,7 +509,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 			lines.push_back(std::move(line));
 		}
 	}
-	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
+	countLine(options, command.toStdString() + ": " + std::to_string(lines.size()));
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
@@ -562,7 +567,7 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 	std::set<Id> seen;
 	ids.erase(std::remove_if(ids.begin(), ids.end(), [&](Id id) { return !seen.insert(id).second; }), ids.end());
 	std::vector<st::ResultLine> lines = st::outline(storage, ids);
-	std::cerr << "outline: " << lines.size() << '\n';
+	countLine(options, "outline: " + std::to_string(lines.size()));
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
@@ -812,6 +817,7 @@ int run(QCoreApplication& app)
 		throw UsageError("Unable to load project settings");
 	}
 	const QString project = QString::fromStdWString(projectFile.wstr());
+	options.project = QFileInfo(project).completeBaseName().toStdString();
 
 	// Never hold the lock while Sourcetrail refreshes: the indexer takes it without waiting.
 	const QString lockFile = st::projectLockFile(projectFile);

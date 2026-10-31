@@ -267,6 +267,10 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 			{
 				continue;
 			}
+			if (isUnsolvedSymbol(edge->getFrom()->getNameHierarchy()))
+			{
+				continue;
+			}
 			const std::wstring user = symbolKey(edge->getFrom()->getNameHierarchy());
 			storage.getSourceLocationsForTokenIds({edge->getId()})->forEachSourceLocation([&](SourceLocation* location) {
 				if (location->isStartLocation())
@@ -300,6 +304,10 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 	std::vector<ResultLine> lines;
 	for (const auto& [node, reached]: results)
 	{
+		if (isUnsolvedSymbol(storage, node))
+		{
+			continue;
+		}
 		std::wstring kind = storage.getNodeTypeForNodeWithId(node).getReadableTypeWString();
 		if (reached.via)
 		{
@@ -362,6 +370,10 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 	std::vector<ResultLine> lines;
 	for (const Id id: results)
 	{
+		if (isUnsolvedSymbol(storage, id))
+		{
+			continue;
+		}
 		for (ResultLine& line: definitionLines(storage, id, key(storage, id)))
 		{
 			lines.push_back(std::move(line));
@@ -389,6 +401,7 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 			for (const auto& edges: found)
 			{
 				std::vector<PathHop> chain;
+				bool solved = true;
 				for (const Edge* edge: edges)
 				{
 					const bool down = edge->isType(Edge::LAYOUT_VERTICAL);
@@ -402,9 +415,13 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 							site = {line.file, line.line};
 						}
 					}
+					solved = solved && !isUnsolvedSymbol(storage, hopTo);
 					chain.push_back({hopFrom, hopTo, edge->getType(), site.file, site.line});
 				}
-				chains.push_back(std::move(chain));
+				if (solved)
+				{
+					chains.push_back(std::move(chain));
+				}
 			}
 		}
 	}
@@ -427,7 +444,7 @@ std::vector<Id> expandClasses(PersistentStorage& storage, const std::vector<Id>&
 			continue;
 		}
 		storage.getGraphForChildrenOfNodeId(id)->forEachNode([&](Node* node) {
-			if (node->getId() != id && isKind(node, CALLABLE))
+			if (node->getId() != id && isKind(node, CALLABLE) && !isUnsolvedSymbol(node->getNameHierarchy()))
 			{
 				expanded.push_back(node->getId());
 			}

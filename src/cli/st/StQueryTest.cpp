@@ -2,6 +2,7 @@
 
 #include "StFiles.h"
 #include "StFilter.h"
+#include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
 #include "StLombok.h"
@@ -313,4 +314,80 @@ TEST_CASE("st outline labels default access as package and omits it in interface
 
 	CHECK(st::outline(code.storage, {run}).front().kind == L"package method");
 	CHECK(st::outline(code.storage, {go}).front().kind == L"method");
+}
+
+namespace
+{
+Id addGeneric(Code& code, const std::wstring& parameters)
+{
+	NameHierarchy type(NAME_DELIMITER_JAVA);
+	type.push(L"p");
+	type.push(L"Result<T>");
+	const Id result = add(code.storage, type, NODE_CLASS);
+	addLocation(code.storage, outcome, code.file(L"Result"), 1);
+
+	NameHierarchy name = type;
+	name.push(NameElement(L"failed<T>", L"Result<T>", parameters));
+	const Id failed = add(code.storage, name);
+	addLocation(code.storage, failed, code.file(L"Result"), 2);
+	code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), result, failed));
+	return failed;
+}
+}
+
+TEST_CASE("st resolves names without type parameters")
+{
+	Code code;
+	const Id failed = addGeneric(code, L"(java.lang.String)");
+	code.storage.buildCaches();
+
+	for (const wchar_t* text: {L"p.Result.failed", L"Result.failed", L"p.Result<T>.failed<T>(java.lang.String)",
+			 L"p.Result.failed(java.lang.String)", L"failed"})
+	{
+		INFO(std::string(text, text + std::wcslen(text)));
+		const auto resolved = st::resolveSymbol(code.storage, text, NODE_METHOD);
+		REQUIRE(resolved.status == st::Resolution::Found);
+		CHECK(resolved.ids == std::vector<Id>{failed});
+	}
+	for (const wchar_t* text: {L"p.Result", L"Result"})
+	{
+		const auto resolved = st::resolveSymbol(code.storage, text, NODE_CLASS);
+		REQUIRE(resolved.status == st::Resolution::Found);
+	}
+}
+
+TEST_CASE("st keeps overloads of a generic method ambiguous")
+{
+	Code code;
+	addGeneric(code, L"(java.lang.String)");
+	NameHierarchy name(NAME_DELIMITER_JAVA);
+	name.push(L"p");
+	name.push(L"Result<T>");
+	name.push(NameElement(L"failed<T>", L"Result<T>", L"(int)"));
+	addLocation(code.storage, add(code.storage, name), code.file(L"Result"), 3);
+	code.storage.buildCaches();
+
+	CHECK(st::resolveSymbol(code.storage, L"Result.failed", NODE_METHOD).status == st::Resolution::Ambiguous);
+	CHECK(st::resolveSymbol(code.storage, L"Result.failed(int)", NODE_METHOD).status == st::Resolution::Found);
+}
+
+TEST_CASE("st hides the unsolved-symbol pseudo node")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	NameHierarchy name(NAME_DELIMITER_JAVA);
+	name.push(L"unsolved-symbol");
+	const Id unsolved = add(code.storage, name, NODE_ENUM_CONSTANT);
+	addLocation(code.storage, unsolved, code.file(L"A"), 4);
+	code.link(Edge::EDGE_CALL, unsolved, run, L"A", {4});
+	code.link(Edge::EDGE_CALL, run, unsolved, L"A", {5});
+	code.storage.buildCaches();
+
+	CHECK(st::definedInFile(code.storage, FilePath(L"/r/p/A.java")) == std::vector<Id>{a, run});
+	CHECK(st::findSymbols(code.storage, L"unsolved", ~NodeKindMask(0)).empty());
+	CHECK(st::resolveSymbol(code.storage, L"unsolved-symbol", ~NodeKindMask(0)).status == st::Resolution::NotFound);
+	CHECK(st::calls(code.storage, {run}, st::Direction::Incoming, 1).empty());
+	CHECK(st::calls(code.storage, {run}, st::Direction::Outgoing, 1).empty());
+	CHECK(st::references(code.storage, {run}).empty());
 }

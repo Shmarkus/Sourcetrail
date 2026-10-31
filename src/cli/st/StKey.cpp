@@ -20,7 +20,23 @@ struct Candidate
 	std::wstring key;
 	std::wstring qualified;
 	std::wstring delimiter;
+	std::wstring bareKey;		// key and qualified name without type parameters
+	std::wstring bareQualified;
 };
+
+// Removes every balanced `<...>` group, nested ones included.
+std::wstring withoutTypeParameters(const std::wstring& text)
+{
+	std::wstring result;
+	int depth = 0;
+	for (const wchar_t c: text)
+	{
+		if (c == L'<') depth++;
+		else if (c == L'>' && depth > 0) depth--;
+		else if (depth == 0) result += c;
+	}
+	return result;
+}
 
 // Text before the parameter list of the last element, which is what the search index knows.
 std::wstring searchText(const std::wstring& text)
@@ -57,7 +73,7 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 		for (Id id: match.tokenIds)
 		{
 			if (!seen.insert(id).second || storage.getDefinitionKindForNodeId(id) == DEFINITION_NONE ||
-				!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds))
+				!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds) || isUnsolvedSymbol(storage, id))
 			{
 				continue;
 			}
@@ -66,7 +82,10 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 			{
 				continue;
 			}
-			result.push_back({id, symbolKey(name), name.getQualifiedName(), name.getDelimiter()});
+			const std::wstring key = symbolKey(name);
+			const std::wstring qualified = name.getQualifiedName();
+			result.push_back({id, key, qualified, name.getDelimiter(), withoutTypeParameters(key),
+				withoutTypeParameters(qualified)});
 		}
 	}
 	return result;
@@ -75,6 +94,7 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text)
 {
 	const bool hasParameters = text.find(L'(') != std::wstring::npos;
+	const std::wstring bare = withoutTypeParameters(text);
 	std::vector<Id> ids;
 	auto gather = [&](auto matches) {
 		for (const auto& candidate: candidates)
@@ -85,14 +105,25 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
 	};
 	if (gather([&](const Candidate& c) { return c.key == text; }) ||
 		gather([&](const Candidate& c) { return c.qualified == text; }) ||
+		gather([&](const Candidate& c) { return (hasParameters ? c.bareKey : c.bareQualified) == bare; }) ||
 		gather([&](const Candidate& c) {
-			return endsWithName(hasParameters ? c.key : c.qualified, text, c.delimiter);
+			return endsWithName(hasParameters ? c.bareKey : c.bareQualified, bare, c.delimiter);
 		}))
 	{
 		return {ids.size() == 1 ? Resolution::Found : Resolution::Ambiguous, ids};
 	}
 	return {Resolution::NotFound, {}};
 }
+}
+
+bool isUnsolvedSymbol(const NameHierarchy& name)
+{
+	return name.size() == 1 && name.back().getName() == L"unsolved-symbol";
+}
+
+bool isUnsolvedSymbol(PersistentStorage& storage, Id id)
+{
+	return isUnsolvedSymbol(storage.getNameHierarchyForNodeId(id));
 }
 
 std::wstring symbolKey(const NameHierarchy& name)
@@ -125,21 +156,23 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
 		std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
 		return s;
 	};
-	const std::wstring needle = lower(text);
+	const std::wstring bare = withoutTypeParameters(text);
+	const std::wstring needle = lower(bare);
 	std::vector<std::pair<int, Id>> ranked;
 	for (const Candidate& candidate: collect(storage, text, kinds))
 	{
-		if (lower(candidate.qualified).find(needle) == std::wstring::npos)
+		if (lower(candidate.bareQualified).find(needle) == std::wstring::npos)
 		{
 			continue;
 		}
 		int tier = 2;
-		if (candidate.qualified == text || storage.getNameHierarchyForNodeId(candidate.id).back().getName() == text)
+		if (candidate.bareQualified == bare ||
+			withoutTypeParameters(storage.getNameHierarchyForNodeId(candidate.id).back().getName()) == bare)
 		{
 			tier = 0;
 		}
-		else if (endsWithName(candidate.qualified, text, candidate.delimiter) ||
-			endsWithName(candidate.key, text, candidate.delimiter))
+		else if (endsWithName(candidate.bareQualified, bare, candidate.delimiter) ||
+			endsWithName(candidate.bareKey, bare, candidate.delimiter))
 		{
 			tier = 1;
 		}

@@ -28,7 +28,7 @@ bool listed(PersistentStorage& storage, Id id)
 {
 	// Edge ids share the id space but have no definition kind.
 	return storage.getDefinitionKindForNodeId(id) == DEFINITION_EXPLICIT &&
-		!(storage.getNodeTypeForNodeWithId(id).getKind() & NOT_LISTED);
+		!(storage.getNodeTypeForNodeWithId(id).getKind() & NOT_LISTED) && !isUnsolvedSymbol(storage, id);
 }
 
 // The file that defines the symbol: its scope's file, else the only file with a token for it, else (when

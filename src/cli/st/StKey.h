@@ -25,6 +25,10 @@ struct Resolved
 	std::vector<Id> ids;
 };
 
+// The Java indexer's placeholder for a reference it could not resolve; never a real symbol.
+bool isUnsolvedSymbol(const NameHierarchy& name);
+bool isUnsolvedSymbol(PersistentStorage& storage, Id id);
+
 // Qualified name plus the last element's parameter string, without return type.
 std::wstring symbolKey(const NameHierarchy& name);
 

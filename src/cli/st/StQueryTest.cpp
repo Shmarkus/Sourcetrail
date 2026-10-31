@@ -291,6 +291,45 @@ TEST_CASE("st at answers an unmapped original line only when both mapped neighbo
 	REQUIRE_FALSE(st::symbolAtOriginal(code.storage, indexed, source, 1, read).has_value());
 }
 
+TEST_CASE("st at refuses an unmapped line when a nested member lies between its mapped neighbours")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	code.scope(a, L"A", 1, 10);
+	code.scope(run, L"A", 2, 8);
+	code.storage.buildCaches();
+	const std::vector<std::string> generated = {"class A {", "void run() {", "try {", "Thread.sleep(1);",
+		"} catch (final java.lang.Throwable $ex) {", "throw lombok.Lombok.sneakyThrow($ex);", "}", "}", "int x;", "}"};
+	const std::vector<std::string> original = {"class A {", "@SneakyThrows void run() { Thread.sleep(1); }", "int x;", "}"};
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+
+	REQUIRE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 1, read) == a);
+	REQUIRE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 3, read) == a);
+	REQUIRE_FALSE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 2, read).has_value());
+}
+
+TEST_CASE("st at refuses an unmapped line when an anonymous class lies between its mapped neighbours")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	const Id anonymous = code.member(a, L"A", L"anonymous");
+	code.scope(a, L"A", 1, 11);
+	code.scope(run, L"A", 2, 10);
+	code.scope(anonymous, L"A", 4, 8);
+	code.storage.buildCaches();
+	const std::vector<std::string> generated = {"class A {", "void run() {", "a();", "new Runnable() {", "public void run() {",
+		"try { x(); } catch (final Throwable e) { throw e; }", "}", "}.run();", "b();", "}", "}"};
+	const std::vector<std::string> original = {"class A {", "void run() {", "a();",
+		"new Runnable() { @SneakyThrows public void run() { x(); } }.run();", "b();", "}", "}"};
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+
+	REQUIRE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 3, read) == run);
+	REQUIRE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 5, read) == run);
+	REQUIRE_FALSE(st::symbolAtOriginal(code.storage, FilePath(L"/r/p/A.java"), FilePath(L"/o/A.java"), 4, read).has_value());
+}
+
 TEST_CASE("st outline shows visibility and line ranges")
 {
 	Code code;

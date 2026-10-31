@@ -205,10 +205,15 @@ void tileGap(const std::vector<std::string>& a, const std::vector<std::string>& 
 			lines.push_back(o);
 		}
 	}
+	// Single lines never tile, but one with the same text makes a run ambiguous.
 	std::map<std::string, std::vector<LineSpan>> runs;
 	for (size_t start = 0; start < lines.size(); start++)
 	{
 		std::string text = b[lines[start]];
+		if (uses.count(text))
+		{
+			runs[text].push_back({lines[start], lines[start]});
+		}
 		for (size_t end = start + 1; end < lines.size() && end - start < MAX_JOINED_LINES && text.size() < longest; end++)
 		{
 			text += b[lines[end]];
@@ -222,7 +227,8 @@ void tileGap(const std::vector<std::string>& a, const std::vector<std::string>& 
 	for (size_t g = gBegin; g < gEnd; g++)
 	{
 		const auto run = runs.find(a[g]);
-		if (run != runs.end() && run->second.size() == 1 && uses[a[g]] == 1)
+		if (run != runs.end() && run->second.size() == 1 && run->second.front().last > run->second.front().first &&
+			uses[a[g]] == 1)
 		{
 			tiles.emplace_back(g, run->second.front());
 		}

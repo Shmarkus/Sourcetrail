@@ -855,3 +855,17 @@ TEST_CASE("lombok location without a counterpart line names the original file on
 	REQUIRE(st::printResults({getter}, options, shown) == 1);
 	CHECK(shown.str().empty());
 }
+
+TEST_CASE("lombok alignment leaves a joined line unmapped when a single original line matches it as well")
+{
+	const std::vector<std::string> original = {"class A {", "@Getter", "int n;", "void f() {", "go(a,", "b);", "go(a,b);", "}", "}"};
+	const std::vector<std::string> generated = {"class A {", "int n;", "void f() {", "go(a, b);", "}", "@lombok.Generated",
+		"int getN() {", "return n;", "}", "}"};
+	const auto aligned = st::alignLines(generated, original);
+	CHECK_FALSE(aligned[3].has_value());
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+	for (size_t line = 5; line <= 7; line++)
+	{
+		CHECK_FALSE(st::toGeneratedLine(FilePath(L"/o/A.java"), FilePath(L"/g/A.java"), line, read).has_value());
+	}
+}

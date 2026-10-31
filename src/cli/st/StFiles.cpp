@@ -245,7 +245,8 @@ std::optional<Id> symbolAtOriginal(PersistentStorage& storage, const FilePath& i
 	{
 		return symbolAt(storage, indexedFile, *generated[line - 1] + 1);
 	}
-	// The alignment keeps the order of both files, so the line lies between the counterparts of its neighbours.
+	// The alignment keeps the order of both files, so the line lies between the counterparts of its neighbours, and
+	// belongs to their symbol when every generated line from one to the other does.
 	std::optional<size_t> above;
 	std::optional<size_t> below;
 	for (size_t i = std::min(line - 1, generated.size()); i-- > 0 && !above;)
@@ -261,11 +262,14 @@ std::optional<Id> symbolAtOriginal(PersistentStorage& storage, const FilePath& i
 		return std::nullopt;
 	}
 	const Id id = symbolAt(storage, indexedFile, *above + 1);
-	if (!id || id != symbolAt(storage, indexedFile, *below + 1))
+	for (size_t g = *above + 1; id && g <= *below; g++)
 	{
-		return std::nullopt;
+		if (symbolAt(storage, indexedFile, g + 1) != id)
+		{
+			return std::nullopt;
+		}
 	}
-	return id;
+	return id ? std::optional<Id>(id) : std::nullopt;
 }
 
 IndexedFiles indexedFiles(PersistentStorage& storage, const LombokRoots* roots)

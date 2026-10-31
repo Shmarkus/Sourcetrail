@@ -6,6 +6,7 @@
 #include "StArchitecture.h"
 #include "StFiles.h"
 #include "StFilter.h"
+#include "StGaps.h"
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
@@ -29,6 +30,55 @@ std::set<std::wstring> impactKeys(Code& code, const std::vector<Id>& ids, size_t
 bool includes(const std::set<std::wstring>& all, const std::set<std::wstring>& some)
 {
 	return std::includes(all.begin(), all.end(), some.begin(), some.end());
+}
+
+// A symbol the index knows by name only, without a definition.
+Id undefined(PersistentStorage& storage, const NameHierarchy& name, NodeKind kind)
+{
+	return storage.addNode(StorageNodeData(nodeKindToInt(kind), NameHierarchy::serialize(name))).first;
+}
+
+NameHierarchy typeName(const std::vector<std::wstring>& path)
+{
+	NameHierarchy name(NAME_DELIMITER_JAVA);
+	for (const std::wstring& element: path)
+	{
+		name.push(element);
+	}
+	return name;
+}
+
+// The Java indexer's placeholder for whatever it could not resolve, such as a call made inside a record.
+Id unsolvedSymbol(Code& code)
+{
+	const Id id = add(code.storage, typeName({L"unsolved-symbol"}), NODE_ENUM_CONSTANT);
+	addLocation(code.storage, id, code.file(L"Rec"), 1);
+	return id;
+}
+
+// A file the indexer reported errors in.
+Id brokenFile(Code& code, const std::wstring& type)
+{
+	const std::wstring path = L"/r/p/" + type + L".java";
+	const Id id = code.storage.addNode(StorageNodeData(nodeKindToInt(NODE_FILE),
+		NameHierarchy::serialize(NameHierarchy(path, NAME_DELIMITER_FILE)))).first;
+	code.storage.addFile(StorageFile(id, path, L"java", "2026-10-30 12:00:00", true, false));
+	code.files[type] = id;
+	return id;
+}
+
+st::Gaps gapsOfCalls(Code& code, Id id, st::Direction direction, size_t depth)
+{
+	st::Walked walked;
+	const auto lines = st::calls(code.storage, {id}, direction, depth, &walked);
+	return st::findGaps(code.storage, walked, lines);
+}
+
+std::string printed(const st::Gaps& gaps)
+{
+	std::ostringstream out;
+	st::printGaps(gaps, out);
+	return out.str();
 }
 }
 
@@ -915,4 +965,153 @@ TEST_CASE("st impact of a package covers what it and its sub-packages own")
 	CHECK(keys(result.lines) == std::set<std::wstring>{L"dx.Other.other()", L"w.Web.serve()", L"w.Main.main()"});
 	REQUIRE(lineFor(result.lines, L"w.Main.main()"));
 	CHECK(lineFor(result.lines, L"w.Main.main()")->kind == L"method, depth 2");
+}
+
+TEST_CASE("st callers of a method also called from an unresolved symbol counts the unresolved links")
+{
+	Code code;
+	const Id a = code.type(L"p", L"A");
+	const Id run = code.member(a, L"A", L"run");
+	const Id use = code.member(code.type(L"p", L"User"), L"User", L"use");
+	const Id top = code.member(code.type(L"p", L"Top"), L"Top", L"main");
+	code.link(Edge::EDGE_CALL, use, run, L"User", {3});
+	code.link(Edge::EDGE_CALL, top, use, L"Top", {3});
+	// Calls made inside record bodies: one link with two sites, and one a level up.
+	const Id unsolved = unsolvedSymbol(code);
+	code.link(Edge::EDGE_CALL, unsolved, run, L"Rec", {4, 6});
+	code.link(Edge::EDGE_CALL, unsolved, use, L"Rec", {8});
+	// What run calls doesn't make its callers incomplete.
+	code.link(Edge::EDGE_CALL, run, unsolved, L"A", {5});
+	code.storage.buildCaches();
+
+	st::Walked walked;
+	const auto lines = st::calls(code.storage, {run}, st::Direction::Incoming, 1, &walked);
+	CHECK(keys(lines) == std::set<std::wstring>{L"p.User.use()"});
+	const st::Gaps gaps = st::findGaps(code.storage, walked, lines);
+	CHECK(gaps.unresolvedLinks == 1);
+	CHECK(gaps.errorFiles == 0);
+	CHECK(gapsOfCalls(code, run, st::Direction::Incoming, 2).unresolvedLinks == 2);
+	CHECK(gapsOfCalls(code, run, st::Direction::Incoming, 0).unresolvedLinks == 2);
+	CHECK(gapsOfCalls(code, top, st::Direction::Incoming, 0).unresolvedLinks == 0);
+}
+
+TEST_CASE("st callees count calls into records and generated classes but not into libraries or implicit members")
+{
+	Code code;
+	const Id a = code.type(L"p", L"A");
+	const Id use = code.member(code.type(L"p", L"User"), L"User", L"use");
+	// A record's type and accessor have no definition; neither has a class only the build generates.
+	const Id record = undefined(code.storage, typeName({L"p", L"Rec"}), NODE_SYMBOL);
+	const Id accessor = undefined(code.storage, method({L"p", L"Rec"}, L"value", L"int", L"()"), NODE_METHOD);
+	const Id generated = undefined(code.storage, method({L"p", L"AMapperImpl"}, L"AMapperImpl", L"", L"()"), NODE_METHOD);
+	const Id library = undefined(code.storage, method({L"java", L"util", L"List"}, L"size", L"int", L"()"), NODE_METHOD);
+	const Id constructor = undefined(code.storage, method({L"p", L"A"}, L"A", L"", L"()"), NODE_METHOD);
+	for (const Id callee: {accessor, generated, library, constructor})
+	{
+		code.link(Edge::EDGE_CALL, use, callee, L"User", {4});
+	}
+	code.link(Edge::EDGE_TYPE_USAGE, use, record, L"User", {5});
+	code.link(Edge::EDGE_CALL, use, unsolvedSymbol(code), L"User", {6});
+	code.storage.buildCaches();
+
+	CHECK(gapsOfCalls(code, use, st::Direction::Outgoing, 1).unresolvedLinks == 3);
+	// The placeholder, the record, its accessor and the generated class's constructor.
+	CHECK(st::countUnresolved(code.storage) == 4);
+	(void)a;
+}
+
+TEST_CASE("st counts the files with index errors holding a result or a walked definition")
+{
+	Code code;
+	brokenFile(code, L"Broken");
+	const Id run = code.member(code.type(L"p", L"A"), L"A", L"run");
+	const Id broken = code.member(code.type(L"p", L"Broken"), L"Broken", L"call");
+	const Id clean = code.member(code.type(L"p", L"Clean"), L"Clean", L"call");
+	const Id helper = code.member(code.type(L"p", L"Helper"), L"Helper", L"help");
+	code.link(Edge::EDGE_CALL, broken, run, L"Broken", {3});
+	code.link(Edge::EDGE_CALL, clean, helper, L"Clean", {3});
+	code.link(Edge::EDGE_CALL, clean, broken, L"Clean", {4});
+	code.storage.buildCaches();
+
+	// A result in the broken file.
+	CHECK(gapsOfCalls(code, run, st::Direction::Incoming, 1).errorFiles == 1);
+	// A walked symbol defined there, though the result line is elsewhere.
+	CHECK(gapsOfCalls(code, clean, st::Direction::Outgoing, 1).errorFiles == 1);
+	CHECK(gapsOfCalls(code, helper, st::Direction::Incoming, 1).errorFiles == 0);
+
+	// A wide walk reads the broken file's definitions instead of the walked symbols' locations.
+	const Id wide = code.type(L"p", L"Wide");
+	for (int i = 0; i < 12; i++)
+	{
+		const Id member = code.member(wide, L"Wide", L"m" + std::to_wstring(i));
+		if (i == 0)
+		{
+			code.link(Edge::EDGE_CALL, broken, member, L"Wide", {7});
+		}
+	}
+	code.storage.buildCaches();
+	const st::ImpactResult impact = st::impact(code.storage, {wide}, 0, st::IMPACT_EDGES, st::Group::None);
+	REQUIRE(keys(impact.lines).count(L"p.Broken.call()"));
+	CHECK(lineFor(impact.lines, L"p.Broken.call()")->file.wstr() == L"/r/p/Wide.java");
+	CHECK(st::findGaps(code.storage, impact.walked, impact.lines).errorFiles == 1);
+}
+
+TEST_CASE("st graph commands count the unresolved links they followed")
+{
+	Code code;
+	const Id api = code.type(L"p", L"Api", NODE_INTERFACE);
+	const Id apiRun = code.member(api, L"Api", L"run");
+	const Id a = code.type(L"p", L"A");
+	const Id run = code.member(a, L"A", L"run");
+	code.link(Edge::EDGE_OVERRIDE, run, apiRun, L"A", {2});
+	const Id use = code.member(code.type(L"p", L"User"), L"User", L"use");
+	code.link(Edge::EDGE_CALL, use, run, L"User", {3});
+	const Id unsolved = unsolvedSymbol(code);
+	code.link(Edge::EDGE_CALL, unsolved, run, L"Rec", {4});
+	// A record implementing the interface.
+	code.link(Edge::EDGE_OVERRIDE, unsolved, apiRun, L"Rec", {5});
+	code.storage.buildCaches();
+
+	st::Walked refs;
+	const auto refLines = st::references(code.storage, {run}, &refs);
+	CHECK(st::findGaps(code.storage, refs, refLines).unresolvedLinks == 1);
+
+	st::Walked impls;
+	const auto implLines = st::hierarchy(code.storage, {apiRun}, st::Direction::Incoming, &impls);
+	CHECK(st::findGaps(code.storage, impls, implLines).unresolvedLinks == 1);
+	st::Walked supers;
+	const auto superLines = st::hierarchy(code.storage, {run}, st::Direction::Outgoing, &supers);
+	CHECK(st::findGaps(code.storage, supers, superLines).unresolvedLinks == 0);
+
+	const st::ImpactResult impact = st::impact(code.storage, {run}, 0, st::IMPACT_EDGES, st::Group::None);
+	// The record's override is a sibling of run: a change to run doesn't reach it.
+	CHECK(st::findGaps(code.storage, impact.walked, impact.lines).unresolvedLinks == 1);
+
+	st::Walked depsIn;
+	const auto depLines = st::deps(code.storage, {a}, st::Direction::Incoming, &depsIn);
+	CHECK(st::findGaps(code.storage, depsIn, depLines).unresolvedLinks == 1);
+	st::Walked depsOut;
+	const auto depOutLines = st::deps(code.storage, {use}, st::Direction::Outgoing, &depsOut);
+	CHECK(st::findGaps(code.storage, depsOut, depOutLines).unresolvedLinks == 0);
+
+	st::Walked path;
+	st::paths(code.storage, {use}, {run}, 6, 10, st::PATH_EDGES, &path);
+	CHECK(st::findGaps(code.storage, path, {}).unresolvedLinks == 1);
+}
+
+TEST_CASE("no incomplete line when nothing is missing")
+{
+	Code code;
+	const Id run = code.member(code.type(L"p", L"A"), L"A", L"run");
+	const Id use = code.member(code.type(L"p", L"User"), L"User", L"use");
+	code.link(Edge::EDGE_CALL, use, run, L"User", {3});
+	code.storage.buildCaches();
+
+	const st::Gaps gaps = gapsOfCalls(code, run, st::Direction::Incoming, 0);
+	CHECK(gaps.unresolvedLinks == 0);
+	CHECK(gaps.errorFiles == 0);
+	CHECK(printed(gaps).empty());
+	CHECK(printed({2, 0}) == "st: incomplete: 2 links to unresolved symbols (see st status)\n");
+	CHECK(printed({0, 1}) == "st: incomplete: 1 files with index errors (see st status)\n");
+	CHECK(printed({2, 1}) == "st: incomplete: 2 links to unresolved symbols, 1 files with index errors (see st status)\n");
 }

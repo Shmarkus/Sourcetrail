@@ -34,6 +34,7 @@ struct ImpactResult
 	size_t symbols = 0;
 	size_t files = 0;
 	size_t packages = 0;
+	Walked walked;
 };
 
 // Symbols a change to `symbols` may break: users over `types` links, subtypes, and overrides both ways
@@ -48,7 +49,8 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 // package when the input is a package. A type stands for itself and its members; links inside the input and
 // links of kind member, import and include don't count. The kind column counts link sites ("class, N links" /
 // "package, N links"); the location is the first of them by path and line.
-std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction);
+std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction,
+	Walked* walked = nullptr);
 }
 
 #endif

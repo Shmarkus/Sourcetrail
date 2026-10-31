@@ -365,7 +365,17 @@ st find --kind class Controller | st filter --annotated RestController | st deps
 ```
 
 **Known limits.** Java records are not indexed as types by the bundled Java indexer: record types, constructors and
-components are missing from every answer. Field reads and writes are not distinguished (both are `usage`).
+components are missing from every answer, and calls made inside a record body are attributed to no symbol. Classes an
+annotation processor generates during the build (JPA metamodel `Order_`, MapStruct `...MapperImpl`) are not indexed either.
+Field reads and writes are not distinguished (both are `usage`).
+
+**Incomplete answers.** When an answer of `callers`, `callees`, `refs`, `impls`, `supers`, `path`, `impact` or `deps` touches such
+a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M files with index errors (see st status)`
+(a zero part is left out); stdout and the exit code stay the same. N counts the links the command followed from the symbols
+it walked whose other end the index could not resolve: the indexer's `unsolved-symbol` placeholder, or a symbol without a
+definition named inside a package the project defines types in (library symbols and implicit members such as default
+constructors don't count). M counts the files with index errors holding a result location or the definition of a walked
+symbol. `st status` adds the index-wide totals, `files_with_errors` and `unresolved_symbols`.
 
 **Exit codes.** 0 results, 1 empty, 2 ambiguous, 3 symbol not found, 4 no index,
 5 index stale (with `--no-refresh`, or when a refresh failed) or project locked past `--wait`, 64 usage error, 70 internal error.

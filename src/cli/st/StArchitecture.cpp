@@ -70,6 +70,23 @@ public:
 		return m_reached;
 	}
 
+	// The symbols walked, after run.
+	std::set<Id> walked() const
+	{
+		std::set<Id> ids;
+		for (const State& state: m_walked)
+		{
+			ids.insert(state.id);
+		}
+		return ids;
+	}
+
+	// Every link followed, after run: link id to the symbol it reached.
+	const std::map<Id, Id>& links() const
+	{
+		return m_links;
+	}
+
 private:
 	// The states not walked yet, marked as walked.
 	std::vector<State> startable(const std::vector<State>& states)
@@ -100,6 +117,7 @@ private:
 
 	void reach(Id id, Id edge, size_t cost, bool climbed, std::vector<State>* into)
 	{
+		m_links[edge] = id;
 		Reach& known = m_reached[id];
 		if (cost < known.cost)
 		{
@@ -163,6 +181,7 @@ private:
 	const size_t m_depth;
 	const Edge::TypeMask m_types;
 	std::map<Id, Reach> m_reached;
+	std::map<Id, Id> m_links;
 	std::set<State> m_walked;
 	std::map<Id, bool> m_walkable;
 };
@@ -341,7 +360,8 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 		roots.insert(roots.end(), expanded.begin(), expanded.end());
 	}
 	const std::set<Id> inputs = owned(storage, roots);
-	const std::map<Id, Reach> reached = Walk(storage, depth, types).run(inputs);
+	Walk walk(storage, depth, types);
+	const std::map<Id, Reach> reached = walk.run(inputs);
 
 	std::vector<Affected> affected;
 	std::vector<Id> edges;
@@ -369,6 +389,12 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 	const std::map<Id, Site> definitionById = definitionSites(storage, ids);
 
 	ImpactResult result;
+	result.walked.nodes = walk.walked();
+	result.walked.links = walk.links();
+	for (const Affected& symbol: affected)
+	{
+		result.walked.nodes.insert(symbol.id);
+	}
 	std::set<std::wstring> files;
 	std::map<std::wstring, std::vector<const Affected*>> byFile;
 	std::map<std::wstring, std::vector<const Affected*>> byPackage;
@@ -433,7 +459,8 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 	return result;
 }
 
-std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction)
+std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction,
+	Walked* walked)
 {
 	const Edge::TypeMask counted = ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT | Edge::EDGE_INCLUDE);
 	Packages packages(storage);
@@ -466,6 +493,10 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 		};
 
 		const std::set<Id> own = owned(storage, withSubPackages(storage, input));
+		if (walked)
+		{
+			walked->nodes.insert(own.begin(), own.end());
+		}
 		const std::vector<Id> ids(own.begin(), own.end());
 		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)
 																				: storage.getEdgesForTargetIds(ids);
@@ -476,6 +507,10 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 			if (!(Edge::intToType(edge.type) & counted) || own.count(other))
 			{
 				continue;
+			}
+			if (walked)
+			{
+				walked->links[edge.id] = other;
 			}
 			auto it = keyById.find(other);
 			if (it == keyById.end())
@@ -491,6 +526,10 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 			}
 			if (!it->second.empty() && !inside(it->second))
 			{
+				if (walked)
+				{
+					walked->nodes.insert(other);
+				}
 				Row& row = rows[it->second];
 				row.label = packageLevel ? L"package" : L"class";
 				row.edges.insert(edge.id);

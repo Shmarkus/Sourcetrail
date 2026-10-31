@@ -67,8 +67,9 @@ struct Reached
 	Id siteEdge = 0;
 };
 
-// 0-1 BFS over one trail graph: call and usage hops cost 1, override hops are free.
-std::map<Id, Reached> walkCalls(const Graph& graph, Id start, Direction direction, size_t depth)
+// 0-1 BFS over one trail graph: call and usage hops cost 1, override hops are free. `expanded` gets the symbols
+// whose callers (callees) were looked at.
+std::map<Id, Reached> walkCalls(const Graph& graph, Id start, Direction direction, size_t depth, std::set<Id>* expanded)
 {
 	const auto hops = adjacency(graph, CALL_EDGES, direction);
 	std::map<Id, Reached> best;
@@ -82,6 +83,10 @@ std::map<Id, Reached> walkCalls(const Graph& graph, Id start, Direction directio
 		if (current != start && !isKind(graph.getNodeById(current), CALLABLE))
 		{
 			continue;
+		}
+		if (!depth || best[current].cost < depth)
+		{
+			expanded->insert(current);
 		}
 		const auto it = hops.find(current);
 		if (it == hops.end())
@@ -290,9 +295,14 @@ std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const
 	return {resultLine(storage, key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), sites.begin()->second)};
 }
 
-std::vector<ResultLine> references(PersistentStorage& storage, const std::vector<Id>& symbols)
+std::vector<ResultLine> references(PersistentStorage& storage, const std::vector<Id>& symbols, Walked* walked)
 {
 	std::vector<ResultLine> lines;
+	if (walked)
+	{
+		walked->nodes.insert(symbols.begin(), symbols.end());
+		walked->scopes.push_back({{symbols.begin(), symbols.end()}, ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT), 0});
+	}
 	for (const Id id: symbols)
 	{
 		const Edge::TypeMask types = ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT);
@@ -314,6 +324,10 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 			{
 				continue;
 			}
+			if (walked)
+			{
+				walked->nodes.insert(edge->getFrom()->getId());
+			}
 			const std::wstring user = symbolKey(edge->getFrom()->getNameHierarchy());
 			storage.getSourceLocationsForTokenIds({edge->getId()})->forEachSourceLocation([&](SourceLocation* location) {
 				if (location->isStartLocation())
@@ -327,16 +341,18 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 	return lines;
 }
 
-std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, size_t depth)
+std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, size_t depth,
+	Walked* walked)
 {
 	const std::set<Id> inputs(symbols.begin(), symbols.end());
 	std::map<Id, Reached> results;
+	std::set<Id> expanded;
 	for (const Id id: symbols)
 	{
 		const auto graph = direction == Direction::Incoming
 			? storage.getGraphForTrail(0, id, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true)
 			: storage.getGraphForTrail(id, 0, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true);
-		for (const auto& [node, reached]: walkCalls(*graph, id, direction, depth))
+		for (const auto& [node, reached]: walkCalls(*graph, id, direction, depth, &expanded))
 		{
 			if (!inputs.count(node) && reached.cost < results[node].cost)
 			{
@@ -344,12 +360,24 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 			}
 		}
 	}
+	if (walked)
+	{
+		const Edge::TypeMask horizontal = Edge::EDGE_CALL | Edge::EDGE_USAGE;
+		const bool incoming = direction == Direction::Incoming;
+		walked->scopes.push_back({expanded, incoming ? horizontal : Edge::EDGE_OVERRIDE, incoming ? Edge::EDGE_OVERRIDE : horizontal});
+		walked->nodes.insert(inputs.begin(), inputs.end());
+		walked->nodes.insert(expanded.begin(), expanded.end());
+	}
 	std::vector<ResultLine> lines;
 	for (const auto& [node, reached]: results)
 	{
 		if (isUnsolvedSymbol(storage, node))
 		{
 			continue;
+		}
+		if (walked)
+		{
+			walked->nodes.insert(node);
 		}
 		std::wstring kind = storage.getNodeTypeForNodeWithId(node).getReadableTypeWString();
 		if (reached.via)
@@ -372,10 +400,15 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 	return lines;
 }
 
-std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction)
+std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction,
+	Walked* walked)
 {
 	const std::set<Id> inputs(symbols.begin(), symbols.end());
 	std::set<Id> results;
+	if (walked)
+	{
+		walked->nodes.insert(inputs.begin(), inputs.end());
+	}
 	for (const Id id: symbols)
 	{
 		const Edge::TypeMask types = (storage.getNodeTypeForNodeWithId(id).getKind() & TYPES)
@@ -408,6 +441,11 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 				}
 			}
 		}
+		if (walked)
+		{
+			// Walking down follows links into the walked symbols, walking up links out of them.
+			walked->scopes.push_back({seen, direction == Direction::Incoming ? types : 0, direction == Direction::Outgoing ? types : 0});
+		}
 	}
 	std::vector<ResultLine> lines;
 	for (const Id id: results)
@@ -415,6 +453,10 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 		if (isUnsolvedSymbol(storage, id))
 		{
 			continue;
+		}
+		if (walked)
+		{
+			walked->nodes.insert(id);
 		}
 		for (ResultLine& line: definitionLines(storage, id, key(storage, id)))
 		{
@@ -425,7 +467,7 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
 }
 
 std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::vector<Id>& from,
-	const std::vector<Id>& to, size_t depth, size_t limit, Edge::TypeMask types)
+	const std::vector<Id>& to, size_t depth, size_t limit, Edge::TypeMask types, Walked* walked)
 {
 	std::vector<std::vector<PathHop>> chains;
 	size_t pairs = 0;
@@ -471,6 +513,26 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 	if (chains.size() > limit)
 	{
 		chains.resize(limit);
+	}
+	if (walked)
+	{
+		// Forward from the origins and along the chains found, backward from the targets.
+		const std::set<Id> targets(to.begin(), to.end());
+		Scope forward{{from.begin(), from.end()}, types & Edge::LAYOUT_VERTICAL, types & ~Edge::LAYOUT_VERTICAL};
+		for (const auto& chain: chains)
+		{
+			for (const PathHop& hop: chain)
+			{
+				if (!targets.count(hop.to))
+				{
+					forward.from.insert(hop.to);
+				}
+			}
+		}
+		walked->nodes.insert(forward.from.begin(), forward.from.end());
+		walked->nodes.insert(targets.begin(), targets.end());
+		walked->scopes.push_back(std::move(forward));
+		walked->scopes.push_back({targets, types & ~Edge::LAYOUT_VERTICAL, types & Edge::LAYOUT_VERTICAL});
 	}
 	return chains;
 }

@@ -114,6 +114,7 @@ public:
 
 	NodeType getNodeTypeForNodeWithId(Id nodeId) const override;
 	DefinitionKind getDefinitionKindForNodeId(Id nodeId) const;
+	std::vector<StorageNode> getStorageNodesForIds(const std::vector<Id>& nodeIds) const;
 	AccessKind getAccessKindForNodeId(Id nodeId) const;
 
 	StorageEdge getEdgeById(Id edgeId) const override;

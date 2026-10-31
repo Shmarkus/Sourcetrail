@@ -622,6 +622,11 @@ DefinitionKind PersistentStorage::getDefinitionKindForNodeId(Id nodeId) const
 	return it == m_symbolDefinitionKinds.end() ? DEFINITION_NONE : it->second;
 }
 
+std::vector<StorageNode> PersistentStorage::getStorageNodesForIds(const std::vector<Id>& nodeIds) const
+{
+	return m_sqliteIndexStorage.getAllByIds<StorageNode>(nodeIds);
+}
+
 AccessKind PersistentStorage::getAccessKindForNodeId(Id nodeId) const
 {
 	const StorageComponentAccess access = m_sqliteIndexStorage.getComponentAccessByNodeId(nodeId);

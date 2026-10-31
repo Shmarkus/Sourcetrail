@@ -33,6 +33,7 @@
 #include "StFiles.h"
 #include "StFreshness.h"
 #include "StFilter.h"
+#include "StGaps.h"
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
@@ -126,6 +127,16 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 
 const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
+// Prints the results, then on stderr the gaps of the index they touch.
+int printWithGaps(PersistentStorage& storage, std::vector<st::ResultLine> lines, const st::Walked& walked,
+	const st::OutputOptions& options)
+{
+	const st::Gaps gaps = st::findGaps(storage, walked, lines);
+	const int code = st::printResults(std::move(lines), options, std::cout);
+	st::printGaps(gaps, std::cerr);
+	return code;
+}
+
 // Prints the definition lines of `ids` on stderr, all of them.
 void printCandidates(PersistentStorage& storage, const std::vector<Id>& ids, const st::OutputOptions& options)
 {
@@ -186,7 +197,17 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 				  << " symbol pairs\n";
 	}
 	const size_t found = 1000;
-	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1), types);
+	st::Walked walked;
+	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1), types, &walked);
+	std::vector<st::ResultLine> hops;
+	for (const auto& chain: chains)
+	{
+		for (const st::PathHop& hop: chain)
+		{
+			hops.push_back({L"", L"", hop.file, hop.line, ""});
+		}
+	}
+	const st::Gaps gaps = st::findGaps(storage, walked, hops);
 	std::cerr << "path: " << chains.size() << '\n';
 	const auto location = [&](const FilePath& file, size_t line, size_t column) {
 		st::ResultLine mapped{L"", L"", file, line, ""};
@@ -218,6 +239,7 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 	{
 		std::cout << "(+" << chains.size() - options.limit << " more paths, --limit)\n";
 	}
+	st::printGaps(gaps, std::cerr);
 	return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }
 
@@ -234,35 +256,37 @@ int impact(PersistentStorage& storage, const std::vector<Id>& ids, size_t depth,
 			? st::displayPath(st::toOriginalFile(line.file, lombok).value_or(line.file), options.cwd)
 			: line.key;
 	}
-	return st::printResults(std::move(result.lines), options, std::cout);
+	return printWithGaps(storage, std::move(result.lines), result.walked, options);
 }
 
 int deps(PersistentStorage& storage, const std::vector<Id>& ids, st::Direction direction, const st::OutputOptions& options)
 {
-	std::vector<st::ResultLine> lines = st::deps(storage, ids, direction);
+	st::Walked walked;
+	std::vector<st::ResultLine> lines = st::deps(storage, ids, direction, &walked);
 	std::cerr << "deps: " << lines.size() << '\n';
-	return st::printResults(std::move(lines), options, std::cout);
+	return printWithGaps(storage, std::move(lines), walked, options);
 }
 
 int graph(PersistentStorage& storage, const QString& command, const std::vector<Id>& ids, size_t depth,
 	const st::OutputOptions& options)
 {
 	std::vector<st::ResultLine> lines;
+	st::Walked walked;
 	if (command == "refs")
 	{
-		lines = st::references(storage, ids);
+		lines = st::references(storage, ids, &walked);
 	}
 	else if (command == "callers" || command == "callees")
 	{
 		lines = st::calls(storage, st::expandClasses(storage, ids),
-			command == "callers" ? st::Direction::Incoming : st::Direction::Outgoing, depth);
+			command == "callers" ? st::Direction::Incoming : st::Direction::Outgoing, depth, &walked);
 	}
 	else
 	{
-		lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing);
+		lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing, &walked);
 	}
 	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
-	return st::printResults(std::move(lines), options, std::cout);
+	return printWithGaps(storage, std::move(lines), walked, options);
 }
 
 // Whether the symbol named by `key` passes; a key that doesn't resolve exactly is reported, fails and sets `unknown`.
@@ -538,6 +562,8 @@ int status(PersistentStorage& storage, const st::Freshness& freshness)
 	std::cout << "indexed_at\t" << stats.timestamp.toString() << '\n'
 			  << "files\t" << stats.fileCount << '\n'
 			  << "errors\t" << storage.getErrorCount().total << '\n'
+			  << "files_with_errors\t" << storage.getIncompleteFiles().size() << '\n'
+			  << "unresolved_symbols\t" << st::countUnresolved(storage) << '\n'
 			  << "stale_files\t" << freshness.changedFiles << '\n';
 	return st::EXIT_RESULTS;
 }

@@ -31,11 +31,16 @@ Id addJavaFile(PersistentStorage& storage, const std::wstring& path)
 	return id;
 }
 
-void addTokenLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t line)
+void addLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t line, LocationType type)
 {
 	const Id locationId = storage.addSourceLocation(
-		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(LOCATION_TOKEN)));
+		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(type)));
 	storage.addOccurrence(StorageOccurrence(elementId, locationId));
+}
+
+void addTokenLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t line)
+{
+	addLocation(storage, elementId, fileId, line, LOCATION_TOKEN);
 }
 
 class TestStorage: public PersistentStorage
@@ -391,4 +396,27 @@ TEST_CASE("storage finds only direct importers of changed files")
 
 	REQUIRE(referencing.count(FilePath(L"/project/p/B.java")) == 1);
 	REQUIRE(referencing.count(FilePath(L"/project/p/C.java")) == 0);
+}
+
+TEST_CASE("storage finds importers by the file declaring the imported symbol")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id fileA = addJavaFile(storage, L"/project/p/A.java");
+	const Id fileB = addJavaFile(storage, L"/project/p/B.java");
+
+	const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+	const Id classB = addJavaSymbol(storage, NODE_CLASS, L"p.B");
+	const Id list = addJavaSymbol(storage, NODE_CLASS, L"java.util.List");
+	addTokenLocation(storage, classA, fileA, 3);
+	addTokenLocation(storage, classB, fileB, 3);
+
+	// B imports List, which no project file declares. A merely qualifies it, and does so last.
+	addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_IMPORT, fileB, list)), fileB, 1);
+	addLocation(storage, list, fileB, 1, LOCATION_QUALIFIER);
+	addLocation(storage, list, fileA, 5, LOCATION_QUALIFIER);
+	storage.buildCaches();
+
+	REQUIRE(storage.getReferencing({FilePath(L"/project/p/A.java")}).count(FilePath(L"/project/p/B.java")) == 0);
+	REQUIRE(storage.getReferenced({FilePath(L"/project/p/B.java")}).count(FilePath(L"/project/p/A.java")) == 0);
 }

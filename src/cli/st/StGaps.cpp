@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "CppSQLite3.h"
 #include "DefinitionKind.h"
@@ -394,6 +395,40 @@ size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const 
 }
 }
 
+// Walked symbols and the types enclosing them that more than one file declares: a class two modules both have,
+// whose other copy's users may be bound to this one or missing.
+size_t multiDeclared(PersistentStorage& storage, const std::set<Id>& nodes)
+{
+	std::set<Id> symbols = nodes;
+	for (std::vector<Id> level(nodes.begin(), nodes.end()); !level.empty();)
+	{
+		std::vector<Id> owners;
+		for (const StorageEdge& edge: storage.getEdgesForTargetIds(level))
+		{
+			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER && symbols.insert(edge.sourceNodeId).second)
+			{
+				owners.push_back(edge.sourceNodeId);
+			}
+		}
+		level = owners;
+	}
+	// every file of a package declares it
+	std::vector<Id> candidates;
+	for (const StorageNode& node: storage.getStorageNodesForIds(std::vector<Id>(symbols.begin(), symbols.end())))
+	{
+		if (!(intToNodeKind(node.type) & (NODE_PACKAGE | NODE_MODULE | NODE_NAMESPACE | NODE_FILE)))
+		{
+			candidates.push_back(node.id);
+		}
+	}
+	size_t count = 0;
+	for (const auto& [id, sites]: declarationSites(storage, candidates))
+	{
+		count += sites.size() > 1;
+	}
+	return count;
+}
+
 Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines)
 {
 	std::map<Id, Id> links = walked.links;
@@ -437,6 +472,7 @@ Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vecto
 		gaps.unresolvedLinks += unresolved.count(end);
 	}
 	gaps.indexErrors = indexErrors(storage, walked.nodes, lines);
+	gaps.multiDeclared = multiDeclared(storage, walked.nodes);
 	return gaps;
 }
 
@@ -455,18 +491,27 @@ size_t countUnresolved(PersistentStorage& storage)
 
 void printGaps(const Gaps& gaps, std::ostream& out)
 {
-	if (!gaps.unresolvedLinks && !gaps.indexErrors)
+	std::vector<std::string> parts;
+	if (gaps.unresolvedLinks)
+	{
+		parts.push_back(std::to_string(gaps.unresolvedLinks) + " links to unresolved symbols");
+	}
+	if (gaps.indexErrors)
+	{
+		parts.push_back(std::to_string(gaps.indexErrors) + " index errors");
+	}
+	if (gaps.multiDeclared)
+	{
+		parts.push_back(std::to_string(gaps.multiDeclared) + " symbols declared in several modules");
+	}
+	if (parts.empty())
 	{
 		return;
 	}
 	out << "st: incomplete: ";
-	if (gaps.unresolvedLinks)
+	for (size_t i = 0; i < parts.size(); i++)
 	{
-		out << gaps.unresolvedLinks << " links to unresolved symbols" << (gaps.indexErrors ? ", " : "");
-	}
-	if (gaps.indexErrors)
-	{
-		out << gaps.indexErrors << " index errors";
+		out << (i ? ", " : "") << parts[i];
 	}
 	out << " (see st status)\n";
 }

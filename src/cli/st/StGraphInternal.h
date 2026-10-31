@@ -40,6 +40,10 @@ std::map<Id, std::vector<Site>> allLinkSites(PersistentStorage& storage, const s
 
 // Definition site of each symbol that has one (the name's line, not the scope's), in one lookup.
 std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector<Id>& ids);
+
+// Per declaring file in path order, the name's line (a token or scope location, not a use); a symbol without one gets
+// its first location of any kind.
+std::map<Id, std::vector<Site>> declarationSites(PersistentStorage& storage, const std::vector<Id>& ids);
 }
 
 #endif

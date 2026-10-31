@@ -37,6 +37,7 @@ struct Gaps
 {
 	size_t unresolvedLinks = 0;
 	size_t indexErrors = 0;
+	size_t multiDeclared = 0;	// walked symbols, or types enclosing one, that several files declare
 };
 
 // Followed links whose other end the index could not resolve, and index errors belonging to a walked symbol or to
@@ -45,13 +46,15 @@ struct Gaps
 // build-generated class), unless it is an implicit member of a defined type (a default constructor, an enum's
 // valueOf). An error belongs to the innermost named symbol around it (anonymous and local classes skipped); at type
 // level to the fields declared on its line, if any; outside every scope (an import) to the file's top-level types.
+// A walked symbol or a type enclosing it that several files declare (a class two modules both have) is a gap too:
+// users of the other copy may be bound to this one or missing.
 Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines);
 
 // Unresolved symbols in the whole index, by the rule of findGaps.
 size_t countUnresolved(PersistentStorage& storage);
 
-// `st: incomplete: <n> links to unresolved symbols, <m> index errors (see st status)` on `out`,
-// leaving out a zero part; nothing when both are zero.
+// `st: incomplete: <n> links to unresolved symbols, <m> index errors, <k> symbols declared in several modules
+// (see st status)` on `out`, leaving out a zero part; nothing when all are zero.
 void printGaps(const Gaps& gaps, std::ostream& out);
 
 // printGaps of what `findGaps` returns; when it throws, `st: incomplete: gap check failed (<what>)` instead, since

@@ -406,7 +406,7 @@ annotation processor generates during the build (JPA metamodel `Order_`, MapStru
 Field reads and writes are not distinguished (both are `usage`).
 A class two modules both declare (same package and name, e.g. a test helper) is one symbol listed at both files; a third
 module resolves it to the first copy on the class path, so its calls to members only the other copy has are missing
-without a warning (module-aware resolution is a tracked follow-up).
+(`st` warns, see below; module-aware resolution is a tracked follow-up).
 
 **Incomplete answers.** When an answer of `callers`, `callees`, `refs`, `impls`, `supers`, `path`, `impact` or `deps` touches such
 a gap, stderr ends with one line, `st: incomplete: N links to unresolved symbols, M index errors (see st status)` (a zero part is
@@ -417,6 +417,8 @@ constructors don't count). M counts the index errors that belong to a walked sym
 error belongs to the innermost named method or type around it (anonymous and local classes are skipped), at class level to a
 field declared on its line, and outside every scope (an import) to the file's top-level types. `st status` adds the index-wide
 totals, `files_with_errors` and `unresolved_symbols`.
+A third part, `K symbols declared in several modules`, counts walked symbols, or types enclosing one, that more than one
+file declares (a class two modules both have): their callers may be bound to the other copy or missing.
 The warning can stay silent where a gap is real: the Java indexer reports an unresolved type once, where it is declared (a
 field of a generated type), so calls through that field vanish without an error in the calling method; and `refs` of an
 entity field misses its JPA metamodel uses (`Order_.status`) without a warning. `refs` and `impact` of a field of a Lombok

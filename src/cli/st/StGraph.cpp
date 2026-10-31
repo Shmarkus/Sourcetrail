@@ -4,7 +4,6 @@
 #include <deque>
 #include <limits>
 #include <map>
-#include <optional>
 #include <set>
 
 #include "Graph.h"
@@ -286,56 +285,65 @@ std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector
 	return sites;
 }
 
-namespace
+std::map<Id, std::vector<Site>> declarationSites(PersistentStorage& storage, const std::vector<Id>& ids)
 {
-// Per declaring file in path order, the name's line. Without a declaring location, the first location of any kind.
-std::vector<Site> declarationSites(PersistentStorage& storage, Id id)
-{
-	std::map<std::wstring, std::pair<Site, bool>> byFile;	 // file -> site, whether it is a scope's
-	std::optional<Site> any;
-	storage.getSourceLocationsForTokenIds({id})->forEachSourceLocation([&](SourceLocation* location) {
-		const auto& tokens = location->getTokenIds();
-		if (!location->isStartLocation() || std::find(tokens.begin(), tokens.end(), id) == tokens.end())
+	std::map<Id, std::vector<Site>> sites;
+	if (ids.empty())
+	{
+		return sites;
+	}
+	const std::set<Id> wanted(ids.begin(), ids.end());
+	std::map<Id, std::map<std::wstring, std::pair<Site, bool>>> byFile;	 // id -> file -> site, whether a scope's
+	std::map<Id, Site> any;
+	storage.getSourceLocationsForTokenIds(ids)->forEachSourceLocation([&](SourceLocation* location) {
+		if (!location->isStartLocation())
 		{
 			return;
 		}
 		const Site site{location->getFilePath(), location->getLineNumber(), location->getColumnNumber()};
-		if (!location->isScopeLocation() && location->getType() != LOCATION_TOKEN)
+		const bool declares = location->isScopeLocation() || location->getType() == LOCATION_TOKEN;
+		for (const Id id: location->getTokenIds())
 		{
-			if (!any)
+			if (!wanted.count(id))
 			{
-				any = site;
+				continue;
 			}
-			return;
-		}
-		auto it = byFile.find(site.file.wstr());
-		if (it == byFile.end())
-		{
-			byFile.emplace(site.file.wstr(), std::make_pair(site, location->isScopeLocation()));
-		}
-		else if (!location->isScopeLocation() && it->second.second)
-		{
-			it->second = {site, false};
+			if (!declares)
+			{
+				any.emplace(id, site);
+				continue;
+			}
+			auto& files = byFile[id];
+			auto it = files.find(site.file.wstr());
+			if (it == files.end())
+			{
+				files.emplace(site.file.wstr(), std::make_pair(site, location->isScopeLocation()));
+			}
+			else if (!location->isScopeLocation() && it->second.second)
+			{
+				it->second = {site, false};
+			}
 		}
 	});
-	std::vector<Site> sites;
-	for (const auto& entry: byFile)
+	for (const auto& [id, files]: byFile)
 	{
-		sites.push_back(entry.second.first);
+		for (const auto& entry: files)
+		{
+			sites[id].push_back(entry.second.first);
+		}
 	}
-	if (sites.empty() && any)
+	for (const auto& [id, site]: any)
 	{
-		sites.push_back(*any);
+		sites.emplace(id, std::vector<Site>{site});
 	}
 	return sites;
-}
 }
 
 std::vector<ResultLine> definitionLines(
 	PersistentStorage& storage, Id id, const std::wstring& key, const std::set<FilePath>* files)
 {
 	const NodeType type = storage.getNodeTypeForNodeWithId(id);
-	std::vector<Site> sites = declarationSites(storage, id);
+	std::vector<Site> sites = std::move(declarationSites(storage, {id})[id]);
 	// every file of a package declares it
 	if (sites.size() > 1 && (type.getKind() & (NODE_PACKAGE | NODE_MODULE | NODE_NAMESPACE)))
 	{

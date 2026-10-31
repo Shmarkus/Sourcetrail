@@ -1259,3 +1259,33 @@ TEST_CASE("st definition lines list each file of a class declared in two modules
 	REQUIRE(outlined.size() == 1);
 	CHECK(outlined[0].file.wstr() == L"/r/sub/p/A.java");
 }
+
+TEST_CASE("st gaps count walked symbols whose type two modules declare")
+{
+	for (const bool twice: {false, true})
+	{
+		Code code;
+		const Id pkg = code.package(L"q");
+		const Id a = code.type(L"q", L"A");
+		const Id f = code.member(a, L"A", L"f");
+		const Id b = code.type(L"q", L"B");
+		const Id g = code.member(b, L"B", L"g");
+		code.link(Edge::EDGE_CALL, g, f, L"B", {3});
+		// the package is declared in every file and never counts
+		addLocation(code.storage, pkg, code.file(L"A"), 1);
+		addLocation(code.storage, pkg, code.file(L"B"), 1);
+		// Code puts a type and its members on one line, and a batched location query keeps one token per position
+		addLocation(code.storage, a, code.file(L"A"), 5);
+		if (twice)
+		{
+			addLocation(code.storage, a, addFile(code.storage, L"/r/sub/q/A.java"), 2);
+		}
+		code.storage.buildCaches();
+
+		const st::Gaps gaps = gapsOfCalls(code, f, st::Direction::Incoming, 1);
+		CHECK(gaps.multiDeclared == (twice ? 1 : 0));
+		CHECK(printed(gaps) == (twice ? "st: incomplete: 1 symbols declared in several modules (see st status)\n" : ""));
+	}
+	CHECK(printed({2, 0, 1}) ==
+		"st: incomplete: 2 links to unresolved symbols, 1 symbols declared in several modules (see st status)\n");
+}

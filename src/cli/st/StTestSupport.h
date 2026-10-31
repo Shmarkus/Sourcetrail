@@ -55,10 +55,10 @@ inline Id addFile(PersistentStorage& storage, const std::wstring& path)
 	return id;
 }
 
-inline void addLocation(PersistentStorage& storage, Id tokenId, Id fileId, size_t line)
+inline void addLocation(PersistentStorage& storage, Id tokenId, Id fileId, size_t line, LocationType type = LOCATION_TOKEN)
 {
 	const Id locationId = storage.addSourceLocation(
-		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(LOCATION_TOKEN)));
+		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(type)));
 	storage.addOccurrence(StorageOccurrence(tokenId, locationId));
 }
 

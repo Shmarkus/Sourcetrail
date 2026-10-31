@@ -284,7 +284,10 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 
 std::optional<FilePath> toOriginalFile(const FilePath& generatedFile, const LombokRoots& roots)
 {
-	const Counterpart counterpart = findOriginal(generatedFile, roots, readLinesFromDisk);
+	// Only the path matters here: any non-empty reply stands for an existing file.
+	const Counterpart counterpart = findOriginal(generatedFile, roots, [](const FilePath& file) {
+		return file.exists() ? std::vector<std::string>{""} : std::vector<std::string>{};
+	});
 	if (counterpart.file.empty())
 	{
 		return std::nullopt;
@@ -319,9 +322,25 @@ std::optional<FilePath> toGeneratedFile(const FilePath& original, const LombokRo
 }
 
 std::optional<size_t> toGeneratedLine(const FilePath& originalFile, const FilePath& generatedFile, size_t line,
-	const std::function<std::vector<std::string>(const FilePath&)>& readLines)
+	const std::function<std::vector<std::string>(const FilePath&)>& readLines, const LombokRoots* cache)
 {
-	const auto alignment = alignLines(readLines(generatedFile), readLines(originalFile));
+	std::vector<std::optional<size_t>> computed;
+	const std::vector<std::optional<size_t>>* aligned = &computed;
+	if (cache)
+	{
+		auto it = cache->reverseAlignments.find(generatedFile.wstr());
+		if (it == cache->reverseAlignments.end())
+		{
+			it = cache->reverseAlignments.emplace(generatedFile.wstr(),
+				alignLines(readLines(generatedFile), readLines(originalFile))).first;
+		}
+		aligned = &it->second;
+	}
+	else
+	{
+		computed = alignLines(readLines(generatedFile), readLines(originalFile));
+	}
+	const auto& alignment = *aligned;
 	for (size_t i = 0; i < alignment.size(); i++)
 	{
 		if (line > 0 && alignment[i] && *alignment[i] == line - 1)

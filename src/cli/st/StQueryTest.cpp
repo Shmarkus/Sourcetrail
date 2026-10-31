@@ -151,12 +151,12 @@ TEST_CASE("st at lists both files when a bare name is ambiguous")
 	code.storage.buildCaches();
 
 	const FilePath cwd(L"/nowhere");
-	REQUIRE(st::matchIndexedFiles(code.storage, L"Util.java", cwd).size() == 2);
-	const auto one = st::matchIndexedFiles(code.storage, L"a/Util.java", cwd);
+	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"Util.java", cwd).size() == 2);
+	const auto one = st::matchIndexedFiles(st::indexedFiles(code.storage), L"a/Util.java", cwd);
 	REQUIRE(one.size() == 1);
 	REQUIRE(one.front().wstr() == L"/r/a/Util.java");
-	REQUIRE(st::matchIndexedFiles(code.storage, L"/r/b/Util.java", cwd).size() == 1);
-	REQUIRE(st::matchIndexedFiles(code.storage, L"/r/c/Util.java", cwd).empty());
+	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/b/Util.java", cwd).size() == 1);
+	REQUIRE(st::matchIndexedFiles(st::indexedFiles(code.storage), L"/r/c/Util.java", cwd).empty());
 }
 
 namespace
@@ -216,4 +216,38 @@ TEST_CASE("st at ignores a sibling only called on the line")
 	const FilePath file(L"/r/p/A.java");
 	REQUIRE(st::symbolAt(code.storage, file, 7) == run);
 	REQUIRE(st::symbolAt(code.storage, file, 12) == helper);
+}
+
+TEST_CASE("st symbols-in and at do not take a qualifier for a definition")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id util = code.type(L"Util");
+	const Id run = code.member(a, L"A", L"run");
+	const Id x = add(code.storage, method({L"p", L"A"}, L"x", L"", L""), NODE_FIELD);
+	addLocation(code.storage, x, code.file(L"A"), 3);
+	addLocation(code.storage, x, code.file(L"A"), 8, LOCATION_QUALIFIER);
+	code.scope(a, L"A", 1, 20);
+	code.scope(run, L"A", 5, 9);
+	addLocation(code.storage, util, code.file(L"A"), 7, LOCATION_QUALIFIER);
+	code.storage.buildCaches();
+
+	const FilePath file(L"/r/p/A.java");
+	REQUIRE(st::definedInFile(code.storage, file) == std::vector<Id>{a, run, x});
+	REQUIRE(st::symbolAt(code.storage, file, 7) == run);
+	REQUIRE(st::symbolAt(code.storage, file, 8) == run);
+}
+
+TEST_CASE("st at aligns a delombok file once")
+{
+	st::LombokRoots roots;
+	int reads = 0;
+	const auto counting = [&](const FilePath& file) {
+		reads++;
+		return linesOf(file);
+	};
+	REQUIRE(*st::toGeneratedLine(FilePath(L"/o/P.java"), FilePath(L"/g/P.java"), 3, counting, &roots) == 2);
+	REQUIRE(*st::toGeneratedLine(FilePath(L"/o/P.java"), FilePath(L"/g/P.java"), 3, counting, &roots) == 2);
+	REQUIRE_FALSE(st::toGeneratedLine(FilePath(L"/o/P.java"), FilePath(L"/g/P.java"), 1, counting, &roots).has_value());
+	REQUIRE(reads == 2);
 }

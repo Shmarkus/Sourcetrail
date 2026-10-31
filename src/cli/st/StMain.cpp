@@ -314,6 +314,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 	const st::LombokRoots& lombok, const st::OutputOptions& options)
 {
 	std::set<Id> ids;
+	const st::IndexedFiles indexed = st::indexedFiles(storage, &lombok);
 	size_t skipped = 0;
 	bool ambiguous = false;
 	for (const std::wstring& input: inputs)
@@ -324,7 +325,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		{
 			splitLocation(input, &path, &line);
 		}
-		const std::vector<FilePath> matches = st::matchIndexedFiles(storage, path, options.cwd, &lombok);
+		const std::vector<FilePath> matches = st::matchIndexedFiles(indexed, path, options.cwd, &lombok);
 		if (matches.empty())
 		{
 			std::cerr << "st: not indexed: " << utility::encodeToUtf8(path) << '\n';
@@ -354,7 +355,7 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		const std::optional<FilePath> original = st::toOriginalFile(file, lombok);
 		if (original && !isGiven(file, path, options.cwd))
 		{
-			const auto generated = st::toGeneratedLine(*original, file, line, st::readLinesFromDisk);
+			const auto generated = st::toGeneratedLine(*original, file, line, st::readLinesFromDisk, &lombok);
 			if (!generated)
 			{
 				std::cerr << "st: " << utility::encodeToUtf8(path) << ':' << line

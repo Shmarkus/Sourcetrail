@@ -48,6 +48,12 @@ FilePath definitionFile(PersistentStorage& storage, Id id)
 	return parent ? definitionFile(storage, parent) : FilePath();
 }
 
+// Scopes and name tokens; qualifiers (`Util` in `Util.format()`) carry the node id of a symbol that is only used.
+bool definesNames(const SourceLocation& location)
+{
+	return location.isScopeLocation() || location.getType() == LOCATION_TOKEN;
+}
+
 bool endsWithElement(const std::wstring& path, const std::wstring& suffix)
 {
 	return path.size() > suffix.size() && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0 &&
@@ -60,6 +66,10 @@ std::vector<Id> definedInFile(PersistentStorage& storage, const FilePath& indexe
 	std::map<Id, size_t> lines;
 	std::set<Id> decided;
 	storage.getSourceLocationsForFile(indexedFile)->forEachStartSourceLocation([&](SourceLocation* location) {
+		if (!definesNames(*location))
+		{
+			return;
+		}
 		for (const Id id: location->getTokenIds())
 		{
 			if (!decided.count(id))
@@ -107,6 +117,10 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 	std::set<Id> referencing;
 	storage.getSourceLocationsForFile(indexedFile)->forEachStartSourceLocation([&](SourceLocation* location) {
 		const size_t first = location->getLineNumber();
+		if (!definesNames(*location))
+		{
+			return;
+		}
 		if (!location->isScopeLocation())
 		{
 			if (first == line)
@@ -156,14 +170,20 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 	return *named.begin();
 }
 
-std::vector<FilePath> matchIndexedFiles(PersistentStorage& storage, const std::wstring& path, const FilePath& cwd,
-	const LombokRoots* roots)
+IndexedFiles indexedFiles(PersistentStorage& storage, const LombokRoots* roots)
 {
-	std::vector<FilePath> indexed;
+	IndexedFiles result;
 	for (const FileInfo& file: storage.getFileInfoForAllFiles())
 	{
-		indexed.push_back(file.path);
+		result.files.push_back(file.path);
+		result.originals.push_back(roots ? toOriginalFile(file.path, *roots) : std::nullopt);
 	}
+	return result;
+}
+
+std::vector<FilePath> matchIndexedFiles(const IndexedFiles& indexed, const std::wstring& path, const FilePath& cwd,
+	const LombokRoots* roots)
+{
 	std::vector<FilePath> matches;
 	const auto add = [&](const FilePath& file) {
 		if (std::find(matches.begin(), matches.end(), file) == matches.end())
@@ -176,21 +196,12 @@ std::vector<FilePath> matchIndexedFiles(PersistentStorage& storage, const std::w
 	if (given.isAbsolute() || resolved.exists())
 	{
 		const std::wstring canonical = resolved.getCanonical().wstr();
-		for (const FilePath& file: indexed)
+		const auto generated = roots ? toGeneratedFile(resolved, *roots) : std::nullopt;
+		for (const FilePath& file: indexed.files)
 		{
-			if (file.wstr() == resolved.wstr() || file.wstr() == canonical)
+			if (file.wstr() == resolved.wstr() || file.wstr() == canonical || (generated && file == *generated))
 			{
 				add(file);
-			}
-		}
-		if (const auto generated = roots ? toGeneratedFile(resolved, *roots) : std::nullopt)
-		{
-			for (const FilePath& file: indexed)
-			{
-				if (file == *generated)
-				{
-					add(file);
-				}
 			}
 		}
 		return matches;
@@ -200,12 +211,12 @@ std::vector<FilePath> matchIndexedFiles(PersistentStorage& storage, const std::w
 	{
 		suffix.erase(0, 2);
 	}
-	for (const FilePath& file: indexed)
+	for (size_t i = 0; i < indexed.files.size(); i++)
 	{
-		const auto original = roots ? toOriginalFile(file, *roots) : std::nullopt;
-		if (endsWithElement(file.wstr(), suffix) || (original && endsWithElement(original->wstr(), suffix)))
+		const auto& original = indexed.originals[i];
+		if (endsWithElement(indexed.files[i].wstr(), suffix) || (original && endsWithElement(original->wstr(), suffix)))
 		{
-			add(file);
+			add(indexed.files[i]);
 		}
 	}
 	return matches;

@@ -224,6 +224,19 @@ public:
 		return name.size() > 1 ? name.getRange(0, name.size() - 1).getQualifiedName() : L"";
 	}
 
+	// The outermost prefix naming a type; empty when the name has none.
+	NameHierarchy topLevelType(const NameHierarchy& name)
+	{
+		for (size_t size = 1; size <= name.size(); size++)
+		{
+			if (kind(name.getRange(0, size)) & (TYPES | NODE_ANNOTATION))
+			{
+				return name.getRange(0, size);
+			}
+		}
+		return NameHierarchy(name.getDelimiter());
+	}
+
 private:
 	NodeKind kind(const NameHierarchy& prefix)
 	{
@@ -240,6 +253,35 @@ private:
 	PersistentStorage& m_storage;
 	std::map<std::wstring, NodeKind> m_kinds;
 };
+
+// The input symbols plus what they own through member links; a package owns its types but not its sub-packages.
+std::set<Id> owned(PersistentStorage& storage, const std::vector<Id>& symbols)
+{
+	std::set<Id> all(symbols.begin(), symbols.end());
+	std::vector<Id> owners;
+	for (const Id id: symbols)
+	{
+		if (storage.getNodeTypeForNodeWithId(id).getKind() & (TYPES | NODE_ANNOTATION | NODE_PACKAGE))
+		{
+			owners.push_back(id);
+		}
+	}
+	while (!owners.empty())
+	{
+		std::vector<Id> members;
+		for (const StorageEdge& edge: storage.getEdgesForSourceIds(owners))
+		{
+			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER &&
+				!(storage.getNodeTypeForNodeWithId(edge.targetNodeId).getKind() & PACKAGES) &&
+				all.insert(edge.targetNodeId).second)
+			{
+				members.push_back(edge.targetNodeId);
+			}
+		}
+		owners = std::move(members);
+	}
+	return all;
+}
 
 struct Affected
 {
@@ -386,5 +428,97 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 		}
 	}
 	return result;
+}
+
+std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction)
+{
+	const Edge::TypeMask counted = ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT | Edge::EDGE_INCLUDE);
+	Packages packages(storage);
+
+	struct Row
+	{
+		std::wstring label;
+		std::set<Id> edges;
+	};
+	std::map<std::wstring, Row> rows;
+	for (const Id input: symbols)
+	{
+		const bool packageLevel = storage.getNodeTypeForNodeWithId(input).getKind() == NODE_PACKAGE;
+		// The row an endpoint rolls up to; empty for the endpoints that are no dependency.
+		const auto rowKey = [&](const NameHierarchy& name) {
+			if (packageLevel)
+			{
+				return packages.of(name);
+			}
+			const NameHierarchy top = packages.topLevelType(name);
+			return symbolKey(top.size() ? top : name);
+		};
+		const NameHierarchy inputName = storage.getNameHierarchyForNodeId(input);
+		const std::wstring home = packageLevel ? inputName.getQualifiedName() : rowKey(inputName);
+
+		const std::set<Id> own = owned(storage, {input});
+		const std::vector<Id> ids(own.begin(), own.end());
+		const std::vector<StorageEdge> edges = direction == Direction::Outgoing ? storage.getEdgesForSourceIds(ids)
+																				: storage.getEdgesForTargetIds(ids);
+		std::map<Id, std::wstring> keyById;
+		for (const StorageEdge& edge: edges)
+		{
+			const Id other = direction == Direction::Outgoing ? edge.targetNodeId : edge.sourceNodeId;
+			if (!(Edge::intToType(edge.type) & counted) || own.count(other))
+			{
+				continue;
+			}
+			auto it = keyById.find(other);
+			if (it == keyById.end())
+			{
+				std::wstring key;
+				const NameHierarchy name = storage.getNameHierarchyForNodeId(other);
+				if (storage.getDefinitionKindForNodeId(other) != DEFINITION_NONE &&
+					!(storage.getNodeTypeForNodeWithId(other).getKind() & (NODE_FILE | PACKAGES)) && !isUnsolvedSymbol(name))
+				{
+					key = rowKey(name);
+				}
+				it = keyById.emplace(other, key).first;
+			}
+			if (!it->second.empty() && it->second != home)
+			{
+				Row& row = rows[it->second];
+				row.label = packageLevel ? L"package" : L"class";
+				row.edges.insert(edge.id);
+			}
+		}
+	}
+
+	std::vector<Id> edgeIds;
+	for (const auto& [key, row]: rows)
+	{
+		edgeIds.insert(edgeIds.end(), row.edges.begin(), row.edges.end());
+	}
+	const std::map<Id, std::vector<Site>> sitesByEdge = allLinkSites(storage, edgeIds);
+
+	std::vector<ResultLine> lines;
+	for (const auto& [key, row]: rows)
+	{
+		size_t count = 0;
+		Site first;
+		for (const Id edge: row.edges)
+		{
+			const auto it = sitesByEdge.find(edge);
+			count += it == sitesByEdge.end() ? 1 : it->second.size();
+			if (it != sitesByEdge.end())
+			{
+				for (const Site& site: it->second)
+				{
+					if (first.file.empty() || before(site, first))
+					{
+						first = site;
+					}
+				}
+			}
+		}
+		lines.push_back({key, row.label + L", " + std::to_wstring(count) + L" links", first.file, first.line,
+			sourceText(storage, first)});
+	}
+	return lines;
 }
 }

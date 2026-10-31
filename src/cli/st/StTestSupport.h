@@ -90,11 +90,38 @@ struct Code
 		return id;
 	}
 
+	// A package node; types created in it are its members, the way the Java indexer records name hierarchies.
+	Id package(const std::wstring& name)
+	{
+		auto it = packages.find(name);
+		if (it == packages.end())
+		{
+			NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
+			hierarchy.push(name);
+			it = packages.emplace(name, add(storage, hierarchy, NODE_PACKAGE)).first;
+		}
+		return it->second;
+	}
+
+	Id type(const std::wstring& packageName, const std::wstring& name, NodeKind kind = NODE_CLASS)
+	{
+		NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
+		hierarchy.push(packageName);
+		hierarchy.push(name);
+		const Id id = add(storage, hierarchy, kind);
+		addLocation(storage, id, file(name), 1);
+		storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), package(packageName), id));
+		packageOfType[name] = packageName;
+		return id;
+	}
+
 	Id member(Id parent, const std::wstring& type, const std::wstring& name, NodeKind kind = NODE_METHOD,
 		const std::wstring& parameters = L"()")
 	{
-		const Id id = kind == NODE_METHOD ? add(storage, method({L"p", type}, name, L"void", parameters))
-										  : add(storage, method({L"p", type}, name, L"", L""), kind);
+		const auto owner = packageOfType.find(type);
+		const std::wstring packageName = owner == packageOfType.end() ? L"p" : owner->second;
+		const Id id = kind == NODE_METHOD ? add(storage, method({packageName, type}, name, L"void", parameters))
+										  : add(storage, method({packageName, type}, name, L"", L""), kind);
 		addLocation(storage, id, file(type), 1);
 		storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), parent, id));
 		return id;
@@ -129,6 +156,8 @@ struct Code
 
 	PersistentStorage storage;
 	std::map<std::wstring, Id> files;
+	std::map<std::wstring, Id> packages;
+	std::map<std::wstring, std::wstring> packageOfType;
 };
 
 inline std::set<std::wstring> keys(const std::vector<st::ResultLine>& lines)

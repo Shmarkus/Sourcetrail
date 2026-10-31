@@ -123,7 +123,7 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
-const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact"};
+const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
 // Resolves every name; ambiguous names list their candidates on stderr.
 int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
@@ -223,6 +223,13 @@ int impact(PersistentStorage& storage, const std::vector<Id>& ids, size_t depth,
 			: line.key;
 	}
 	return st::printResults(std::move(result.lines), options, std::cout);
+}
+
+int deps(PersistentStorage& storage, const std::vector<Id>& ids, st::Direction direction, const st::OutputOptions& options)
+{
+	std::vector<st::ResultLine> lines = st::deps(storage, ids, direction);
+	std::cerr << "deps: " << lines.size() << '\n';
+	return st::printResults(std::move(lines), options, std::cout);
 }
 
 int graph(PersistentStorage& storage, const QString& command, const std::vector<Id>& ids, size_t depth,
@@ -563,7 +570,7 @@ int run(QCoreApplication& app)
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | impact | filter | symbols-in | at | outline");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | impact | deps | filter | symbols-in | at | outline");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted. symbols-in takes files "
 		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...]), outline takes files or symbols", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
@@ -573,6 +580,7 @@ int run(QCoreApplication& app)
 	parser.addOption({"edges", "path and impact only: link kinds to follow, comma-separated: call, usage, type-usage, override, "
 		"inheritance, import, annotation (path default call,usage,override; impact default all but import)", "list"});
 	parser.addOption({"group", "impact only: one line per file or package", "file|package"});
+	parser.addOption({"in", "deps only: dependencies on the symbol instead of its own"});
 	parser.addOption({"kind", "Only symbols of this kind, e.g. class, method", "kind"});
 	parser.addOption({"package", "filter only: keep symbols whose key starts with this package", "package"});
 	parser.addOption({"annotated", "filter only: keep symbols annotated with this type, or inside a type that is", "annotation"});
@@ -599,8 +607,8 @@ int run(QCoreApplication& app)
 		(args.size() > (command == "path" ? 3 : 2) && !takesMany) || (command == "status" && args.size() != 1))
 	{
 		throw UsageError(
-			"Usage: st <find|status|refs|callers|callees|impls|supers|path|impact|filter|symbols-in|at|outline> [symbol|file[:line]] [target] "
-			"[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--package P] [--annotated A] "
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path|impact|deps|filter|symbols-in|at|outline> [symbol|file[:line]] [target] "
+			"[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--in] [--package P] [--annotated A] "
 			"[--file G] [--not] [--no-source] [--no-refresh]; see --help");
 	}
 	st::OutputOptions options;
@@ -616,6 +624,10 @@ int run(QCoreApplication& app)
 		{
 			throw UsageError("--" + name.toStdString() + " applies to filter only");
 		}
+	}
+	if (command != "deps" && parser.isSet("in"))
+	{
+		throw UsageError("--in applies to deps only");
 	}
 	if (command != "impact" && parser.isSet("group"))
 	{
@@ -829,6 +841,10 @@ int run(QCoreApplication& app)
 	if (command == "impact")
 	{
 		return impact(storage, ids, depth, edges, group, lombok, options);
+	}
+	if (command == "deps")
+	{
+		return deps(storage, ids, parser.isSet("in") ? st::Direction::Incoming : st::Direction::Outgoing, options);
 	}
 	if (command != "path")
 	{

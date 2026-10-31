@@ -208,9 +208,9 @@ Site linkSite(PersistentStorage& storage, Id edgeId)
 	return sites.empty() ? Site() : sites.begin()->second;
 }
 
-std::map<Id, Site> linkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds)
+std::map<Id, std::vector<Site>> allLinkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds)
 {
-	std::map<Id, Site> sites;
+	std::map<Id, std::vector<Site>> sites;
 	if (edgeIds.empty())
 	{
 		return sites;
@@ -223,19 +223,25 @@ std::map<Id, Site> linkSites(PersistentStorage& storage, const std::vector<Id>& 
 		}
 		for (const Id id: location->getTokenIds())
 		{
-			if (!wanted.count(id))
+			if (wanted.count(id))
 			{
-				continue;
-			}
-			const auto it = sites.find(id);
-			if (it == sites.end() || std::make_pair(location->getFilePath().wstr(), location->getLineNumber()) <
-					std::make_pair(it->second.file.wstr(), it->second.line))
-			{
-				sites[id] = {location->getFilePath(), location->getLineNumber()};
+				sites[id].push_back({location->getFilePath(), location->getLineNumber()});
 			}
 		}
 	});
 	return sites;
+}
+
+std::map<Id, Site> linkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds)
+{
+	std::map<Id, Site> first;
+	for (const auto& [id, sites]: allLinkSites(storage, edgeIds))
+	{
+		first[id] = *std::min_element(sites.begin(), sites.end(), [](const Site& a, const Site& b) {
+			return std::make_pair(a.file.wstr(), a.line) < std::make_pair(b.file.wstr(), b.line);
+		});
+	}
+	return first;
 }
 
 std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector<Id>& ids)

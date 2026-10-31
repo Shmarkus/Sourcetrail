@@ -557,3 +557,67 @@ TEST_CASE("st path over inheritance only when asked")
 	CHECK(chains[0][1].type == Edge::EDGE_INHERITANCE);
 	CHECK(chains[0][1].to == derived);
 }
+
+TEST_CASE("st deps rolls up to top-level classes and counts links")
+{
+	Code code;
+	const Id ctl = code.type(L"web", L"Ctl");
+	const Id get = code.member(ctl, L"Ctl", L"get");
+	const Id svc = code.type(L"domain", L"Svc");
+	const Id a = code.member(svc, L"Svc", L"a");
+	const Id in = code.member(svc, L"Svc", L"In", NODE_CLASS);
+	code.link(Edge::EDGE_CALL, get, a, L"Ctl", {7, 3});
+	code.link(Edge::EDGE_TYPE_USAGE, get, in, L"Ctl", {9});
+	code.storage.buildCaches();
+
+	const auto lines = st::deps(code.storage, {get}, st::Direction::Outgoing);
+	REQUIRE(lines.size() == 1);
+	CHECK(lines[0].key == L"domain.Svc");
+	CHECK(lines[0].kind == L"class, 3 links");
+	CHECK(lines[0].line == 3);
+}
+
+TEST_CASE("st deps of a package rolls up to packages")
+{
+	Code code;
+	const Id ctl = code.type(L"web", L"Ctl");
+	const Id get = code.member(ctl, L"Ctl", L"get");
+	const Id svc = code.type(L"domain", L"Svc");
+	const Id a = code.member(svc, L"Svc", L"a");
+	code.link(Edge::EDGE_CALL, get, a, L"Ctl", {4});
+	code.storage.buildCaches();
+
+	const auto lines = st::deps(code.storage, {code.package(L"web")}, st::Direction::Outgoing);
+	REQUIRE(lines.size() == 1);
+	CHECK(lines[0].key == L"domain");
+	CHECK(lines[0].kind.rfind(L"package, ", 0) == 0);
+}
+
+TEST_CASE("st deps ignores links inside the input")
+{
+	Code code;
+	const Id svc = code.type(L"domain", L"Svc");
+	const Id a = code.member(svc, L"Svc", L"a");
+	const Id b = code.member(svc, L"Svc", L"b");
+	code.link(Edge::EDGE_CALL, a, b, L"Svc", {5});
+	code.storage.buildCaches();
+
+	CHECK(st::deps(code.storage, {svc}, st::Direction::Outgoing).empty());
+	CHECK(st::deps(code.storage, {a}, st::Direction::Outgoing).empty());
+}
+
+TEST_CASE("st deps incoming lists the dependants")
+{
+	Code code;
+	const Id ctl = code.type(L"web", L"Ctl");
+	const Id get = code.member(ctl, L"Ctl", L"get");
+	const Id svc = code.type(L"domain", L"Svc");
+	const Id a = code.member(svc, L"Svc", L"a");
+	code.link(Edge::EDGE_CALL, get, a, L"Ctl", {4});
+	code.storage.buildCaches();
+
+	const auto lines = st::deps(code.storage, {svc}, st::Direction::Incoming);
+	REQUIRE(lines.size() == 1);
+	CHECK(lines[0].key == L"web.Ctl");
+	CHECK(st::deps(code.storage, {code.package(L"domain")}, st::Direction::Incoming).front().key == L"web");
+}

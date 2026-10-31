@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Edge.h"
+#include "StGraph.h"
 #include "StOutput.h"
 #include "types.h"
 
@@ -41,6 +42,12 @@ struct ImpactResult
 // Group::Package print one line per file or package instead, keyed by its path or name.
 ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, size_t depth, Edge::TypeMask types,
 	Group group);
+
+// Dependencies of `symbols` (Outgoing) or on them (Incoming), rolled up to one line per top-level type, or per
+// package when the input is a package. A type stands for itself and its members; links inside the input and
+// links of kind member, import and include don't count. The kind column counts link sites ("class, N links" /
+// "package, N links"); the location is the first of them by path and line.
+std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction);
 }
 
 #endif

@@ -30,6 +30,9 @@ Site linkSite(PersistentStorage& storage, Id edgeId);
 // First start location of each link that has one, in one lookup.
 std::map<Id, Site> linkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds);
 
+// Every start location of each link that has one, in one lookup.
+std::map<Id, std::vector<Site>> allLinkSites(PersistentStorage& storage, const std::vector<Id>& edgeIds);
+
 // Definition site of each symbol that has one (the name's line, not the scope's), in one lookup.
 std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector<Id>& ids);
 }

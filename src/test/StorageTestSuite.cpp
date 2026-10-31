@@ -1,17 +1,22 @@
 #include "catch.hpp"
 
 #include <chrono>
+#include <fstream>
 #include <future>
 #include <thread>
 
 #include "utilityString.h"
 
+#include "Blackboard.h"
 #include "DefinitionKind.h"
+#include "FileSystem.h"
 #include "Graph.h"
 #include "IntermediateStorage.h"
 #include "LocationType.h"
 #include "ParseLocation.h"
 #include "PersistentStorage.h"
+#include "TaskIndexIfDeclarationsChanged.h"
+#include "TaskLambda.h"
 
 namespace
 {
@@ -41,6 +46,39 @@ void addLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t lin
 void addTokenLocation(PersistentStorage& storage, Id elementId, Id fileId, size_t line)
 {
 	addLocation(storage, elementId, fileId, line, LOCATION_TOKEN);
+}
+
+// Indexes data/StorageTestSuite/A.java holding class p.A on line 2 and, given parameters, a method
+// "int size<parameters>" whose header is line 3. Returns the file's declarations.
+std::set<std::string> getDeclarationsOfIndexedClass(
+	const std::string& text, const std::wstring& methodParameters = L"")
+{
+	const FilePath path(L"data/StorageTestSuite/A.java");
+	FileSystem::createDirectory(path.getParentDirectory());
+	std::ofstream(path.str()) << text;
+
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id file = addJavaFile(storage, path.wstr());
+	addTokenLocation(storage, addJavaSymbol(storage, NODE_CLASS, L"p.A"), file, 2);
+	if (!methodParameters.empty())
+	{
+		NameHierarchy name(L"p.A", NAME_DELIMITER_JAVA);
+		name.push(NameElement(L"size", L"int", methodParameters));
+		const Id method = storage.addNode(StorageNodeData(nodeKindToInt(NODE_METHOD), NameHierarchy::serialize(name))).first;
+		storage.addSymbol(StorageSymbol(method, definitionKindToInt(DEFINITION_EXPLICIT)));
+		addTokenLocation(storage, method, file, 3);
+
+		const std::string header = utility::splitToVector(text, "\n")[2];
+		const Id signature = storage.addSourceLocation(StorageSourceLocationData(file, 3,
+			header.find_first_not_of('\t') + 1, 3, header.find(')') + 1, locationTypeToInt(LOCATION_SIGNATURE)));
+		storage.addOccurrence(StorageOccurrence(method, signature));
+	}
+	storage.buildCaches();
+
+	const std::set<std::string> declarations = storage.getDeclarations({path});
+	FileSystem::remove(path);
+	return declarations;
 }
 
 class TestStorage: public PersistentStorage
@@ -419,6 +457,81 @@ TEST_CASE("storage finds importers by the file declaring the imported symbol")
 
 	REQUIRE(storage.getReferencing({FilePath(L"/project/p/A.java")}).count(FilePath(L"/project/p/B.java")) == 0);
 	REQUIRE(storage.getReferenced({FilePath(L"/project/p/B.java")}).count(FilePath(L"/project/p/A.java")) == 0);
+}
+
+TEST_CASE("storage declarations ignore an edit inside a method body")
+{
+	const std::set<std::string> before = getDeclarationsOfIndexedClass(
+		"package p;\nclass A {\n\tint size(String s) {\n\t\treturn s.length();\n\t}\n}\n", L"(java.lang.String)");
+	const std::set<std::string> after = getDeclarationsOfIndexedClass(
+		"package p;\nclass A {\n\tint size(String s) {\n\t\tint unused = 1;\n\t\treturn s.length();\n\t}\n}\n",
+		L"(java.lang.String)");
+
+	REQUIRE(!before.empty());
+	REQUIRE(before == after);
+}
+
+TEST_CASE("storage declarations change with a method signature")
+{
+	const std::set<std::string> before = getDeclarationsOfIndexedClass(
+		"package p;\nclass A {\n\tint size(String s) {\n\t\treturn s.length();\n\t}\n}\n", L"(java.lang.String)");
+
+	SECTION("parameter type")
+	{
+		REQUIRE(before != getDeclarationsOfIndexedClass(
+			"package p;\nclass A {\n\tint size(CharSequence s) {\n\t\treturn s.length();\n\t}\n}\n",
+			L"(java.lang.CharSequence)"));
+	}
+	SECTION("modifier")
+	{
+		REQUIRE(before != getDeclarationsOfIndexedClass(
+			"package p;\nclass A {\n\tstatic int size(String s) {\n\t\treturn s.length();\n\t}\n}\n",
+			L"(java.lang.String)"));
+	}
+}
+
+TEST_CASE("storage declarations change when a method is removed")
+{
+	const std::set<std::string> before = getDeclarationsOfIndexedClass(
+		"package p;\nclass A {\n\tint size(String s) {\n\t\treturn s.length();\n\t}\n}\n", L"(java.lang.String)");
+
+	REQUIRE(before != getDeclarationsOfIndexedClass("package p;\nclass A {\n}\n"));
+}
+
+TEST_CASE("dependent files are indexed only when declarations changed")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id file = addJavaFile(storage, L"/project/p/A.java");
+	addTokenLocation(storage, addJavaSymbol(storage, NODE_CLASS, L"p.A"), file, 2);
+	const std::set<FilePath> filePaths = {FilePath(L"/project/p/A.java")};
+	const std::set<std::string> declarations = storage.getDeclarations(filePaths);
+	std::shared_ptr<PersistentStorage> indexed(&storage, [](PersistentStorage*) {});
+	std::shared_ptr<Blackboard> blackboard = std::make_shared<Blackboard>();
+
+	bool dependentFilesIndexed = false;
+	const auto indexIfChanged = [&](const std::set<std::string>& previousDeclarations) {
+		std::make_shared<TaskIndexIfDeclarationsChanged>(indexed, filePaths, previousDeclarations, [&]() {
+			return std::make_shared<TaskLambda>([&]() { dependentFilesIndexed = true; });
+		})->update(blackboard);
+	};
+
+	SECTION("unchanged")
+	{
+		indexIfChanged(declarations);
+		REQUIRE(!dependentFilesIndexed);
+	}
+	SECTION("changed")
+	{
+		indexIfChanged({});
+		REQUIRE(dependentFilesIndexed);
+	}
+	SECTION("changed but interrupted")
+	{
+		blackboard->set("interrupted_indexing", true);
+		indexIfChanged({});
+		REQUIRE(!dependentFilesIndexed);
+	}
 }
 
 TEST_CASE("storage keeps the edges of a symbol a cleared file only qualifies")

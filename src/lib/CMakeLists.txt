@@ -312,6 +312,8 @@ add_files(
 	data/NodeTypeSet.h
 	data/TaskCleanStorage.cpp
 	data/TaskCleanStorage.h
+	data/TaskIndexIfDeclarationsChanged.cpp
+	data/TaskIndexIfDeclarationsChanged.h
 	data/TaskFinishParsing.cpp
 	data/TaskFinishParsing.h
 	data/TaskInjectStorage.cpp

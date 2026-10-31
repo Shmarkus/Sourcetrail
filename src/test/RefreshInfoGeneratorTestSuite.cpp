@@ -3,6 +3,7 @@
 #include <QDateTime>
 
 #include "FileSystem.h"
+#include "LocationType.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "RefreshInfo.h"
@@ -164,6 +165,23 @@ Id addVeryNewFileToStorage(
 		indexed,
 		complete,
 		storage);
+}
+
+void addTokenLocation(Id elementId, Id fileId, std::shared_ptr<PersistentStorage> storage)
+{
+	const Id locationId = storage->addSourceLocation(
+		StorageSourceLocationData(fileId, 1, 1, 1, 5, locationTypeToInt(LOCATION_TOKEN)));
+	storage->addOccurrence(StorageOccurrence(elementId, locationId));
+}
+
+// The referencing file calls a method the referenced file declares.
+void addSymbolReference(Id referencingFileId, Id referencedFileId, std::shared_ptr<PersistentStorage> storage)
+{
+	const Id caller = storage->addNode(StorageNodeData(NODE_METHOD, L"caller")).first;
+	const Id callee = storage->addNode(StorageNodeData(NODE_METHOD, L"callee")).first;
+	addTokenLocation(caller, referencingFileId, storage);
+	addTokenLocation(callee, referencedFileId, storage);
+	addTokenLocation(storage->addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, callee)), referencingFileId, storage);
 }
 }	 // namespace
 
@@ -1067,6 +1085,73 @@ TEST_CASE(
 			utility::toVector(refreshInfo.filesToClear), upToDateHeaderFilePath));
 		REQUIRE(utility::containsElement<FilePath>(
 			utility::toVector(refreshInfo.filesToIndex), upToDateSourceFilePath));
+	}
+	cleanup();
+}
+
+TEST_CASE("refresh info for updated files defers files referencing the declarations of an edited file")
+{
+	cleanup();
+	{
+		const FilePath editedFilePath = m_sourceFolder.getConcatenated(L"Edited.java");
+		const FilePath callerFilePath = m_sourceFolder.getConcatenated(L"Caller.java");
+
+		std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+		sourceGroups.push_back(
+			std::shared_ptr<SourceGroupTest>(new SourceGroupTest({editedFilePath, callerFilePath})));
+
+		std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(
+			m_indexDbPath, m_bookmarkDbPath);
+		storage->setup();
+
+		const Id editedFileId = addVeryOldFileToStorage(editedFilePath, true, true, storage);
+		addFileToFileSystem(editedFilePath);
+		const Id callerFileId = addVeryNewFileToStorage(callerFilePath, true, true, storage);
+		addFileToFileSystem(callerFilePath);
+		addSymbolReference(callerFileId, editedFileId, storage);
+
+		storage->buildCaches();
+
+		const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
+			sourceGroups, storage);
+
+		REQUIRE(refreshInfo.filesToClear == std::set<FilePath>({editedFilePath}));
+		REQUIRE(refreshInfo.filesToIndex == std::set<FilePath>({editedFilePath}));
+		REQUIRE(refreshInfo.filesToCompareDeclarations == std::set<FilePath>({editedFilePath}));
+		REQUIRE(refreshInfo.dependentFilesToClear == std::set<FilePath>({callerFilePath}));
+		REQUIRE(refreshInfo.dependentFilesToIndex == std::set<FilePath>({callerFilePath}));
+	}
+	cleanup();
+}
+
+TEST_CASE("refresh info for updated files reindexes files referencing a removed file at once")
+{
+	cleanup();
+	{
+		const FilePath removedFilePath = m_sourceFolder.getConcatenated(L"Removed.java");
+		const FilePath callerFilePath = m_sourceFolder.getConcatenated(L"Caller.java");
+
+		std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+		sourceGroups.push_back(std::shared_ptr<SourceGroupTest>(new SourceGroupTest({callerFilePath})));
+
+		std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(
+			m_indexDbPath, m_bookmarkDbPath);
+		storage->setup();
+
+		const Id removedFileId = addVeryNewFileToStorage(removedFilePath, true, true, storage);
+		const Id callerFileId = addVeryNewFileToStorage(callerFilePath, true, true, storage);
+		addFileToFileSystem(callerFilePath);
+		addSymbolReference(callerFileId, removedFileId, storage);
+
+		storage->buildCaches();
+
+		const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
+			sourceGroups, storage);
+
+		REQUIRE(refreshInfo.filesToClear == std::set<FilePath>({removedFilePath, callerFilePath}));
+		REQUIRE(refreshInfo.filesToIndex == std::set<FilePath>({callerFilePath}));
+		REQUIRE(refreshInfo.filesToCompareDeclarations.empty());
+		REQUIRE(refreshInfo.dependentFilesToClear.empty());
 	}
 	cleanup();
 }

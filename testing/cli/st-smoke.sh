@@ -152,6 +152,21 @@ sed -i 's/return greeter.greeting(p);/return "Hi " + greeter.greeting(p);/' "$we
 "$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
 indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
 [ "$indexed" = "$delombok_main/example/Welcome.java" ] || assert "expected only Welcome.java re-indexed, got: $indexed"
+# Files referencing an edited file are re-indexed only when what it declares changes: not for a body edit,
+# but for a signature change, after which their calls are still found.
+caller=src/main/java/example/Caller.java
+sed -i 's/return salutation + person.getName().length();/return salutation + person.getName();/' "$caller"
+"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a body edit failed"
+indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
+[ "$indexed" = "$delombok_main/example/Caller.java" ] || assert "expected only Caller.java re-indexed, got: $indexed"
+sed -i 's/String greeting(Person person, String salutation)/String greeting(Person person, CharSequence salutation)/' "$caller"
+"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a signature change failed"
+grep -F 'indexing source file:' "$work/err" | grep -qF "$delombok_main/example/web/GreetingController.java" \
+    || assert "GreetingController.java not re-indexed after a signature change in Caller.java"
+run 0 callers 'example.Caller.greeting(example.Person)'
+contains 'example.web.GreetingController.greet(example.Person)' out
+run 0 find greeting
+contains 'example.Caller.greeting(example.Person, java.lang.CharSequence)' out
 sed -i 's/^}$/    public int nameLength() { return name.length(); }\n}/' "$person"
 "$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a Lombok file edit failed"
 grep -qF 'nameLength' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java not updated"

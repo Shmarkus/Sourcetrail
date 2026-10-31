@@ -10,11 +10,13 @@
 #include "SourceGroup.h"
 
 struct FileInfo;
+class CombinedIndexerCommandProvider;
 class DialogView;
 class FilePath;
 class PersistentStorage;
 class ProjectSettings;
 class StorageCache;
+class TaskGroupSequence;
 class QLockFile;
 
 class Project
@@ -66,6 +68,17 @@ private:
 	};
 
 	Project(const Project&);
+
+	// The first provider holds the commands run by the indexer threads, the second the custom commands.
+	std::pair<std::unique_ptr<CombinedIndexerCommandProvider>, std::unique_ptr<CombinedIndexerCommandProvider>>
+		createIndexerCommandProviders(const RefreshInfo& info) const;
+	void addIndexingTasks(
+		std::shared_ptr<TaskGroupSequence> taskSequential,
+		std::unique_ptr<CombinedIndexerCommandProvider> indexerCommandProvider,
+		std::unique_ptr<CombinedIndexerCommandProvider> customIndexerCommandProvider,
+		std::shared_ptr<PersistentStorage> tempStorage,
+		std::shared_ptr<DialogView> dialogView,
+		int indexerThreadCount);
 
 	void swapToTempStorage(std::shared_ptr<DialogView> dialogView);
 	bool swapToTempStorageFile(

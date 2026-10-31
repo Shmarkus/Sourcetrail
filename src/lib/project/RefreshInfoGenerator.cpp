@@ -9,6 +9,18 @@
 #include "TextAccess.h"
 #include "utility.h"
 
+namespace
+{
+std::set<FilePath> subtract(std::set<FilePath> paths, const std::set<FilePath>& removedPaths)
+{
+	for (const FilePath& path: removedPaths)
+	{
+		paths.erase(path);
+	}
+	return paths;
+}
+}	 // namespace
+
 RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
 	const std::vector<std::shared_ptr<SourceGroup>>& sourceGroups,
 	std::shared_ptr<const PersistentStorage> storage)
@@ -18,6 +30,8 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
 	std::set<FilePath> unchangedIndexedFilePaths;
 	std::set<FilePath> unchangedNonindexedFilePaths;
 	std::set<FilePath> changedFilePaths;
+	// indexed files whose content changed and that are still part of the project
+	std::set<FilePath> editedFilePaths;
 
 	{
 		const std::vector<FileInfo> fileInfosFromStorage = storage->getFileInfoForAllFiles();
@@ -49,6 +63,7 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
 					if (didFileChange(info, storage))
 					{
 						changedFilePaths.insert(info.path);
+						editedFilePaths.insert(info.path);
 					}
 					else
 					{
@@ -77,8 +92,14 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
 	// 2.1) Add all changed files
 	std::set<FilePath> filesToClear = changedFilePaths;
 
-	// 2.2) Add files that are reference the changed files
-	utility::append(filesToClear, storage->getReferencing(changedFilePaths));
+	// 2.2) Add files that are reference the changed files. Files that only resolve against what an
+	// edited file declares are deferred: they need re-indexing only if those declarations change.
+	utility::append(filesToClear, storage->getReferencingByIncludes(changedFilePaths));
+	utility::append(
+		filesToClear,
+		storage->getReferencingByDeclarations(subtract(changedFilePaths, editedFilePaths)));
+	const std::set<FilePath> referencingEditedFilePaths = storage->getReferencingByDeclarations(
+		editedFilePaths);
 
 	// 2.3) Handle files that are referenced by the files that will be cleared. These will be
 	// re-indexed on the fly. However, we do not
@@ -131,6 +152,21 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(
 	RefreshInfo info;
 	info.mode = REFRESH_UPDATED_FILES;
 	info.filesToIndex = filesToIndex;
+	const std::set<FilePath> dependentFilePaths = subtract(referencingEditedFilePaths, filesToClear);
+	if (!dependentFilePaths.empty())
+	{
+		// Unlike in 2.3, files referenced by the dependent files need no clearing: dependent files are
+		// unchanged, so they still reference them.
+		info.filesToCompareDeclarations = editedFilePaths;
+		info.dependentFilesToClear = dependentFilePaths;
+		for (const FilePath& path: dependentFilePaths)
+		{
+			if (allSourceFilePathsFromSourcegroups.find(path) != allSourceFilePathsFromSourcegroups.end())
+			{
+				info.dependentFilesToIndex.insert(path);
+			}
+		}
+	}
 	for (const FilePath fileToClear: filesToClear)
 	{
 		if (storage->getFilePathIndexed(fileToClear))
@@ -193,6 +229,13 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForIncompleteFiles(
 					info.filesToIndex,
 					sourceGroup->filterToContainedSourceFilePath(staticSourceFilePaths));
 			}
+		}
+
+		info.dependentFilesToClear = subtract(info.dependentFilesToClear, incompleteFiles);
+		info.dependentFilesToIndex = subtract(info.dependentFilesToIndex, info.filesToIndex);
+		if (info.dependentFilesToClear.empty())
+		{
+			info.filesToCompareDeclarations.clear();
 		}
 	}
 

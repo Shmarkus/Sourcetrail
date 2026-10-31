@@ -19,6 +19,12 @@ struct RefreshInfo
 	std::set<FilePath> filesToClear;
 	std::set<FilePath> nonIndexedFilesToClear;
 
+	// Files referencing what filesToCompareDeclarations declare. They are cleared and indexed in a second
+	// pass, and only if indexing those files changed their declarations.
+	std::set<FilePath> filesToCompareDeclarations;
+	std::set<FilePath> dependentFilesToClear;
+	std::set<FilePath> dependentFilesToIndex;
+
 	RefreshMode mode = REFRESH_NONE;
 	bool shallow = false;
 };

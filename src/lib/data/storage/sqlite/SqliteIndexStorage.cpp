@@ -1,5 +1,6 @@
 #include "SqliteIndexStorage.h"
 
+#include <map>
 #include <sstream>
 #include <unordered_map>
 
@@ -775,6 +776,97 @@ std::vector<Id> SqliteIndexStorage::getFileIdsReferencingSymbolsDeclaredInFiles(
 		q.nextRow();
 	}
 	return referencingFileIds;
+}
+
+std::vector<std::string> SqliteIndexStorage::getDeclarationsInFile(Id fileId) const
+{
+	// Anonymous classes are named after their position and no other file can refer to them.
+	const auto isAnonymous = [](const std::string& serializedName) {
+		return serializedName.find("anonymous class (") != std::string::npos;
+	};
+	const std::shared_ptr<TextAccess> content = getFileContentById(fileId);
+	const std::string tokenLocations = "SELECT occurrence.element_id FROM occurrence "
+		"JOIN source_location ON source_location.id = occurrence.source_location_id "
+		"WHERE source_location.file_node_id == " + std::to_string(fileId) +
+		" AND source_location.type == " + std::to_string(locationTypeToInt(LOCATION_TOKEN));
+
+	// A symbol is described by its kinds, access and name, plus the text of its signature or, for
+	// symbols without one, of the lines holding its name. Bodies are in neither.
+	std::map<std::string, std::vector<std::string>> tokenTexts;
+	std::map<std::string, std::vector<std::string>> signatureTexts;
+	CppSQLite3Query q = executeQuery(
+		"SELECT node.serialized_name, node.type, IFNULL(symbol.definition_kind, 0), "
+		"IFNULL(component_access.type, 0), source_location.type, source_location.start_line, "
+		"source_location.start_column, source_location.end_line, source_location.end_column "
+		"FROM source_location JOIN occurrence ON occurrence.source_location_id = source_location.id "
+		"JOIN node ON node.id = occurrence.element_id "
+		"LEFT JOIN symbol ON symbol.id = node.id "
+		"LEFT JOIN component_access ON component_access.node_id = node.id "
+		"WHERE source_location.file_node_id == " + std::to_string(fileId) +
+		" AND source_location.type IN (" + std::to_string(locationTypeToInt(LOCATION_TOKEN)) + ',' +
+		std::to_string(locationTypeToInt(LOCATION_SIGNATURE)) + ");");
+	while (!q.eof())
+	{
+		const std::string serializedName = q.getStringField(0, "");
+		if (!isAnonymous(serializedName))
+		{
+			const std::string symbol = std::to_string(q.getIntField(1, 0)) + '\t' +
+				std::to_string(q.getIntField(2, 0)) + '\t' + std::to_string(q.getIntField(3, 0)) + '\t' +
+				serializedName;
+			const int startLine = q.getIntField(5, 0);
+			const int endLine = q.getIntField(7, 0);
+			std::string text;
+			for (int line = startLine; line <= endLine; line++)
+			{
+				text += content->getLine(line);
+			}
+			if (intToLocationType(q.getIntField(4, 0)) == LOCATION_SIGNATURE)
+			{
+				// Columns are 1-based and inclusive. Keeps the whole lines if they don't match the location.
+				const size_t start = static_cast<size_t>(q.getIntField(6, 0) - 1);
+				const size_t end = text.size() - content->getLine(endLine).size() + q.getIntField(8, 0);
+				if (start < end && end <= text.size())
+				{
+					text = text.substr(start, end - start);
+				}
+				signatureTexts[symbol].push_back(text);
+			}
+			else
+			{
+				tokenTexts[symbol].push_back(text);
+			}
+		}
+		q.nextRow();
+	}
+
+	std::vector<std::string> declarations;
+	for (const auto& it: tokenTexts)
+	{
+		const auto signatureIt = signatureTexts.find(it.first);
+		for (const std::string& text: signatureIt != signatureTexts.end() ? signatureIt->second : it.second)
+		{
+			declarations.push_back(it.first + '\t' + text);
+		}
+	}
+
+	CppSQLite3Query edges = executeQuery(
+		"SELECT edge.type, source.serialized_name, target.serialized_name FROM edge "
+		"JOIN node AS source ON source.id = edge.source_node_id "
+		"JOIN node AS target ON target.id = edge.target_node_id "
+		"WHERE edge.type IN (" + std::to_string(Edge::typeToInt(Edge::EDGE_INHERITANCE)) + ',' +
+		std::to_string(Edge::typeToInt(Edge::EDGE_OVERRIDE)) + ") AND edge.source_node_id IN (" +
+		tokenLocations + ");");
+	while (!edges.eof())
+	{
+		const std::string source = edges.getStringField(1, "");
+		if (!isAnonymous(source))
+		{
+			declarations.push_back(std::to_string(edges.getIntField(0, 0)) + '\t' + source + '\t' +
+				edges.getStringField(2, ""));
+		}
+		edges.nextRow();
+	}
+	return declarations;
 }
 
 std::vector<StorageEdge> SqliteIndexStorage::getEdgesByType(int type) const

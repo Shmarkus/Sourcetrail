@@ -4,18 +4,24 @@
 #include <map>
 #include <set>
 
+#include "AccessKind.h"
 #include "FileInfo.h"
+#include "Graph.h"
+#include "Node.h"
 #include "NodeType.h"
 #include "PersistentStorage.h"
 #include "SourceLocation.h"
 #include "SourceLocationCollection.h"
 #include "SourceLocationFile.h"
+#include "StGraph.h"
+#include "StKey.h"
 #include "StLombok.h"
 
 namespace st
 {
 namespace
 {
+const NodeKindMask TYPES = NODE_CLASS | NODE_INTERFACE | NODE_ENUM | NODE_STRUCT | NODE_UNION;
 const NodeKindMask NOT_LISTED = NODE_PACKAGE | NODE_FILE | NODE_TYPE_PARAMETER;
 
 bool listed(PersistentStorage& storage, Id id)
@@ -98,6 +104,55 @@ std::vector<Id> definedInFile(PersistentStorage& storage, const FilePath& indexe
 	{
 		ordered.emplace_back(line, id);
 	}
+	std::sort(ordered.begin(), ordered.end());
+	std::vector<Id> ids;
+	for (const auto& entry: ordered)
+	{
+		ids.push_back(entry.second);
+	}
+	return ids;
+}
+
+std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id>& symbols)
+{
+	std::vector<ResultLine> lines;
+	for (const Id id: symbols)
+	{
+		const AccessKind access = storage.getAccessKindForNodeId(id);
+		for (ResultLine& line: definitionLines(storage, id, symbolKey(storage.getNameHierarchyForNodeId(id))))
+		{
+			if (access != ACCESS_NONE)
+			{
+				line.kind = accessKindToString(access) + L" " + line.kind;
+			}
+			storage.getSourceLocationsForTokenIds({id})->forEachSourceLocation([&](SourceLocation* location) {
+				const SourceLocation* end = location->getOtherLocation();
+				if (location->isScopeLocation() && location->isStartLocation() && end && location->getFilePath() == line.file)
+				{
+					line.endLine = end->getLineNumber();
+				}
+			});
+			lines.push_back(std::move(line));
+		}
+	}
+	return lines;
+}
+
+bool isTypeSymbol(PersistentStorage& storage, Id id)
+{
+	return storage.getNodeTypeForNodeWithId(id).getKind() & TYPES;
+}
+
+std::vector<Id> directMembers(PersistentStorage& storage, Id type)
+{
+	std::vector<std::pair<size_t, Id>> ordered;
+	storage.getGraphForChildrenOfNodeId(type)->forEachNode([&](Node* node) {
+		if (node->getId() != type && listed(storage, node->getId()))
+		{
+			const auto lines = definitionLines(storage, node->getId(), L"");
+			ordered.emplace_back(lines.empty() ? 0 : lines.front().line, node->getId());
+		}
+	});
 	std::sort(ordered.begin(), ordered.end());
 	std::vector<Id> ids;
 	for (const auto& entry: ordered)

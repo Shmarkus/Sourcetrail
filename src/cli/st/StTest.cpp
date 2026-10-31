@@ -732,3 +732,27 @@ TEST_CASE("lombok location reached through a symlinked delombok root still maps"
 		st::toOriginal({L"k", L"call", FilePath((base / "link" / "p" / "A.java").wstring()), 1, "x"}, roots, read);
 	CHECK(mapped.file.wstr() == L"/src/main/java/p/A.java");
 }
+
+TEST_CASE("lombok range end without a counterpart is dropped")
+{
+	const std::vector<std::string> generated = {"package p;", "public class A {", "  void f() {", "    int z = 1;", "  public String getN() {", "    return n;", "}"};
+	const std::vector<std::string> original = {"package p;", "public class A {", "  void f() {", "    int z = 1;", "}"};
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/out/delombok/main"), {FilePath(L"/src/main/java")}});
+	const auto read = [&](const FilePath& file) {
+		return file.wstr() == L"/out/delombok/main/p/A.java" ? generated
+			: file.wstr() == L"/src/main/java/p/A.java"	   ? original
+															   : std::vector<std::string>();
+	};
+	st::ResultLine line{L"k", L"method", FilePath(L"/out/delombok/main/p/A.java"), 3, "void f() {"};
+	line.endLine = 4;
+	const st::ResultLine mapped = st::toOriginal(line, roots, read);
+	CHECK(mapped.line == 3);
+	CHECK(mapped.endLine == 4);
+
+	line.endLine = 6;
+	const st::ResultLine dropped = st::toOriginal(line, roots, read);
+	CHECK(dropped.file.wstr() == L"/src/main/java/p/A.java");
+	CHECK(dropped.line == 3);
+	CHECK(dropped.endLine == 0);
+}

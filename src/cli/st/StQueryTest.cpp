@@ -251,3 +251,51 @@ TEST_CASE("st at aligns a delombok file once")
 	REQUIRE_FALSE(st::toGeneratedLine(FilePath(L"/o/P.java"), FilePath(L"/g/P.java"), 1, counting, &roots).has_value());
 	REQUIRE(reads == 2);
 }
+
+TEST_CASE("st outline shows visibility and line ranges")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = add(code.storage, method({L"p", L"A"}, L"run", L"void", L"()"));
+	addLocation(code.storage, run, code.file(L"A"), 5);
+	code.scope(run, L"A", 5, 9);
+	code.access(run, ACCESS_PUBLIC);
+	code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), a, run));
+	const Id stop = code.member(a, L"A", L"stop");
+	code.storage.buildCaches();
+
+	const auto lines = st::outline(code.storage, {run, stop});
+	REQUIRE(lines.size() == 2);
+	CHECK(lines[0].kind == L"public method");
+	CHECK(lines[0].line == 5);
+	CHECK(lines[0].endLine == 9);
+	CHECK(lines[1].kind == L"method");
+	CHECK(lines[1].endLine == 0);
+}
+
+TEST_CASE("st outline of a class lists direct members only")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	const Id in = code.member(a, L"A", L"In", NODE_CLASS);
+	code.member(in, L"A", L"go");
+	code.storage.buildCaches();
+
+	const auto members = st::directMembers(code.storage, a);
+	CHECK(std::set<Id>(members.begin(), members.end()) == std::set<Id>{run, in});
+	CHECK(members.size() == 2);
+	CHECK(st::isTypeSymbol(code.storage, a));
+	CHECK_FALSE(st::isTypeSymbol(code.storage, run));
+}
+
+TEST_CASE("st output prints a line range")
+{
+	st::OutputOptions options;
+	options.cwd = FilePath(L"/r");
+	std::ostringstream out;
+	st::ResultLine line{L"k", L"method", FilePath(L"/r/A.java"), 5, "void f() {"};
+	line.endLine = 9;
+	st::printResults({line}, options, out);
+	CHECK(out.str() == "k\tmethod\tA.java:5-9\tvoid f() {\n");
+}

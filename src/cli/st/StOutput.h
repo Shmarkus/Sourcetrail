@@ -30,6 +30,8 @@ struct ResultLine
 	size_t line;
 	std::string source;
 	int tier = 0;
+	// Last line of a symbol's extent; 0 when it is a single line or unknown.
+	size_t endLine = 0;
 };
 
 struct OutputOptions

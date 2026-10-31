@@ -309,6 +309,36 @@ void splitLocation(const std::wstring& input, std::wstring* path, size_t* line)
 	*line = std::stoul(digits);
 }
 
+enum class FileLookup
+{
+	Found,
+	NotIndexed,
+	Ambiguous
+};
+
+// The one indexed file a user-typed path denotes; reports on stderr when there is none or several.
+FileLookup lookupFile(const st::IndexedFiles& indexed, const std::wstring& path, const st::LombokRoots& lombok,
+	const st::OutputOptions& options, FilePath* file)
+{
+	const std::vector<FilePath> matches = st::matchIndexedFiles(indexed, path, options.cwd, &lombok);
+	if (matches.empty())
+	{
+		std::cerr << "st: not indexed: " << utility::encodeToUtf8(path) << '\n';
+		return FileLookup::NotIndexed;
+	}
+	if (matches.size() > 1)
+	{
+		std::cerr << "st: ambiguous: " << utility::encodeToUtf8(path) << '\n';
+		for (const FilePath& match: matches)
+		{
+			std::cerr << utility::encodeToUtf8(st::displayPath(match, options.cwd)) << '\n';
+		}
+		return FileLookup::Ambiguous;
+	}
+	*file = matches.front();
+	return FileLookup::Found;
+}
+
 // symbols-in: the symbols defined in each file. at: the symbol at each <file>:<line>.
 int inFiles(PersistentStorage& storage, const QString& command, const std::vector<std::wstring>& inputs,
 	const st::LombokRoots& lombok, const st::OutputOptions& options)
@@ -325,24 +355,18 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		{
 			splitLocation(input, &path, &line);
 		}
-		const std::vector<FilePath> matches = st::matchIndexedFiles(indexed, path, options.cwd, &lombok);
-		if (matches.empty())
+		FilePath file;
+		const FileLookup found = lookupFile(indexed, path, lombok, options, &file);
+		if (found == FileLookup::NotIndexed)
 		{
-			std::cerr << "st: not indexed: " << utility::encodeToUtf8(path) << '\n';
 			skipped++;
 			continue;
 		}
-		if (matches.size() > 1)
+		if (found == FileLookup::Ambiguous)
 		{
-			std::cerr << "st: ambiguous: " << utility::encodeToUtf8(path) << '\n';
-			for (const FilePath& file: matches)
-			{
-				std::cerr << utility::encodeToUtf8(st::displayPath(file, options.cwd)) << '\n';
-			}
 			ambiguous = true;
 			continue;
 		}
-		const FilePath& file = matches.front();
 		if (command == "symbols-in")
 		{
 			for (const Id id: st::definedInFile(storage, file))
@@ -386,6 +410,62 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		}
 	}
 	std::cerr << command.toStdString() << ": " << lines.size() << '\n';
+	return st::printResults(std::move(lines), options, std::cout);
+}
+
+// outline: the symbols defined in each file, and the direct members of each type (any other symbol outlines itself).
+int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& inputs, const st::LombokRoots& lombok,
+	const st::OutputOptions& options)
+{
+	const st::IndexedFiles indexed = st::indexedFiles(storage, &lombok);
+	std::vector<Id> ids;
+	std::vector<std::wstring> symbolNames;
+	size_t skipped = 0;
+	bool ambiguous = false;
+	for (const std::wstring& input: inputs)
+	{
+		const FilePath given(input);
+		const bool isFile = !st::matchIndexedFiles(indexed, input, options.cwd, &lombok).empty() ||
+			given.isAbsolute() || options.cwd.getConcatenated(input).exists();
+		if (!isFile)
+		{
+			symbolNames.push_back(input);
+			continue;
+		}
+		FilePath file;
+		const FileLookup found = lookupFile(indexed, input, lombok, options, &file);
+		if (found == FileLookup::Found)
+		{
+			const std::vector<Id> defined = st::definedInFile(storage, file);
+			ids.insert(ids.end(), defined.begin(), defined.end());
+		}
+		skipped += found == FileLookup::NotIndexed;
+		ambiguous |= found == FileLookup::Ambiguous;
+	}
+	std::vector<Id> symbols;
+	const int resolved = symbolNames.empty() ? st::EXIT_RESULTS : resolve(storage, symbolNames, ~NodeKindMask(0), options, &symbols);
+	if (resolved == st::EXIT_AMBIGUOUS || ambiguous)
+	{
+		return st::EXIT_AMBIGUOUS;
+	}
+	if (ids.empty() && symbols.empty() && (resolved == st::EXIT_NOT_FOUND || skipped == inputs.size()))
+	{
+		return st::EXIT_NOT_FOUND;
+	}
+	for (const Id id: symbols)
+	{
+		if (st::isTypeSymbol(storage, id))
+		{
+			const std::vector<Id> members = st::directMembers(storage, id);
+			ids.insert(ids.end(), members.begin(), members.end());
+		}
+		else
+		{
+			ids.push_back(id);
+		}
+	}
+	std::vector<st::ResultLine> lines = st::outline(storage, ids);
+	std::cerr << "outline: " << lines.size() << '\n';
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
@@ -464,9 +544,9 @@ int run(QCoreApplication& app)
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter | symbols-in | at");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter | symbols-in | at | outline");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted. symbols-in takes files "
-		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...])", "[symbol]");
+		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...]), outline takes files or symbols", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
 	parser.addOption({"project", "Project file (.srctrlprj); registers it for later use from its source tree", "file"});
 	parser.addOption({"limit", "Maximum result lines (default 50)", "count"});
@@ -492,11 +572,12 @@ int run(QCoreApplication& app)
 	const QString command = args.isEmpty() ? QString() : args[0];
 	const bool isGraph = GRAPH_COMMANDS.contains(command);
 	const bool isFiles = command == "symbols-in" || command == "at";
-	if ((command != "find" && command != "status" && command != "filter" && !isGraph && !isFiles) ||
-		(args.size() > (command == "path" ? 3 : 2) && command != "symbols-in") || (command == "status" && args.size() != 1))
+	const bool takesMany = command == "symbols-in" || command == "outline";
+	if ((command != "find" && command != "status" && command != "filter" && !isGraph && !isFiles && command != "outline") ||
+		(args.size() > (command == "path" ? 3 : 2) && !takesMany) || (command == "status" && args.size() != 1))
 	{
 		throw UsageError(
-			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter|symbols-in|at> [symbol|file[:line]] [target] [--project P] "
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter|symbols-in|at|outline> [symbol|file[:line]] [target] [--project P] "
 			"[--limit N] [--depth N] [--kind K] [--package P] [--annotated A] [--file G] [--not] [--no-source] "
 			"[--no-refresh]; see --help");
 	}
@@ -539,7 +620,7 @@ int run(QCoreApplication& app)
 		{
 			targets.push_back(args.last().toStdWString());
 		}
-		if (command == "symbols-in" && named >= 1)
+		if (takesMany && named >= 1)
 		{
 			for (int i = 1; i < args.size(); i++)
 			{
@@ -679,6 +760,10 @@ int run(QCoreApplication& app)
 	if (isFiles)
 	{
 		return inFiles(storage, command, names, lombok, options);
+	}
+	if (command == "outline")
+	{
+		return outlineInputs(storage, names, lombok, options);
 	}
 	if (command == "filter")
 	{

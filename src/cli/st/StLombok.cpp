@@ -278,6 +278,11 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 	ResultLine mapped = line;
 	mapped.file = originalFile;
 	mapped.line = *alignment[line.line - 1] + 1;
+	mapped.endLine = 0;
+	if (line.endLine > line.line && line.endLine <= alignment.size() && alignment[line.endLine - 1])
+	{
+		mapped.endLine = *alignment[line.endLine - 1] + 1;
+	}
 	mapped.source = roots.originalLines[originalFile.wstr()][mapped.line - 1];
 	return mapped;
 }

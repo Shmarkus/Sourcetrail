@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "AccessKind.h"
 #include "FullTextSearchIndex.h"
 #include "HierarchyCache.h"
 #include "SearchIndex.h"
@@ -107,6 +108,7 @@ public:
 
 	NodeType getNodeTypeForNodeWithId(Id nodeId) const override;
 	DefinitionKind getDefinitionKindForNodeId(Id nodeId) const;
+	AccessKind getAccessKindForNodeId(Id nodeId) const;
 
 	StorageEdge getEdgeById(Id edgeId) const override;
 

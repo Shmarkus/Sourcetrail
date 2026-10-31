@@ -589,6 +589,12 @@ DefinitionKind PersistentStorage::getDefinitionKindForNodeId(Id nodeId) const
 	return it == m_symbolDefinitionKinds.end() ? DEFINITION_NONE : it->second;
 }
 
+AccessKind PersistentStorage::getAccessKindForNodeId(Id nodeId) const
+{
+	const StorageComponentAccess access = m_sqliteIndexStorage.getComponentAccessByNodeId(nodeId);
+	return access.nodeId == 0 ? ACCESS_NONE : intToAccessKind(access.type);
+}
+
 StorageEdge PersistentStorage::getEdgeById(Id edgeId) const
 {
 	return m_sqliteIndexStorage.getEdgeById(edgeId);

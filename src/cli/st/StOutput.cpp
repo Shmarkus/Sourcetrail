@@ -94,6 +94,10 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 	{
 		out << utility::encodeToUtf8(line.key) << '\t' << utility::encodeToUtf8(line.kind) << '\t'
 			<< utility::encodeToUtf8(displayPath(line.file, options.cwd)) << ':' << line.line;
+		if (line.endLine > line.line)
+		{
+			out << '-' << line.endLine;
+		}
 		if (options.showSource)
 		{
 			out << '\t' << clean(line.source);

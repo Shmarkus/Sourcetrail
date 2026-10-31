@@ -4,9 +4,12 @@
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE
 
+#	include <algorithm>
 #	include <chrono>
 #	include <filesystem>
 #	include <fstream>
+
+#	include <QByteArray>
 
 #	include "FilePath.h"
 #	include "FileSystem.h"
@@ -19,9 +22,16 @@ const FilePath s_root(L"data/GradleCacheTestSuite/tmp");
 struct GradleCacheFixture
 {
 	GradleCacheFixture()
-		: project(s_root.getConcatenated(L"project")), output(s_root.getConcatenated(L"output"))
+		: project(s_root.getConcatenated(L"project"))
+		, output(s_root.getConcatenated(L"output"))
+		, userHome(s_root.getConcatenated(L"gradle-home"))
 	{
+		const QByteArray previous = qgetenv("GRADLE_USER_HOME");
+		hadUserHome = !previous.isEmpty();
+		previousUserHome = previous;
 		std::filesystem::remove_all(s_root.str());
+		FileSystem::createDirectory(userHome);
+		qputenv("GRADLE_USER_HOME", QByteArray(userHome.str().c_str()));
 		FileSystem::createDirectory(project);
 		FileSystem::createDirectory(output);
 		FileSystem::createDirectory(project.getConcatenated(L"src/main/java"));
@@ -33,6 +43,14 @@ struct GradleCacheFixture
 
 	~GradleCacheFixture()
 	{
+		if (hadUserHome)
+		{
+			qputenv("GRADLE_USER_HOME", previousUserHome);
+		}
+		else
+		{
+			qunsetenv("GRADLE_USER_HOME");
+		}
 		std::filesystem::remove_all(s_root.str());
 	}
 
@@ -63,6 +81,11 @@ struct GradleCacheFixture
 
 	FilePath project;
 	FilePath output;
+	FilePath userHome;
+
+private:
+	bool hadUserHome = false;
+	QByteArray previousUserHome;
 };
 }	 // namespace
 
@@ -154,6 +177,47 @@ TEST_CASE("gradle build files list known names and skip build directories")
 	GradleCacheFixture f;
 	const std::vector<FilePath> files = utility::gradleBuildFiles(f.project);
 	REQUIRE(files.size() == 3);
+}
+
+TEST_CASE("gradle build files include buildSrc sources")
+{
+	GradleCacheFixture f;
+	f.write("buildSrc/src/main/groovy/conventions.gradle", "plugins {}");
+	f.write("buildSrc/build/tmp/x.class", "ignored");
+
+	std::vector<std::string> names;
+	for (const FilePath& file: utility::gradleBuildFiles(f.project))
+	{
+		names.push_back(file.str());
+	}
+	const auto listed = [&](const std::string& relativePath) {
+		const std::string absolute = (std::filesystem::path(f.project.str()) / relativePath).string();
+		return std::find(names.begin(), names.end(), absolute) != names.end();
+	};
+
+	REQUIRE(listed("buildSrc/src/main/groovy/conventions.gradle"));
+	REQUIRE_FALSE(listed("buildSrc/build/tmp/x.class"));
+}
+
+TEST_CASE("gradle build fingerprint changes when the user gradle properties change")
+{
+	GradleCacheFixture f;
+	const std::filesystem::path properties = std::filesystem::path(f.userHome.str()) / "gradle.properties";
+	std::ofstream(properties, std::ios::binary) << "org.gradle.jvmargs=-Xmx1g";
+	const std::string before = utility::gradleBuildFingerprint(f.project);
+
+	std::ofstream(properties, std::ios::binary | std::ios::trunc) << "org.gradle.jvmargs=-Xmx2048m";
+
+	REQUIRE(utility::gradleBuildFingerprint(f.project) != before);
+}
+
+TEST_CASE("gradle build files skip a missing user gradle properties")
+{
+	GradleCacheFixture f;
+	for (const FilePath& file: utility::gradleBuildFiles(f.project))
+	{
+		REQUIRE(file.str().rfind(f.project.str(), 0) == 0);
+	}
 }
 
 #endif

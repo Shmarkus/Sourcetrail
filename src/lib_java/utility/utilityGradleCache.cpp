@@ -1,6 +1,7 @@
 #include "utilityGradleCache.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -61,6 +62,32 @@ void writeFileAtomically(const std::filesystem::path& path, const std::string& c
 	}
 }
 
+bool isInBuildSrc(const std::filesystem::path& relativePath)
+{
+	return std::any_of(
+		relativePath.begin(), relativePath.end(), [](const std::filesystem::path& component) {
+			return component == "buildSrc";
+		});
+}
+
+std::filesystem::path getUserPropertiesPath()
+{
+	std::filesystem::path home;
+	if (const char* userHome = std::getenv("GRADLE_USER_HOME"); userHome != nullptr && *userHome != '\0')
+	{
+		home = userHome;
+	}
+	else if (const char* homeDirectory = std::getenv("HOME"); homeDirectory != nullptr && *homeDirectory != '\0')
+	{
+		home = std::filesystem::path(homeDirectory) / ".gradle";
+	}
+	else
+	{
+		return {};
+	}
+	return home / "gradle.properties";
+}
+
 bool isBuildFile(const std::filesystem::path& path)
 {
 	const std::string name = path.filename().string();
@@ -98,13 +125,22 @@ std::vector<FilePath> gradleBuildFiles(const FilePath& projectDirectory)
 				it.disable_recursion_pending();
 			}
 		}
-		else if (isBuildFile(it->path()) && it->is_regular_file(entryEc))
+		else if (
+			(isInBuildSrc(it->path().lexically_relative(projectDirectory.str())) || isBuildFile(it->path())) &&
+			it->is_regular_file(entryEc))
 		{
 			files.push_back(FilePath(it->path().wstring()));
 		}
 	}
 
 	std::sort(files.begin(), files.end(), [](const FilePath& a, const FilePath& b) { return a.str() < b.str(); });
+
+	const std::filesystem::path userProperties = getUserPropertiesPath();
+	std::error_code propertiesEc;
+	if (!userProperties.empty() && std::filesystem::is_regular_file(userProperties, propertiesEc))
+	{
+		files.push_back(FilePath(userProperties.wstring()));
+	}
 	return files;
 }
 

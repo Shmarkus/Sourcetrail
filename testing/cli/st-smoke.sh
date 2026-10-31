@@ -94,6 +94,16 @@ shout_line="$(grep -n 'toUpperCase' "$caller" | head -n1 | cut -d: -f1)"
 run 0 at "$caller:$shout_line"
 contains 'example.Caller.shout(example.Person)' out
 grep -F 'example.Caller.shout(example.Person)' "$work/out" | grep -qF "$caller:" || assert "at lacks the method location: $(cat "$work/out")"
+# A piped Lombok annotation line without a counterpart is reported and skipped; the other inputs still answer.
+person=src/main/java/example/Person.java
+getter_line="$(grep -n '^@Getter' "$person" | cut -d: -f1)"
+field_line="$(grep -n 'private final String name' "$person" | cut -d: -f1)"
+printf '%s:%s\n%s:%s\n' "$person" "$getter_line" "$person" "$field_line" | "$st" at > "$work/out" 2> "$work/err" \
+    || assert "piped at with a Lombok annotation line failed"
+contains 'example.Person.name' out
+contains 'has no counterpart' err
+printf '%s:%s\n' "$person" "$getter_line" | "$st" at > "$work/out" 2> "$work/err" && code=0 || code=$?
+[ "$code" = 3 ] || assert "piped at with only an unmapped line exited $code, expected 3"
 
 run 0 symbols-in src/main/java/example/Person.java
 contains 'example.Person' out

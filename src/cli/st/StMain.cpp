@@ -440,7 +440,8 @@ int inFiles(PersistentStorage& storage, const QString& command, const std::vecto
 		{
 			std::cerr << "st: " << utility::encodeToUtf8(path) << ':' << line
 					  << " has no counterpart in the indexed (delombok) file\n";
-			return st::EXIT_NOT_FOUND;
+			skipped++;
+			continue;
 		}
 		if (*id)
 		{

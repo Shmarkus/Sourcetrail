@@ -346,8 +346,9 @@ nodes unless `--kind` asks for them.
 **Input rules.** `filter`, `impact` and `deps` take symbols as arguments or keys on stdin; `symbols-in` takes paths; `at`
 takes `file:line`. With Lombok, give the original path and line: the file maps to its delombok copy and the line maps back
 through the generated code; every line of a statement delombok joined onto one line maps to it. A line with no counterpart
-gets the symbol of the nearest mapped lines above and below when both give the same one; otherwise it exits 3
-(`st: <file>:<line> has no counterpart in the indexed (delombok) file`) rather than guessing. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
+gets the symbol of the nearest mapped lines above and below when both give the same one; otherwise st reports it on stderr
+(`st: <file>:<line> has no counterpart in the indexed (delombok) file`) and skips it rather than guessing, like an input that is
+not indexed; `at` exits 3 only when every input was skipped. If a piped command was cut off by `--limit`, stderr says `input truncated upstream`.
 
 ```bash
 grep -n 'placeOrder' src/main/java/com/acme/*.java | st at | st impact --group package

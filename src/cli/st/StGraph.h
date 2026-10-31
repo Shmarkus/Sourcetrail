@@ -41,6 +41,7 @@ struct PathHop
 	Edge::EdgeType type;
 	FilePath file;
 	size_t line;
+	size_t column = 0;
 };
 
 // Simple chains over links of `types` from any of `from` to any of `to`, shortest first, at most `limit`.

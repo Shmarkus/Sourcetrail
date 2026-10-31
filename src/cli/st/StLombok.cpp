@@ -57,17 +57,60 @@ ResultLine generated(ResultLine line)
 	return line;
 }
 
+bool isSpace(char c)
+{
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
+}
+
 std::string squeezed(const std::string& text)
 {
 	std::string result;
 	for (const char c: text)
 	{
-		if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\f' && c != '\v')
+		if (!isSpace(c))
 		{
 			result += c;
 		}
 	}
 	return result;
+}
+
+// The line of `span` holding the token at 1-based `column` of the generated line, found by counting non-whitespace
+// bytes; nullopt when the column is unknown or lands on whitespace or past the line. The indexer counts UTF-16
+// units, so a tab is one column and a character outside the basic plane two.
+std::optional<size_t> lineAtColumn(
+	const std::string& generatedLine, const std::vector<std::string>& original, const LineSpan& span, size_t column)
+{
+	size_t units = 0;
+	size_t before = 0;
+	size_t i = 0;
+	for (; i < generatedLine.size(); i++)
+	{
+		const unsigned char c = generatedLine[i];
+		if ((c & 0xC0) != 0x80)
+		{
+			if (units + 1 == column)
+			{
+				break;
+			}
+			units += c >= 0xF0 ? 2 : 1;
+		}
+		before += !isSpace(c);
+	}
+	if (column == 0 || i == generatedLine.size() || isSpace(generatedLine[i]))
+	{
+		return std::nullopt;
+	}
+	for (size_t o = span.first; o <= span.last; o++)
+	{
+		const size_t size = squeezed(original[o]).size();
+		if (before < size)
+		{
+			return o;
+		}
+		before -= size;
+	}
+	return std::nullopt;
 }
 
 // Generated line index -> original line index of the LCS matches that pass the guards against repeated lines.
@@ -398,10 +441,12 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 		}
 		if (!counterpart.file.empty())
 		{
+			std::vector<std::string> generatedLines = readLines(line.file);
 			if (!roots.alignments.count(line.file.wstr()))
 			{
-				roots.alignments[line.file.wstr()] = alignSpans(readLines(line.file), counterpart.lines);
+				roots.alignments[line.file.wstr()] = alignSpans(generatedLines, counterpart.lines);
 			}
+			roots.generatedLines[line.file.wstr()] = std::move(generatedLines);
 			roots.originalLines[counterpart.file.wstr()] = std::move(counterpart.lines);
 		}
 		cached = roots.originalFiles.emplace(line.file.wstr(), counterpart.file).first;
@@ -412,21 +457,37 @@ ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 		return generated(line);
 	}
 	const auto& alignment = roots.alignments[line.file.wstr()];
+	const auto& originalLines = roots.originalLines[originalFile.wstr()];
 	ResultLine mapped = line;
 	mapped.file = originalFile;
 	mapped.endLine = 0;
-	if (line.line == 0 || line.line > alignment.size() || !alignment[line.line - 1])
+	std::optional<size_t> original;
+	if (line.line > 0 && line.line <= alignment.size() && alignment[line.line - 1])
+	{
+		const LineSpan& span = *alignment[line.line - 1];
+		const auto& generatedLines = roots.generatedLines[line.file.wstr()];
+		if (span.last == span.first)
+		{
+			original = span.first;
+		}
+		else if (line.line <= generatedLines.size())
+		{
+			// A joined line maps by the column of its token, never to a guess.
+			original = lineAtColumn(generatedLines[line.line - 1], originalLines, span, line.column);
+		}
+	}
+	if (!original)
 	{
 		mapped.line = 0;
 		mapped.generated = true;
 		return mapped;
 	}
-	mapped.line = alignment[line.line - 1]->first + 1;
+	mapped.line = *original + 1;
 	if (line.endLine > line.line && line.endLine <= alignment.size() && alignment[line.endLine - 1])
 	{
 		mapped.endLine = alignment[line.endLine - 1]->last + 1;
 	}
-	mapped.source = roots.originalLines[originalFile.wstr()][mapped.line - 1];
+	mapped.source = originalLines[mapped.line - 1];
 	return mapped;
 }
 

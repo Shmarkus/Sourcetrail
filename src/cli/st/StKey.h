@@ -35,6 +35,9 @@ std::wstring symbolKey(const NameHierarchy& name);
 // Exact key, then exact qualified name (overloads are ambiguous), then suffix match.
 Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
 
+// The symbols a name with a parameter list resolves to without it; empty when the name has no parameter list.
+std::vector<Id> overloadsOf(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
+
 struct RankedSymbol
 {
 	Id id;

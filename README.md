@@ -300,7 +300,7 @@ afterwards `st` works from anywhere in the tree without the flag.
 `symbols-in`, `at`, `outline` (see `st --help`).
 The symbol is a name or a full key (`pkg.Class.method(pkg.Arg)`); without one, `st` reads
 keys from stdin, one per line or the first tab-separated column, so commands pipe.
-Ambiguous names exit 2 and list the candidates.
+Ambiguous names exit 2 and list the candidates. A parameter list matching no overload exits 3 and lists the overloads.
 
 **Output.** One tab-separated line per result: `key`, `kind`, `path:line`, source line
 (`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9`)
@@ -326,7 +326,8 @@ st path com.acme.Controller.create com.acme.Repo.save
   `outline <class>` lists nested types but not their members.
 - `impact <symbol>`: what a change can break: users, subtypes and overrides, transitively. `--depth` (default 0, unlimited)
   counts every hop except override hops; a class stands for all its members. `--group file|package` prints one line per file or
-  package. Overrides are followed up and down, but not down again after going up. Rows read `<kind>, depth <n>` (`depth 1` is a direct user). stderr gets `impact: N symbols in F files, P packages`.
+  package. Overrides are followed up and down, but not down again after going up. Rows read `<kind>, depth <n>` (`depth 1` is a direct user); `--limit` keeps the lowest depths. stderr gets `impact: N symbols in F files, P packages`.
+  `| st filter --not --file '*Test*'` leaves out tests.
 - `deps <symbol>`: outgoing dependencies, one row per top-level type (`class, N links`), or per package for a package input
   (`package, N links`; sub-packages are included). `--in` gives incoming. Links inside the input, external targets and builtin types
   are not counted.
@@ -361,7 +362,7 @@ components are missing from every answer. Field reads and writes are not disting
 
 **Lombok.** Sourcetrail indexes delombok copies, so `st` maps those locations back to the original
 file and line, mapping only lines whose text matches the original unambiguously. Unchanged copies map line for line; a
-statement delombok joined onto one line maps to its first original line. Generated members and other lines without an
+location in a statement delombok joined onto one line maps to the original line holding its column. Generated members and other lines without an
 original line print the original path without a line, `src/.../Order.java (generated)`; if there is no original file, the
 row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no-generated` (any command) drops those rows.
 

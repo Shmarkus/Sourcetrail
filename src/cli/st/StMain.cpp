@@ -126,28 +126,41 @@ int find(PersistentStorage& storage, const std::vector<std::wstring>& names, Nod
 
 const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
-// Resolves every name; ambiguous names list their candidates on stderr.
+// Prints the definition lines of `ids` on stderr, all of them.
+void printCandidates(PersistentStorage& storage, const std::vector<Id>& ids, const st::OutputOptions& options)
+{
+	std::vector<st::ResultLine> candidates;
+	for (const Id id: ids)
+	{
+		for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id))))
+		{
+			candidates.push_back(std::move(line));
+		}
+	}
+	st::OutputOptions all = options;
+	all.limit = candidates.size();
+	all.hideGenerated = false;
+	st::printResults(std::move(candidates), all, std::cerr);
+}
+
+// Resolves every name; ambiguous names list their candidates on stderr, and so does a parameter list matching none
+// of the name's overloads.
 int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
 	const st::OutputOptions& options, std::vector<Id>* ids)
 {
-	std::vector<st::ResultLine> candidates;
+	std::vector<Id> candidates;
 	for (const std::wstring& name: names)
 	{
 		const st::Resolved resolved = st::resolveSymbol(storage, name, kinds);
 		if (resolved.status == st::Resolution::NotFound)
 		{
 			std::cerr << "st: symbol not found: " << utility::encodeToUtf8(name) << '\n';
+			printCandidates(storage, st::overloadsOf(storage, name, kinds), options);
 		}
 		else if (resolved.status == st::Resolution::Ambiguous)
 		{
 			std::cerr << "st: ambiguous: " << utility::encodeToUtf8(name) << '\n';
-			for (const Id id: resolved.ids)
-			{
-				for (auto& line: st::definitionLines(storage, id, st::symbolKey(storage.getNameHierarchyForNodeId(id))))
-				{
-					candidates.push_back(std::move(line));
-				}
-			}
+			candidates.insert(candidates.end(), resolved.ids.begin(), resolved.ids.end());
 		}
 		else
 		{
@@ -156,10 +169,7 @@ int resolve(PersistentStorage& storage, const std::vector<std::wstring>& names, 
 	}
 	if (!candidates.empty())
 	{
-		st::OutputOptions all = options;
-		all.limit = candidates.size();
-		all.hideGenerated = false;
-		st::printResults(std::move(candidates), all, std::cerr);
+		printCandidates(storage, candidates, options);
 		return st::EXIT_AMBIGUOUS;
 	}
 	return ids->empty() ? st::EXIT_NOT_FOUND : st::EXIT_RESULTS;
@@ -178,8 +188,9 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 	const size_t found = 1000;
 	const auto chains = st::paths(storage, origins, targets, depth, std::max(found, options.limit + 1), types);
 	std::cerr << "path: " << chains.size() << '\n';
-	const auto location = [&](const FilePath& file, size_t line) {
+	const auto location = [&](const FilePath& file, size_t line, size_t column) {
 		st::ResultLine mapped{L"", L"", file, line, ""};
+		mapped.column = column;
 		if (options.mapLocation)
 		{
 			mapped = options.mapLocation(mapped);
@@ -193,14 +204,14 @@ int path(PersistentStorage& storage, const std::vector<Id>& from, const std::vec
 		std::cout << i + 1 << ". " << utility::encodeToUtf8(startKey);
 		for (const auto& line: st::definitionLines(storage, start, startKey))
 		{
-			std::cout << '\t' << location(line.file, line.line);
+			std::cout << '\t' << location(line.file, line.line, line.column);
 		}
 		std::cout << '\n';
 		for (const st::PathHop& hop: chains[i])
 		{
 			std::cout << "   -" << utility::encodeToUtf8(st::linkKind(hop.type)) << "-> "
 					  << utility::encodeToUtf8(st::symbolKey(storage.getNameHierarchyForNodeId(hop.to))) << '\t'
-					  << location(hop.file, hop.line) << '\n';
+					  << location(hop.file, hop.line, hop.column) << '\n';
 		}
 	}
 	if (chains.size() > options.limit)

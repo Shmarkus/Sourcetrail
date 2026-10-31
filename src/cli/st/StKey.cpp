@@ -204,6 +204,12 @@ Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, Nod
 
 namespace st
 {
+std::vector<Id> overloadsOf(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds)
+{
+	const std::wstring name = searchText(text);
+	return name == text ? std::vector<Id>() : resolveSymbol(storage, name, kinds).ids;
+}
+
 std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds)
 {
 	auto lower = [](std::wstring s) {

@@ -7,6 +7,7 @@
 
 #include "FilePath.h"
 #include "NodeKind.h"
+#include "StOutput.h"
 #include "types.h"
 
 class PersistentStorage;
@@ -20,9 +21,13 @@ struct Site
 {
 	FilePath file;
 	size_t line = 0;
+	size_t column = 0;
 };
 
 std::string sourceText(PersistentStorage& storage, const Site& site);
+
+// A result line at `site`, with its source text.
+ResultLine resultLine(PersistentStorage& storage, const std::wstring& key, const std::wstring& kind, const Site& site);
 
 // First start location of a link, by file then line.
 Site linkSite(PersistentStorage& storage, Id edgeId);

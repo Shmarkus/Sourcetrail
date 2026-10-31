@@ -869,3 +869,67 @@ TEST_CASE("lombok alignment leaves a joined line unmapped when a single original
 		CHECK_FALSE(st::toGeneratedLine(FilePath(L"/o/A.java"), FilePath(L"/g/A.java"), line, read).has_value());
 	}
 }
+
+namespace
+{
+st::LombokRoots joinedRoots()
+{
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/g"), {FilePath(L"/o")}});
+	return roots;
+}
+
+st::ResultLine joinedAt(size_t line, size_t column)
+{
+	st::ResultLine result{L"k", L"call", FilePath(L"/g/M.java"), line, ""};
+	result.column = column;
+	return result;
+}
+}
+
+TEST_CASE("lombok location inside a joined statement maps to the original line holding its column")
+{
+	const st::LombokRoots roots = joinedRoots();
+	// "return gw.find(b.getUuid()).map(this::project);": `find` at column 11, `map` at column 29.
+	const st::ResultLine find = st::toOriginal(joinedAt(4, 11), roots, joinedLines);
+	CHECK(find.line == 5);
+	CHECK(find.source == "return gw.find(b.getUuid())");
+	const st::ResultLine map = st::toOriginal(joinedAt(4, 29), roots, joinedLines);
+	CHECK_FALSE(map.generated);
+	CHECK(map.line == 6);
+	CHECK(map.source == "    .map(this::project);");
+	// "public void alter(UUID id, Alter a, Strategy s) {": `Strategy` at column 37.
+	CHECK(st::toOriginal(joinedAt(6, 37), roots, joinedLines).line == 9);
+	CHECK(st::toOriginal(joinedAt(6, 13), roots, joinedLines).line == 8);
+}
+
+TEST_CASE("lombok location inside a joined statement without a placeable column stays generated")
+{
+	const st::LombokRoots roots = joinedRoots();
+	for (const size_t column: {0, 7, 200})
+	{
+		const st::ResultLine mapped = st::toOriginal(joinedAt(4, column), roots, joinedLines);
+		CHECK(mapped.generated);
+		CHECK(mapped.line == 0);
+		CHECK(mapped.file.wstr() == L"/o/M.java");
+	}
+	// A line that maps one to one needs no column.
+	CHECK(st::toOriginal(joinedAt(3, 0), roots, joinedLines).line == 4);
+}
+
+TEST_CASE("lombok joined statement columns count a tab and a non-ascii character as one")
+{
+	const std::vector<std::string> original = {"class A {", "@Getter", "int n;", "void f() {", "\t\tlog(\"\xc3\xb5\",",
+		"\t\t\tgo());", "}", "}"};
+	const std::vector<std::string> generated = {"class A {", "int n;", "void f() {", "\t\tlog(\"\xc3\xb5\", go());", "}",
+		"@lombok.Generated", "int getN() {", "return n;", "}", "}"};
+	st::LombokRoots roots;
+	roots.delombokToOriginalRoots.push_back({FilePath(L"/g"), {FilePath(L"/o")}});
+	const auto read = [&](const FilePath& file) { return file.wstr() == L"/o/A.java" ? original : generated; };
+	st::ResultLine go{L"k", L"call", FilePath(L"/g/A.java"), 4, ""};
+	// Two tabs, `log("õ",` and a space: `go` starts at column 12.
+	go.column = 12;
+	CHECK(st::toOriginal(go, roots, read).line == 6);
+	go.column = 3;
+	CHECK(st::toOriginal(go, roots, read).line == 5);
+}

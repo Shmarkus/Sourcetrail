@@ -815,3 +815,62 @@ TEST_CASE("st find hides type parameters unless the kind asks for them")
 	CHECK(std::find(hidden.begin(), hidden.end(), failed) != hidden.end());
 	CHECK(st::findSymbols(code.storage, L"Result.failed", NODE_TYPE_PARAMETER) == std::vector<Id>{parameter});
 }
+
+TEST_CASE("st impact keeps the lowest depths under the limit")
+{
+	Code code;
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	const Id c = code.member(code.type(L"C"), L"C", L"c");
+	code.link(Edge::EDGE_CALL, a, b, L"A", {2});
+	code.link(Edge::EDGE_CALL, b, c, L"B", {2});
+	code.storage.buildCaches();
+
+	st::OutputOptions options;
+	options.limit = 1;
+	options.showSource = false;
+	std::ostringstream out;
+	st::printResults(st::impact(code.storage, {c}, 0, st::IMPACT_EDGES, st::Group::None).lines, options, out);
+	CHECK(out.str() == "p.B.b()\tmethod, depth 1\t/r/p/B.java:2\n+1 more (--limit)\n");
+}
+
+TEST_CASE("st lists the overloads of a name whose parameter list matches none")
+{
+	Code code;
+	const Id service = code.type(L"p", L"PaymentService");
+	const Id one = code.member(service, L"PaymentService", L"sendPayments", NODE_METHOD, L"(java.util.UUID)");
+	const Id two = code.member(service, L"PaymentService", L"sendPayments", NODE_METHOD, L"(java.util.UUID, int)");
+	code.storage.buildCaches();
+
+	const std::vector<Id> overloads = st::overloadsOf(code.storage, L"PaymentService.sendPayments(String)", NODE_METHOD);
+	CHECK(std::set<Id>(overloads.begin(), overloads.end()) == std::set<Id>{one, two});
+	CHECK(st::overloadsOf(code.storage, L"PaymentService.sendPayments", NODE_METHOD).empty());
+	CHECK(st::overloadsOf(code.storage, L"PaymentService.missing(String)", NODE_METHOD).empty());
+}
+
+TEST_CASE("st result lines carry the column of their location")
+{
+	Code code;
+	const Id a = code.member(code.type(L"A"), L"A", L"a");
+	const Id b = code.member(code.type(L"B"), L"B", L"b");
+	const Id call = code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_CALL), a, b));
+	code.storage.addOccurrence(StorageOccurrence(call, code.storage.addSourceLocation(
+		StorageSourceLocationData(code.file(L"A"), 7, 13, 7, 15, locationTypeToInt(LOCATION_TOKEN)))));
+	code.storage.buildCaches();
+
+	const auto callers = st::calls(code.storage, {b}, st::Direction::Incoming, 1);
+	REQUIRE(callers.size() == 1);
+	CHECK(callers[0].column == 13);
+	const auto refs = st::references(code.storage, {b});
+	REQUIRE(refs.size() == 1);
+	CHECK(refs[0].column == 13);
+	const auto impacted = st::impact(code.storage, {b}, 0, st::IMPACT_EDGES, st::Group::None).lines;
+	REQUIRE(impacted.size() == 1);
+	CHECK(impacted[0].column == 13);
+	const auto chains = st::paths(code.storage, {a}, {b}, 2, 10, Edge::EDGE_CALL);
+	REQUIRE(chains.size() == 1);
+	CHECK(chains[0][0].column == 13);
+	const auto definition = st::definitionLines(code.storage, b, L"p.B.b()");
+	REQUIRE(definition.size() == 1);
+	CHECK(definition[0].column == 1);
+}

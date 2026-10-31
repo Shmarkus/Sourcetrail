@@ -38,16 +38,19 @@ struct LombokRoots
 {
 	// Delombok output directory -> the declared original roots of the same source set.
 	std::vector<std::pair<FilePath, std::vector<FilePath>>> delombokToOriginalRoots;
-	// By delombok file for the duration of one command: its original (empty without exactly one) and alignSpans.
+	// By delombok file for the duration of one command: its original (empty without exactly one), alignSpans and lines.
 	mutable std::map<std::wstring, FilePath> originalFiles;
 	mutable std::map<std::wstring, std::vector<std::optional<LineSpan>>> alignments;
 	mutable std::map<std::wstring, std::vector<std::string>> originalLines;
+	mutable std::map<std::wstring, std::vector<std::string>> generatedLines;
 };
 
 LombokRoots lombokRoots(const ProjectSettings& settings);
 
 // Lines outside every delombok directory are returned unchanged. An unmatched line is marked `generated` and names
 // the original file with line 0; without one it keeps its delombok location and its kind gains " (generated)".
+// A line delombok joined from several original lines maps to the one holding the character at `column`, and
+// stays generated when the column is unknown or can't be placed.
 // readLines returns no lines for a missing file.
 ResultLine toOriginal(const ResultLine& line, const LombokRoots& roots,
 	const std::function<std::vector<std::string>(const FilePath&)>& readLines);

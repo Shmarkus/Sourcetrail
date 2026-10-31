@@ -34,6 +34,8 @@ struct ResultLine
 	size_t endLine = 0;
 	// A delombok location without an original line: `file` is the original file and `line` is 0.
 	bool generated = false;
+	// 1-based column of the location on `line`; 0 when unknown.
+	size_t column = 0;
 };
 
 struct OutputOptions

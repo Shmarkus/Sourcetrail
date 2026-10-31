@@ -303,8 +303,7 @@ std::vector<ResultLine> grouped(PersistentStorage& storage, const std::map<std::
 				first = affected->definition;
 			}
 		}
-		lines.push_back({key, label + L", " + std::to_wstring(members.size()) + L" symbols", first.file, first.line,
-			sourceText(storage, first)});
+		lines.push_back(resultLine(storage, key, label + L", " + std::to_wstring(members.size()) + L" symbols", first));
 	}
 	return lines;
 }
@@ -421,10 +420,13 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
 			{
 				continue;
 			}
-			result.lines.push_back({symbolKey(symbol.name),
-				storage.getNodeTypeForNodeWithId(symbol.id).getReadableTypeWString() + L", depth " +
-					std::to_wstring(reached.at(symbol.id).cost),
-				symbol.site.file, symbol.site.line, sourceText(storage, symbol.site)});
+			const size_t depth = reached.at(symbol.id).cost;
+			ResultLine line = resultLine(storage, symbolKey(symbol.name),
+				storage.getNodeTypeForNodeWithId(symbol.id).getReadableTypeWString() + L", depth " + std::to_wstring(depth),
+				symbol.site);
+			// Under --limit the nearest rows stay.
+			line.tier = static_cast<int>(depth);
+			result.lines.push_back(std::move(line));
 		}
 	}
 	return result;
@@ -536,8 +538,7 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
 				}
 			}
 		}
-		lines.push_back({key, row.label + L", " + std::to_wstring(count) + L" links", first.file, first.line,
-			sourceText(storage, first)});
+		lines.push_back(resultLine(storage, key, row.label + L", " + std::to_wstring(count) + L" links", first));
 	}
 	return lines;
 }

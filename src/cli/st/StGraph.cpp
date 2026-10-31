@@ -204,6 +204,13 @@ std::string sourceText(PersistentStorage& storage, const Site& site)
 	return "";
 }
 
+ResultLine resultLine(PersistentStorage& storage, const std::wstring& key, const std::wstring& kind, const Site& site)
+{
+	ResultLine line{key, kind, site.file, site.line, sourceText(storage, site)};
+	line.column = site.column;
+	return line;
+}
+
 Site linkSite(PersistentStorage& storage, Id edgeId)
 {
 	const auto sites = linkSites(storage, {edgeId});
@@ -227,7 +234,7 @@ std::map<Id, std::vector<Site>> allLinkSites(PersistentStorage& storage, const s
 		{
 			if (wanted.count(id))
 			{
-				sites[id].push_back({location->getFilePath(), location->getLineNumber()});
+				sites[id].push_back({location->getFilePath(), location->getLineNumber(), location->getColumnNumber()});
 			}
 		}
 	});
@@ -265,7 +272,7 @@ std::map<Id, Site> definitionSites(PersistentStorage& storage, const std::vector
 		{
 			if (wanted.count(id) && (!sites.count(id) || (!location->isScopeLocation() && isScope[id])))
 			{
-				sites[id] = {location->getFilePath(), location->getLineNumber()};
+				sites[id] = {location->getFilePath(), location->getLineNumber(), location->getColumnNumber()};
 				isScope[id] = location->isScopeLocation();
 			}
 		}
@@ -280,9 +287,7 @@ std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const
 	{
 		return {};
 	}
-	const Site& site = sites.begin()->second;
-	return {{key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), site.file, site.line,
-		sourceText(storage, site)}};
+	return {resultLine(storage, key, storage.getNodeTypeForNodeWithId(id).getReadableTypeWString(), sites.begin()->second)};
 }
 
 std::vector<ResultLine> references(PersistentStorage& storage, const std::vector<Id>& symbols)
@@ -313,8 +318,8 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
 			storage.getSourceLocationsForTokenIds({edge->getId()})->forEachSourceLocation([&](SourceLocation* location) {
 				if (location->isStartLocation())
 				{
-					const Site site{location->getFilePath(), location->getLineNumber()};
-					lines.push_back({user, linkKind(edge->getType()), site.file, site.line, sourceText(storage, site)});
+					const Site site{location->getFilePath(), location->getLineNumber(), location->getColumnNumber()};
+					lines.push_back(resultLine(storage, user, linkKind(edge->getType()), site));
 				}
 			});
 		}
@@ -353,8 +358,7 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 		}
 		if (reached.siteEdge)
 		{
-			const Site site = linkSite(storage, reached.siteEdge);
-			lines.push_back({key(storage, node), kind, site.file, site.line, sourceText(storage, site)});
+			lines.push_back(resultLine(storage, key(storage, node), kind, linkSite(storage, reached.siteEdge)));
 		}
 		else
 		{
@@ -450,11 +454,11 @@ std::vector<std::vector<PathHop>> paths(PersistentStorage& storage, const std::v
 					{
 						for (const ResultLine& line: definitionLines(storage, hopTo, L""))
 						{
-							site = {line.file, line.line};
+							site = {line.file, line.line, line.column};
 						}
 					}
 					solved = solved && !isUnsolvedSymbol(storage, hopTo);
-					chain.push_back({hopFrom, hopTo, edge->getType(), site.file, site.line});
+					chain.push_back({hopFrom, hopTo, edge->getType(), site.file, site.line, site.column});
 				}
 				if (solved)
 				{

@@ -8,6 +8,7 @@
 #include "NodeType.h"
 #include "PersistentStorage.h"
 #include "SourceLocation.h"
+#include "SourceLocationCollection.h"
 #include "SourceLocationFile.h"
 #include "StLombok.h"
 
@@ -22,6 +23,29 @@ bool listed(PersistentStorage& storage, Id id)
 	// Edge ids share the id space but have no definition kind.
 	return storage.getDefinitionKindForNodeId(id) == DEFINITION_EXPLICIT &&
 		!(storage.getNodeTypeForNodeWithId(id).getKind() & NOT_LISTED);
+}
+
+// The file that defines the symbol: its scope's file, else the only file with a token for it, else (when
+// references are recorded as tokens too) the file of its enclosing symbol.
+FilePath definitionFile(PersistentStorage& storage, Id id)
+{
+	std::set<FilePath> scopes;
+	std::set<FilePath> tokens;
+	storage.getSourceLocationsForTokenIds({id})->forEachSourceLocation([&](SourceLocation* location) {
+		(location->isScopeLocation() ? scopes : tokens).insert(location->getFilePath());
+	});
+	if (!scopes.empty())
+	{
+		return *scopes.begin();
+	}
+	if (tokens.size() == 1)
+	{
+		return *tokens.begin();
+	}
+	NameHierarchy name = storage.getNameHierarchyForNodeId(id);
+	name.pop();
+	const Id parent = name.size() ? storage.getNodeIdForNameHierarchy(name) : 0;
+	return parent ? definitionFile(storage, parent) : FilePath();
 }
 
 bool endsWithElement(const std::wstring& path, const std::wstring& suffix)
@@ -111,6 +135,11 @@ Id symbolAt(PersistentStorage& storage, const FilePath& indexedFile, size_t line
 			}
 		}
 	});
+	// A reference to a symbol defined elsewhere is not a name on this line.
+	for (auto it = named.begin(); it != named.end();)
+	{
+		it = definitionFile(storage, *it) == indexedFile ? std::next(it) : named.erase(it);
+	}
 	if (named.empty() || named.count(innermost))
 	{
 		return innermost;

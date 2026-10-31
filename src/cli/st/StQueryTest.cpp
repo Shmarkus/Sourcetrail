@@ -182,3 +182,19 @@ TEST_CASE("st at refuses an original line without a generated counterpart")
 {
 	REQUIRE_FALSE(st::toGeneratedLine(FilePath(L"/o/P.java"), FilePath(L"/g/P.java"), 1, linesOf).has_value());
 }
+
+TEST_CASE("st at ignores a symbol only referenced on the line")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id b = code.type(L"B");
+	const Id run = code.member(a, L"A", L"run");
+	const Id go = code.member(b, L"B", L"go");
+	code.scope(a, L"A", 1, 20);
+	code.scope(run, L"A", 5, 9);
+	code.link(Edge::EDGE_CALL, run, go, L"A", {7});
+	addLocation(code.storage, go, code.file(L"A"), 7);
+	code.storage.buildCaches();
+
+	REQUIRE(st::symbolAt(code.storage, FilePath(L"/r/p/A.java"), 7) == run);
+}

@@ -283,6 +283,27 @@ TEST_CASE("st callees reach implementations via the interface method")
 	REQUIRE(lineFor(one, L"p.Impl.run()")->line == 5);
 	const auto two = st::calls(code.storage, {f}, st::Direction::Outgoing, 2);
 	REQUIRE(keys(two) == std::set<std::wstring>{L"p.Iface.run()", L"p.Impl.run()", L"p.Impl.helper()"});
+	REQUIRE(lineFor(two, L"p.Impl.run()")->kind == L"method via p.Iface.run(), depth 1");
+}
+
+TEST_CASE("st calls tier results by depth")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id f = code.member(a, L"A", L"f");
+	const Id g = code.member(a, L"A", L"g");
+	const Id h = code.member(a, L"A", L"h");
+	code.link(Edge::EDGE_CALL, f, g, L"A", {3});
+	code.link(Edge::EDGE_CALL, g, h, L"A", {4});
+	code.storage.buildCaches();
+	const auto lines = st::calls(code.storage, {f}, st::Direction::Outgoing, 2);
+	REQUIRE(lineFor(lines, L"p.A.g()")->tier == 1);
+	REQUIRE(lineFor(lines, L"p.A.h()")->tier == 2);
+	REQUIRE(lineFor(lines, L"p.A.h()")->kind == L"method, depth 2");
+	REQUIRE(lineFor(lines, L"p.A.g()")->kind == L"method, depth 1");
+	const auto shallow = st::calls(code.storage, {f}, st::Direction::Outgoing, 1);
+	REQUIRE(lineFor(shallow, L"p.A.g()")->kind == L"method");
+	REQUIRE(lineFor(shallow, L"p.A.g()")->tier == 1);
 }
 
 TEST_CASE("st callers count method references")

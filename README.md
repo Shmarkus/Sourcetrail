@@ -339,7 +339,8 @@ Ambiguous names exit 2 and list the candidates; a bare class name that matches o
 **Output.** One tab-separated line per result: `key`, `kind`, `path:line`, source line
 (`--no-source` drops it). Paths are relative to the current directory when below it. The count (`callers: 9 (project shop)`, the project file's base name)
 goes to stderr; a `+N more (--limit)` overflow line ends stdout. Calls through an
-interface show as `method via pkg.Iface.method()`. `--limit` (default 50), `--depth`, `--kind` shape results.
+interface show as `method via pkg.Iface.method()`. With `--depth` above 1 (or 0) `callers` and `callees` append
+`, depth <n>` to the kind (`method, depth 2`; `--limit` keeps the lowest depths). `--limit` (default 50), `--depth`, `--kind` shape results.
 `find` ranks exact, then suffix, then substring matches. External (library) symbols are hidden.
 
 ```bash

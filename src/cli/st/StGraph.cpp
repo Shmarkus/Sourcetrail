@@ -452,15 +452,21 @@ std::vector<ResultLine> calls(PersistentStorage& storage, const std::vector<Id>&
 		{
 			kind += L" via " + key(storage, reached.via);
 		}
+		if (depth != 1)
+		{
+			kind += L", depth " + std::to_wstring(reached.cost);
+		}
 		if (reached.siteEdge)
 		{
 			lines.push_back(resultLine(storage, key(storage, node), kind, linkSite(storage, reached.siteEdge)));
+			lines.back().tier = static_cast<int>(reached.cost);
 		}
 		else
 		{
 			for (ResultLine& line: definitionLines(storage, node, key(storage, node)))
 			{
 				line.kind = kind;
+				line.tier = static_cast<int>(reached.cost);
 				lines.push_back(std::move(line));
 			}
 		}

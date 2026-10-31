@@ -112,6 +112,9 @@ contains refreshed err
 contains 'example.Caller.shout(example.Person)' out
 run 0 callers 'example.Person.getName()'
 ! grep -q refreshed "$work/err" || assert "second run refreshed again"
+grep -qF $'\tmethod\t' "$work/out" || assert "depth-1 callers kind changed: $(cat "$work/out")"
+run 0 callers 'example.Person.getName()' --depth 2
+contains $'\tmethod, depth 1\t' out
 
 # Phase 2 commands against the fixture (the edited Caller.java is still in place).
 caller=src/main/java/example/Caller.java

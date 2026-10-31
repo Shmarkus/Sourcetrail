@@ -583,6 +583,14 @@ TEST_CASE("delombok runs on the whole tree when an unchanged file uses a cross-f
 	{
 		f.write("b/src/main/java/other/X.java", "import lombok.val;\nclass X { void f() { val b = new B(); } }");
 	}
+	SECTION("val through a wildcard import")
+	{
+		f.write("b/src/main/java/other/X.java", "import lombok.*;\nclass X { void f() { val b = new B(); } }");
+	}
+	SECTION("lombok.var")
+	{
+		f.write("b/src/main/java/other/X.java", "import lombok.var;\nclass X { void f() { var b = new B(); } }");
+	}
 	REQUIRE(f.run(fake));
 
 	f.edit("a/src/main/java/pkg/B.java", "class B { int make() { return 1; } }");

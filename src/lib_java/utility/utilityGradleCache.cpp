@@ -147,8 +147,8 @@ std::string hashFingerprint(const std::string& fingerprint)
 	return out.str();
 }
 
-// @Delegate and @ExtensionMethod generate code from other types, and lombok.val resolves to a
-// concrete type on Java 8, so their output changes with those types
+// @Delegate and @ExtensionMethod generate code from other types, and lombok.val and lombok.var
+// resolve to a concrete type on Java 8, so their output changes with those types
 bool usesCrossFileLombok(const std::filesystem::path& file)
 {
 	std::ifstream stream(file, std::ios::binary);
@@ -161,14 +161,16 @@ bool usesCrossFileLombok(const std::filesystem::path& file)
 		  "lombok.Delegate",
 		  "@ExtensionMethod",
 		  "lombok.experimental.ExtensionMethod",
-		  "lombok.val"})
+		  "lombok.val",
+		  "lombok.var"})
 	{
 		if (text.find(marker) != std::string::npos)
 		{
 			return true;
 		}
 	}
-	return false;
+	// val through a wildcard import; any "val " counts, a false hit only costs a whole-tree run
+	return text.find("import lombok.*;") != std::string::npos && text.find("val ") != std::string::npos;
 }
 
 // Reuses the previous answer for an unchanged file and reads the file otherwise.

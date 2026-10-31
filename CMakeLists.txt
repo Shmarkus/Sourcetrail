@@ -784,14 +784,15 @@ add_test(NAME cli.queries COMMAND Sourcetrail_cli_test)
 
 add_library(Sourcetrail_st_lib STATIC
 	src/cli/st/StKey.cpp src/cli/st/StOutput.cpp src/cli/st/StInput.cpp src/cli/st/StProject.cpp
-	src/cli/st/StGraph.cpp src/cli/st/StFreshness.cpp src/cli/st/StLombok.cpp)
+	src/cli/st/StGraph.cpp src/cli/st/StFreshness.cpp src/cli/st/StLombok.cpp
+	src/cli/st/StFilter.cpp)
 target_include_directories(Sourcetrail_st_lib PUBLIC ${PROJECT_SOURCE_DIR}/src/cli/st)
 target_link_libraries(Sourcetrail_st_lib PUBLIC Sourcetrail_cli_queries)
 add_executable(st src/cli/st/StMain.cpp)
 target_link_libraries(st PRIVATE Sourcetrail_st_lib)
 add_dependencies(st ${APP_PROJECT_NAME})
 
-add_executable(Sourcetrail_st_test src/cli/st/StTest.cpp)
+add_executable(Sourcetrail_st_test src/cli/st/StTest.cpp src/cli/st/StQueryTest.cpp)
 target_include_directories(Sourcetrail_st_test PRIVATE ${PROJECT_SOURCE_DIR}/src/external/catch)
 target_link_libraries(Sourcetrail_st_test PRIVATE Sourcetrail_st_lib)
 set_target_properties(Sourcetrail_st_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")

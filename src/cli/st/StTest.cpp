@@ -28,131 +28,18 @@
 #include "StLombok.h"
 #include "StOutput.h"
 #include "StProject.h"
+#include "StTestSupport.h"
 #include "StorageNode.h"
 #include "StorageFile.h"
 #include "StorageSymbol.h"
 #include "TimeStamp.h"
 #include "utilityGradleCache.h"
 
+using namespace st::test;
+
 namespace
 {
 const NodeKindMask ALL_KINDS = (NODE_MAX_VALUE << 1) - 1;
-
-NameHierarchy method(const std::vector<std::wstring>& path, const std::wstring& name,
-	const std::wstring& returnType, const std::wstring& parameters)
-{
-	NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
-	for (const auto& element: path)
-	{
-		hierarchy.push(element);
-	}
-	hierarchy.push(NameElement(name, returnType, parameters));
-	return hierarchy;
-}
-
-Id add(PersistentStorage& storage, const NameHierarchy& name, NodeKind kind = NODE_METHOD)
-{
-	const Id id = storage.addNode(StorageNodeData(nodeKindToInt(kind), NameHierarchy::serialize(name))).first;
-	storage.addSymbol(StorageSymbol(id, definitionKindToInt(DEFINITION_EXPLICIT)));
-	return id;
-}
-
-Id addFile(PersistentStorage& storage, const std::wstring& path)
-{
-	const Id id = storage.addNode(StorageNodeData(nodeKindToInt(NODE_FILE),
-		NameHierarchy::serialize(NameHierarchy(path, NAME_DELIMITER_FILE)))).first;
-	storage.addFile(StorageFile(id, path, L"java", "2026-10-30 12:00:00", true, true));
-	return id;
-}
-
-void addLocation(PersistentStorage& storage, Id tokenId, Id fileId, size_t line)
-{
-	const Id locationId = storage.addSourceLocation(
-		StorageSourceLocationData(fileId, line, 1, line, 5, locationTypeToInt(LOCATION_TOKEN)));
-	storage.addOccurrence(StorageOccurrence(tokenId, locationId));
-}
-
-// A small Java-like code base: every symbol is defined on line 1 of its class's file.
-struct Code
-{
-	Code(): storage(FilePath(L":memory:"), FilePath(L":memory:"))
-	{
-		storage.setup();
-	}
-
-	Id file(const std::wstring& type)
-	{
-		auto it = files.find(type);
-		if (it == files.end())
-		{
-			it = files.emplace(type, addFile(storage, L"/r/p/" + type + L".java")).first;
-		}
-		return it->second;
-	}
-
-	Id type(const std::wstring& name, NodeKind kind = NODE_CLASS)
-	{
-		NameHierarchy hierarchy(NAME_DELIMITER_JAVA);
-		hierarchy.push(L"p");
-		hierarchy.push(name);
-		const Id id = add(storage, hierarchy, kind);
-		addLocation(storage, id, file(name), 1);
-		return id;
-	}
-
-	Id member(Id parent, const std::wstring& type, const std::wstring& name, NodeKind kind = NODE_METHOD,
-		const std::wstring& parameters = L"()")
-	{
-		const Id id = kind == NODE_METHOD ? add(storage, method({L"p", type}, name, L"void", parameters))
-										  : add(storage, method({L"p", type}, name, L"", L""), kind);
-		addLocation(storage, id, file(type), 1);
-		storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), parent, id));
-		return id;
-	}
-
-	Id link(Edge::EdgeType type, Id from, Id to, const std::wstring& inFile, std::vector<size_t> lines)
-	{
-		const Id id = storage.addEdge(StorageEdgeData(Edge::typeToInt(type), from, to));
-		for (size_t line: lines)
-		{
-			addLocation(storage, id, file(inFile), line);
-		}
-		return id;
-	}
-
-	PersistentStorage storage;
-	std::map<std::wstring, Id> files;
-};
-
-std::set<std::wstring> keys(const std::vector<st::ResultLine>& lines)
-{
-	std::set<std::wstring> result;
-	for (const auto& line: lines)
-	{
-		result.insert(line.key);
-	}
-	return result;
-}
-
-const st::ResultLine* lineFor(const std::vector<st::ResultLine>& lines, const std::wstring& key)
-{
-	for (const auto& line: lines)
-	{
-		if (line.key == key)
-		{
-			return &line;
-		}
-	}
-	return nullptr;
-}
-
-void write(const QString& path, const QByteArray& content = "")
-{
-	QDir().mkpath(QFileInfo(path).absolutePath());
-	QFile file(path);
-	REQUIRE(file.open(QIODevice::WriteOnly));
-	file.write(content);
-}
 }
 
 TEST_CASE("st key omits return type and keeps parameters")

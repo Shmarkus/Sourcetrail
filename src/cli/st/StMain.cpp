@@ -28,6 +28,7 @@
 #include "ProjectSettings.h"
 #include "Query.h"
 #include "StFreshness.h"
+#include "StFilter.h"
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
@@ -226,6 +227,51 @@ int graph(PersistentStorage& storage, const QString& command, const std::vector<
 	return st::printResults(std::move(lines), options, std::cout);
 }
 
+// Prints the input lines whose symbol passes; keys that don't resolve exactly are reported and skipped.
+int filter(PersistentStorage& storage, const std::vector<st::InputLine>& input, const st::FilterOptions& filterOptions,
+	const st::OutputOptions& options)
+{
+	std::vector<const st::InputLine*> passing;
+	for (const st::InputLine& line: input)
+	{
+		const st::Resolved resolved = st::resolveSymbol(storage, line.key, ~NodeKindMask(0));
+		if (resolved.status != st::Resolution::Found || resolved.ids.size() != 1)
+		{
+			std::cerr << "st: symbol not found: " << utility::encodeToUtf8(line.key) << '\n';
+			continue;
+		}
+		const Id id = resolved.ids.front();
+		std::wstring path;
+		if (!filterOptions.filePattern.empty())
+		{
+			const auto definitions = st::definitionLines(storage, id, line.key);
+			if (!definitions.empty())
+			{
+				st::ResultLine definition = definitions.front();
+				if (options.mapLocation)
+				{
+					definition = options.mapLocation(definition);
+				}
+				path = st::displayPath(definition.file, options.cwd);
+			}
+		}
+		if (st::matchesFilter(storage, id, filterOptions, path))
+		{
+			passing.push_back(&line);
+		}
+	}
+	std::cerr << "filter: " << passing.size() << '\n';
+	for (size_t i = 0; i < passing.size() && i < options.limit; i++)
+	{
+		std::cout << passing[i]->raw << '\n';
+	}
+	if (passing.size() > options.limit)
+	{
+		std::cout << '+' << passing.size() - options.limit << " more (--limit)\n";
+	}
+	return passing.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
+}
+
 int status(PersistentStorage& storage, const st::Freshness& freshness)
 {
 	const StorageStats stats = storage.getStorageStats();
@@ -301,13 +347,17 @@ int run(QCoreApplication& app)
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path");
+	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | filter");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
 	parser.addOption({"project", "Project file (.srctrlprj); registers it for later use from its source tree", "file"});
 	parser.addOption({"limit", "Maximum result lines (default 50)", "count"});
 	parser.addOption({"depth", "Call levels for callers/callees (default 1) and links for path (default 6); 0 = unlimited", "n"});
 	parser.addOption({"kind", "Only symbols of this kind, e.g. class, method", "kind"});
+	parser.addOption({"package", "filter only: keep symbols whose key starts with this package", "package"});
+	parser.addOption({"annotated", "filter only: keep symbols annotated with this type, or inside a type that is", "annotation"});
+	parser.addOption({"file", "filter only: wildcard on the definition file; a pattern with / matches the displayed path, else the file name", "glob"});
+	parser.addOption({"not", "filter only: keep the symbols that do not meet the criteria"});
 	parser.addOption({"no-source", "Omit the source line column"});
 	parser.addOption({"no-refresh", "Do not refresh a stale index before querying"});
 	parser.addOption({"wait", "Milliseconds to wait for the project lock (default 30000)", "ms"});
@@ -323,12 +373,13 @@ int run(QCoreApplication& app)
 	const QStringList args = parser.positionalArguments();
 	const QString command = args.isEmpty() ? QString() : args[0];
 	const bool isGraph = GRAPH_COMMANDS.contains(command);
-	if ((command != "find" && command != "status" && !isGraph) || args.size() > (command == "path" ? 3 : 2) ||
+	if ((command != "find" && command != "status" && command != "filter" && !isGraph) || args.size() > (command == "path" ? 3 : 2) ||
 		(command == "status" && args.size() != 1))
 	{
 		throw UsageError(
-			"Usage: st <find|status|refs|callers|callees|impls|supers|path> [symbol] [target] [--project P] "
-			"[--limit N] [--depth N] [--kind K] [--no-source] [--no-refresh]; see --help");
+			"Usage: st <find|status|refs|callers|callees|impls|supers|path|filter> [symbol] [target] [--project P] "
+			"[--limit N] [--depth N] [--kind K] [--package P] [--annotated A] [--file G] [--not] [--no-source] "
+			"[--no-refresh]; see --help");
 	}
 	st::OutputOptions options;
 	options.limit = number(parser, "limit", options.limit);
@@ -337,9 +388,30 @@ int run(QCoreApplication& app)
 	const size_t wait = number(parser, "wait", 30000);
 	const size_t depth = number(parser, "depth", command == "path" ? 6 : 1);
 	const NodeKindMask kinds = kindMask(parser);
+	for (const QString& name: {"package", "annotated", "file", "not"})
+	{
+		if (command != "filter" && parser.isSet(name))
+		{
+			throw UsageError("--" + name.toStdString() + " applies to filter only");
+		}
+	}
+	st::FilterOptions filterOptions;
+	if (command == "filter")
+	{
+		filterOptions.kinds = kinds;
+		filterOptions.package = parser.value("package").toStdWString();
+		filterOptions.annotation = parser.value("annotated").toStdWString();
+		filterOptions.filePattern = parser.value("file").toStdWString();
+		filterOptions.invert = parser.isSet("not");
+		if (!parser.isSet("kind") && !parser.isSet("package") && !parser.isSet("annotated") && !parser.isSet("file"))
+		{
+			throw UsageError("filter needs at least one of --kind, --package, --annotated, --file");
+		}
+	}
 
 	// path reads its origins from stdin when given only the target.
 	std::vector<std::wstring> names;
+	std::vector<st::InputLine> inputLines;
 	std::vector<std::wstring> targets;
 	if (command != "status")
 	{
@@ -351,6 +423,7 @@ int run(QCoreApplication& app)
 		if (named == (command == "path" ? 2 : 1))
 		{
 			names.push_back(args[1].toStdWString());
+			inputLines.push_back({names.back(), utility::encodeToUtf8(names.back())});
 		}
 		else if (command == "path" && named == 0)
 		{
@@ -359,7 +432,14 @@ int run(QCoreApplication& app)
 		else if (!ST_ISATTY(0))
 		{
 			size_t truncated = 0;
-			names = st::readKeys(std::cin, &truncated);
+			inputLines = st::readLines(std::cin, &truncated);
+			for (const st::InputLine& line: inputLines)
+			{
+				if (std::find(names.begin(), names.end(), line.key) == names.end())
+				{
+					names.push_back(line.key);
+				}
+			}
 			if (truncated)
 			{
 				std::cerr << "st: input truncated upstream (+" << truncated << ", raise --limit)\n";
@@ -469,6 +549,10 @@ int run(QCoreApplication& app)
 	if (command == "find")
 	{
 		return find(storage, names, kinds, options);
+	}
+	if (command == "filter")
+	{
+		return filter(storage, inputLines, filterOptions, options);
 	}
 	std::vector<Id> ids;
 	if (const int code = resolve(storage, names, kinds, options, &ids))

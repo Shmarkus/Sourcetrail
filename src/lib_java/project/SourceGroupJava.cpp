@@ -8,6 +8,7 @@
 #include "SourceGroupSettingsWithJavaStandard.h"
 #include "SourceGroupSettingsWithSourceExtensions.h"
 #include "logging.h"
+#include "utilityJava.h"
 
 std::set<FilePath> SourceGroupJava::filterToContainedFilePaths(const std::set<FilePath>& filePaths) const
 {
@@ -50,7 +51,8 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupJava::getIndexerCommands
 		if (info.filesToIndex.find(sourcePath) != info.filesToIndex.end())
 		{
 			indexerCommands.push_back(
-				std::make_shared<IndexerCommandJava>(sourcePath, languageStandard, classPath));
+				std::make_shared<IndexerCommandJava>(
+					sourcePath, languageStandard, utility::withOwnRootFirst(classPath, sourcePath)));
 		}
 	}
 

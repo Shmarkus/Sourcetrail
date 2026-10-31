@@ -492,6 +492,29 @@ TEST_CASE("sourcegroup java empty generates expected output")
 	applicationSettings->setJreSystemLibraryPaths(storedJreSystemLibraryPaths);
 }
 
+TEST_CASE("java class path puts the source file's own root first")
+{
+	const std::vector<FilePath> classPath = {
+		FilePath(L"/p/a/src/test/java"),
+		FilePath(L"/libs/x.jar"),
+		FilePath(L"/p/b/src/test/java"),
+		FilePath(L"/p/b/src/test/java/gen")};
+
+	REQUIRE(
+		utility::withOwnRootFirst(classPath, FilePath(L"/p/b/src/test/java/q/TestUtil.java")) ==
+		std::vector<FilePath>{
+			FilePath(L"/p/b/src/test/java"),
+			FilePath(L"/p/a/src/test/java"),
+			FilePath(L"/libs/x.jar"),
+			FilePath(L"/p/b/src/test/java/gen")});
+	// the innermost root holding the file wins
+	REQUIRE(
+		utility::withOwnRootFirst(classPath, FilePath(L"/p/b/src/test/java/gen/q/G.java")).front() ==
+		FilePath(L"/p/b/src/test/java/gen"));
+	REQUIRE(utility::withOwnRootFirst(classPath, FilePath(L"/p/a/src/test/java/q/A.java")) == classPath);
+	REQUIRE(utility::withOwnRootFirst(classPath, FilePath(L"/p/b/src/test/javax/q/A.java")) == classPath);
+}
+
 TEST_CASE("sourcegroup java gradle generates expected output")
 {
 #	ifndef __linux__

@@ -152,6 +152,36 @@ std::set<FilePath> fetchRootDirectories(const std::set<FilePath>& sourceFilePath
 	return rootDirectories;
 }
 
+std::vector<FilePath> withOwnRootFirst(const std::vector<FilePath>& classPath, const FilePath& sourceFilePath)
+{
+	const std::wstring file = sourceFilePath.wstr();
+	auto own = classPath.end();
+	for (auto it = classPath.begin(); it != classPath.end(); it++)
+	{
+		const std::wstring root = it->wstr();
+		if (file.size() > root.size() && file.compare(0, root.size(), root) == 0 &&
+			(file[root.size()] == L'/' || file[root.size()] == L'\\') &&
+			(own == classPath.end() || own->wstr().size() < root.size()))
+		{
+			own = it;
+		}
+	}
+	if (own == classPath.end() || own == classPath.begin())
+	{
+		return classPath;
+	}
+
+	std::vector<FilePath> ordered = {*own};
+	for (auto it = classPath.begin(); it != classPath.end(); it++)
+	{
+		if (it != own)
+		{
+			ordered.push_back(*it);
+		}
+	}
+	return ordered;
+}
+
 std::vector<FilePath> getClassPath(
 	const std::vector<FilePath>& classpathItems,
 	bool useJreSystemLibrary,

@@ -18,6 +18,9 @@ std::vector<FilePath> getClassPath(
 	const std::vector<FilePath>& classpathItems,
 	bool useJreSystemLibrary,
 	const std::set<FilePath>& sourceFilePaths);
+// The class path for indexing one source file: its own source root first, so a class declared in several roots,
+// like a test helper two modules both have, resolves to the copy its own module compiles against.
+std::vector<FilePath> withOwnRootFirst(const std::vector<FilePath>& classPath, const FilePath& sourceFilePath);
 void setJavaHomeVariableIfNotExists();
 }	 // namespace utility
 

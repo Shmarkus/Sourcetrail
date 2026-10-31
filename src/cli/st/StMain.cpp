@@ -426,7 +426,7 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 	{
 		const FilePath given(input);
 		const bool isFile = !st::matchIndexedFiles(indexed, input, options.cwd, &lombok).empty() ||
-			given.isAbsolute() || options.cwd.getConcatenated(input).exists();
+			QFileInfo(QString::fromStdWString((given.isAbsolute() ? given : options.cwd.getConcatenated(input)).wstr())).isFile();
 		if (!isFile)
 		{
 			symbolNames.push_back(input);
@@ -464,6 +464,8 @@ int outlineInputs(PersistentStorage& storage, const std::vector<std::wstring>& i
 			ids.push_back(id);
 		}
 	}
+	std::set<Id> seen;
+	ids.erase(std::remove_if(ids.begin(), ids.end(), [&](Id id) { return !seen.insert(id).second; }), ids.end());
 	std::vector<st::ResultLine> lines = st::outline(storage, ids);
 	std::cerr << "outline: " << lines.size() << '\n';
 	return st::printResults(std::move(lines), options, std::cout);

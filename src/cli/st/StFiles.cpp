@@ -118,12 +118,20 @@ std::vector<ResultLine> outline(PersistentStorage& storage, const std::vector<Id
 	std::vector<ResultLine> lines;
 	for (const Id id: symbols)
 	{
-		const AccessKind access = storage.getAccessKindForNodeId(id);
+		AccessKind access = storage.getAccessKindForNodeId(id);
+		// Interface and annotation members are implicitly public, which the indexer records as default access.
+		NameHierarchy owner = storage.getNameHierarchyForNodeId(id);
+		owner.pop();
+		const Id ownerId = owner.size() ? storage.getNodeIdForNameHierarchy(owner) : 0;
+		if (ownerId && (storage.getNodeTypeForNodeWithId(ownerId).getKind() & (NODE_INTERFACE | NODE_ANNOTATION)))
+		{
+			access = ACCESS_NONE;
+		}
 		for (ResultLine& line: definitionLines(storage, id, symbolKey(storage.getNameHierarchyForNodeId(id))))
 		{
 			if (access != ACCESS_NONE)
 			{
-				line.kind = accessKindToString(access) + L" " + line.kind;
+				line.kind = (access == ACCESS_DEFAULT ? L"package" : accessKindToString(access)) + L" " + line.kind;
 			}
 			storage.getSourceLocationsForTokenIds({id})->forEachSourceLocation([&](SourceLocation* location) {
 				const SourceLocation* end = location->getOtherLocation();

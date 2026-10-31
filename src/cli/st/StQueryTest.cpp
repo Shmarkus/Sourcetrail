@@ -299,3 +299,18 @@ TEST_CASE("st output prints a line range")
 	st::printResults({line}, options, out);
 	CHECK(out.str() == "k\tmethod\tA.java:5-9\tvoid f() {\n");
 }
+
+TEST_CASE("st outline labels default access as package and omits it in interfaces")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	const Id run = code.member(a, L"A", L"run");
+	code.access(run, ACCESS_DEFAULT);
+	const Id i = code.type(L"I", NODE_INTERFACE);
+	const Id go = code.member(i, L"I", L"go");
+	code.access(go, ACCESS_DEFAULT);
+	code.storage.buildCaches();
+
+	CHECK(st::outline(code.storage, {run}).front().kind == L"package method");
+	CHECK(st::outline(code.storage, {go}).front().kind == L"method");
+}

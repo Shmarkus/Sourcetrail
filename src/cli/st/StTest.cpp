@@ -258,6 +258,27 @@ TEST_CASE("st finds project upward and through the registry")
 	REQUIRE(st::findProject(FilePath((base + "/src").toStdWString()), registryFile).empty());
 }
 
+TEST_CASE("st finds the project and relative paths from a symlinked checkout")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	write(base + "/real/src/A.java");
+	write(base + "/p.srctrlprj");
+	REQUIRE(QFile::link(base + "/real", base + "/link"));
+	const QString registry = base + "/reg/st-projects.tsv";
+	write(registry, QString(base + "/real\t" + base + "/p.srctrlprj\n").toUtf8());
+	const FilePath registryFile(registry.toStdWString());
+	REQUIRE(st::findProject(FilePath((base + "/link/src").toStdWString()), registryFile).wstr() ==
+		(base + "/p.srctrlprj").toStdWString());
+	REQUIRE(st::displayPath(FilePath((base + "/real/src/A.java").toStdWString()), FilePath((base + "/link").toStdWString())) ==
+		L"src/A.java");
+
+	write(registry, QString(base + "/link\t" + base + "/p.srctrlprj\n").toUtf8());
+	REQUIRE(st::findProject(FilePath((base + "/real/src").toStdWString()), registryFile).wstr() ==
+		(base + "/p.srctrlprj").toStdWString());
+}
+
 TEST_CASE("st hides external symbols from resolution and find")
 {
 	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));

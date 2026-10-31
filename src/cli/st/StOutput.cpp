@@ -4,6 +4,8 @@
 #include <set>
 #include <tuple>
 
+#include <QFileInfo>
+
 #include "utilityString.h"
 
 namespace st
@@ -28,10 +30,10 @@ std::string clean(const std::string& source)
 }
 }
 
-std::wstring displayPath(const FilePath& file, const FilePath& cwd)
+namespace
 {
-	const std::wstring path = file.wstr();
-	std::wstring base = cwd.wstr();
+bool relativeTo(const std::wstring& path, std::wstring base, std::wstring& relative)
+{
 	while (base.size() > 1 && (base.back() == L'/' || base.back() == L'\\'))
 	{
 		base.pop_back();
@@ -39,7 +41,28 @@ std::wstring displayPath(const FilePath& file, const FilePath& cwd)
 	if (!base.empty() && path.size() > base.size() + 1 && path.compare(0, base.size(), base) == 0 &&
 		(path[base.size()] == L'/' || path[base.size()] == L'\\'))
 	{
-		return path.substr(base.size() + 1);
+		relative = path.substr(base.size() + 1);
+		return true;
+	}
+	return false;
+}
+
+std::wstring canonicalOrSame(const std::wstring& path)
+{
+	const QString resolved = QFileInfo(QString::fromStdWString(path)).canonicalFilePath();
+	return resolved.isEmpty() ? path : resolved.toStdWString();
+}
+}
+
+std::wstring displayPath(const FilePath& file, const FilePath& cwd)
+{
+	const std::wstring path = file.wstr();
+	const std::wstring realCwd = canonicalOrSame(cwd.wstr());
+	std::wstring relative;
+	if (relativeTo(path, cwd.wstr(), relative) || relativeTo(path, realCwd, relative) ||
+		relativeTo(canonicalOrSame(path), realCwd, relative))
+	{
+		return relative;
 	}
 	return path;
 }

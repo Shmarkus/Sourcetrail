@@ -33,6 +33,12 @@ QString normalized(const QString& path)
 	return QDir::cleanPath(path);
 }
 
+QString canonical(const QString& path)
+{
+	const QString resolved = QFileInfo(path).canonicalFilePath();
+	return resolved.isEmpty() ? normalized(path) : resolved;
+}
+
 bool isBelow(const QString& path, const QString& root)
 {
 	return path == root || path.startsWith(root.endsWith('/') ? root : root + '/');
@@ -57,26 +63,36 @@ FilePath findProject(const FilePath& cwd, const FilePath& registryFile)
 		const QStringList columns = line.trimmed().split('\t');
 		if (columns.size() == 2)
 		{
-			registered.emplace_back(normalized(columns[0]), columns[1]);
+			registered.emplace_back(canonical(columns[0]), columns[1]);
 		}
 	}
-	for (QDir dir(normalized(toQt(cwd))); ; )
+	const QString given = normalized(toQt(cwd));
+	QStringList starts{given};
+	if (const QString resolved = canonical(given); resolved != given)
 	{
-		const QStringList projects = dir.entryList({"*.srctrlprj"}, QDir::Files, QDir::Name);
-		if (!projects.isEmpty())
+		starts << resolved;
+	}
+	for (const QString& start: starts)
+	{
+		for (QDir dir(start); ; )
 		{
-			return fromQt(dir.absoluteFilePath(projects.first()));
-		}
-		for (const auto& [root, project]: registered)
-		{
-			if (root == dir.path() && QFile::exists(project))
+			const QStringList projects = dir.entryList({"*.srctrlprj"}, QDir::Files, QDir::Name);
+			if (!projects.isEmpty())
 			{
-				return fromQt(project);
+				return fromQt(dir.absoluteFilePath(projects.first()));
 			}
-		}
-		if (!dir.cdUp())
-		{
-			break;
+			const QString here = canonical(dir.path());
+			for (const auto& [root, project]: registered)
+			{
+				if (root == here && QFile::exists(project))
+				{
+					return fromQt(project);
+				}
+			}
+			if (!dir.cdUp())
+			{
+				break;
+			}
 		}
 	}
 	return FilePath();

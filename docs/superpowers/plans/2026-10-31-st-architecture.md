@@ -221,6 +221,20 @@ New:
 - [ ] **Step 5: Run all `Sourcetrail_st_test` and `ctest`.**
 - [ ] **Step 6: Commit** `feat(st): outline files and classes with visibility and line ranges`.
 
+### Task 5b: Resolution fixes found on a real index
+
+Added during execution. A probe on the real batch index found two problems that break agent use.
+
+**Files:** Modify `src/cli/st/StKey.cpp` (and every place that lists symbols: `StFiles.cpp`, `StGraph.cpp`, `StMain.cpp` as needed). Test: `src/cli/st/StQueryTest.cpp`.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `st resolves names without type parameters`: the key `p.Result<T>.failed<T>(java.lang.String)` must resolve as Found from each of these inputs: `p.Result.failed`, `Result.failed`, `p.Result<T>.failed<T>(java.lang.String)` and `p.Result.failed(java.lang.String)`. The type `p.Result<T>` must resolve from `p.Result` and `Result`. Two overloads that differ only in parameters must still be Ambiguous.
+  - `st hides the unsolved-symbol pseudo node`: an explicit node named `unsolved-symbol`, with a token location in `A.java`, is absent from `definedInFile(A.java)`, `findSymbols(L"unsolved")` and `resolveSymbol(L"unsolved-symbol")` (NotFound). It is also absent from callers and refs output when it is linked.
+- [ ] **Step 2: Run them to see them fail.**
+- [ ] **Step 3: Implement.** Matching compares names with every `<...>` group removed, on both the input and the key. The tiers keep their order: exact key, then exact name, then suffix. The pseudo-node is dropped wherever symbols are collected.
+- [ ] **Step 4: Run all `Sourcetrail_st_test` and `ctest`.** Then check on the batch scratch index: `st callers com.acme.batch.core.item.Result.failed` exits 0, and `st symbols-in .../Result.java` has no `unsolved-symbol` line.
+- [ ] **Step 5: Commit** `fix(st): resolve names without type parameters and hide unsolved symbols`.
+
 ### Task 6: `impact` and `--edges`
 
 **Files:**
@@ -324,3 +338,71 @@ Added at Markus's request: check that the commands answer real agent questions, 
 - [ ] **Step 3: Write the results file.** It has a per-question table, medians against the spec's targets (≥50% fewer tool calls and tokens, ≥30% faster, correctness no worse than grep), and every wrong answer with its root cause.
 - [ ] **Step 4: Fix or rule on each wrong answer** found by Step 2: a bug fix with a test, or a documented limit.
 - [ ] **Step 5: Commit** `docs(st): use-case benchmark against grep on real projects`.
+
+### Task 10: Lombok line mapping that survives delombok's reformatting
+
+Found by the Task 9 benchmark (`benchmark-scoring.md`, root causes a and b):
+- all four `at` calls on shop failed;
+- 26% of result rows printed delombok paths;
+- only 80.5% of original lines map.
+
+**Files:** `src/cli/st/StLombok.{h,cpp}`, `src/cli/st/StFiles.cpp`, `src/cli/st/StMain.cpp`, tests in `src/cli/st/StQueryTest.cpp` / `StTest.cpp`.
+
+- [ ] **Byte-identical shortcut.** When the generated and original files have identical bytes, line i maps to line i in both directions, with no guards.
+- [ ] **Join-aware tiling.** Inside each gap between LCS anchors, map one delombok line to a run of consecutive original lines when the whitespace-free concatenation of the run equals the whitespace-free delombok line, and that run is the only one in the gap that does.
+  - In the output direction, the result line is the run's first line.
+  - In the input direction, every line of the run maps to that delombok line.
+  - Anything that isn't unique stays unmapped.
+- [ ] **`at` fallback.** When an original line still has no counterpart, take the nearest mapped original line above it and the nearest below it, in the same file. If `symbolAt` gives the same symbol for both mapped generated lines, answer that symbol. Otherwise keep exit 3 and the existing message.
+- [ ] **Generated rows.** A row that stays unmapped prints the original relative path with no line number, as `<relpath> (generated)`, instead of the absolute delombok path. Add `--no-generated` (all commands), which drops those rows.
+- [ ] **Tests**, each RED first:
+  - the byte-identical file maps repeated `}` lines;
+  - the Q4 shape: a 2-line `return a.b(x)` / `.map(f);` joined into one line maps both original lines, and the generated line maps back to the first;
+  - the Q5 shape: a 2-line method signature;
+  - a non-unique run stays unmapped;
+  - the `at` fallback agrees when both neighbours are in the same method, and refuses when they are in different methods;
+  - the `(generated)` row format.
+- [ ] **Real-index check.** On the shop scratch copy, `st at` answers the four benchmark frames:
+  - `DiscountCombinedOfferStrategy.java:25`
+  - `PaymentService.java:80`
+  - `CatalogQueryService.java:183`
+  - `ShopTestApplicationConfiguration.java:46`
+
+  Also report the share of `(generated)` rows in `st callers com.acme.shop.service.create.CreateOrder.getPaymentPlan` before and after the change.
+
+### Task 11: Query fixes from the benchmark
+
+**Files:** `src/cli/st/StGraph.cpp`, `src/cli/st/StArchitecture.cpp`, `src/cli/st/StKey.cpp`, `src/cli/st/StMain.cpp`, `README.md`, tests in `src/cli/st/StQueryTest.cpp`.
+
+- [ ] **`callers` and `callees` keep field callers** (root cause c). A field whose initializer calls the symbol is a caller, like a method. Today `walkCalls` erases non-callable nodes at `StGraph.cpp:132`. Fields are reported but not walked further.
+- [ ] **`deps` sub-packages by name prefix** (root cause e4). The index lacks the package→sub-package member link for 79 of 219 packages. A package input owns every package node whose qualified name starts with `<input>.`, found by name rather than by member links.
+- [ ] **Parameter matching** (root cause d).
+  - When the input has a parameter list, compare its parameters one by one with the key's.
+  - Each input parameter matches if it equals the key's parameter, or is a dot-boundary suffix of it, after removing type parameters and whitespace.
+  - The count must be equal.
+  - Ambiguity rules are unchanged.
+- [ ] **`impact` prints the depth.** The kind column becomes `<kind>, depth <n>`, where n is the walk cost (override hops are free). That gives direct callers `depth 1`. Document this in the README.
+- [ ] **Tests** (RED first):
+  - a static field initializer calling `F.required()` appears in callers;
+  - a package whose sub-package has no member link is still covered by `deps`;
+  - `sendPayments(UUID, PaymentPlan, Collection<Payment>)` resolves to the fully qualified overload, and the other overload doesn't;
+  - impact rows carry `depth 1` and `depth 2`.
+- [ ] **Real-index check.**
+  - `st callers com.acme.batch.core.schema.SchemaRules.required` lists `ShopSchema.SCHEMA` (batch).
+  - `st deps com.acme.shop.domain` lists `com.acme.shop.document` and `com.acme.shop.service.payment` (shop).
+
+### Task 12: Index every Gradle source set that holds tests
+
+Root cause e2: `init.gradle` exports only the `main` and `test` source sets. shop's `integration-test` (54 files) and `contractTest` (1 file) are never indexed, so "which tests reach this line" misses integration tests.
+
+**Files:** `bin/app/data/java/gradle/init.gradle` and the Java/C++ Gradle export path (`src/lib_java/utility/utilityGradle.cpp`, `utilityGradleCache.cpp` and the `InfoRetriever` bridge as needed), tests in `src/test/GradleCacheTestSuite.cpp` or the existing Gradle tests.
+
+- [ ] **When the source group includes tests, export every source set**, not only `main` and `test`. Each one gets its own delombok output dir: `delombok/<sourceSetName>`. Lombok mapping must treat each of them like `main` and `test`.
+- [ ] **Bump the Gradle cache version**, so existing caches are re-prepared.
+- [ ] **Test the export.** Use the `testing/cli/lombok` fixture with an added `integrationTest` source set holding one class that calls `example.Caller`. After a full index, `st callers` on that `Caller` method lists the integration-test class.
+- [ ] **Real-index check.** Re-index the shop scratch copy (full). `st callers` on the Q4 path reaches `DiscountCombinedOfferStrategyIntTest.shouldFetchCombinedOfferId`.
+
+### Task 13: Re-run the benchmark
+
+- [ ] **Fresh run.** A fresh agent answers `benchmark-questions-only.md` with the final build. Score it against the corrected ground truth: Q2 also has the anonymous subclass, Q5 also has the method-reference callers, and Q7a starts at 177.
+- [ ] **Write the results.** Write `docs/superpowers/specs/2026-10-31-st-benchmark-results.md` with both runs (before and after the fixes), the medians against the targets, and the remaining limits.

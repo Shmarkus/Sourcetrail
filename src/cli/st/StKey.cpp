@@ -161,7 +161,7 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 
 std::vector<SearchMatch> search(PersistentStorage& storage, const std::wstring& query)
 {
-	return storage.getAutocompletionSymbolMatches(query, NodeTypeSet::all(), 1000, 0);
+	return storage.getAutocompletionSymbolMatches(query, NodeTypeSet::all(), 1000, 100);
 }
 
 // A type together with its own constructors (methods named like it, directly inside it) stands for the type.

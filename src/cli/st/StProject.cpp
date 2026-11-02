@@ -103,7 +103,7 @@ QString projectLockFile(const FilePath& project)
 	return toQt(project.getCanonical()) + ".lock";
 }
 
-void registerProject(const FilePath& registryFile, const FilePath& project)
+void registerProject(const FilePath& registryFile, const FilePath& project, std::ostream& err)
 {
 	ProjectSettings settings;
 	if (!settings.load(project, true))
@@ -125,7 +125,7 @@ void registerProject(const FilePath& registryFile, const FilePath& project)
 	}
 	if (roots.isEmpty())
 	{
-		std::cerr << "st: project has no Gradle source group to register; run from its directory or pass --project\n";
+		err << "st: project has no Gradle source group to register; run from its directory or pass --project\n";
 		return;
 	}
 	const QString projectPath = toQt(project.getAbsolute());
@@ -133,7 +133,7 @@ void registerProject(const FilePath& registryFile, const FilePath& project)
 	QLockFile lock(toQt(registryFile) + ".lock");
 	if (!lock.tryLock(10000))
 	{
-		std::cerr << "st: cannot lock " << registryFile.str() << '\n';
+		err << "st: cannot lock " << registryFile.str() << '\n';
 		return;
 	}
 	const QStringList existing = readLines(registryFile);
@@ -161,7 +161,7 @@ void registerProject(const FilePath& registryFile, const FilePath& project)
 	QSaveFile out(toQt(registryFile));
 	if (!out.open(QIODevice::WriteOnly | QIODevice::Text) || out.write((lines.join('\n') + '\n').toUtf8()) < 0 || !out.commit())
 	{
-		std::cerr << "st: cannot write " << registryFile.str() << '\n';
+		err << "st: cannot write " << registryFile.str() << '\n';
 	}
 }
 }

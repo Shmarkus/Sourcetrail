@@ -2,7 +2,7 @@
 #define ST_OUTPUT_H
 
 #include <functional>
-#include <ostream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -45,6 +45,8 @@ struct OutputOptions
 	// Drops lines that stay generated after mapLocation, and says how many on stderr.
 	bool hideGenerated = false;
 	FilePath cwd;
+	// Where the hidden-lines notice goes.
+	std::ostream* err = &std::cerr;
 	// Base name of the project file; ends the stderr count line so a query against the wrong project shows.
 	std::string project;
 	// Applied to every line before sorting; identity when empty.

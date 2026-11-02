@@ -1,6 +1,7 @@
 #ifndef ST_FRESHNESS_H
 #define ST_FRESHNESS_H
 
+#include <iostream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -31,7 +32,7 @@ struct RefreshRecord
 };
 
 std::optional<RefreshRecord> lastRefresh(const ProjectSettings& settings);
-void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record);
+void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record, std::ostream& err = std::cerr);
 
 // Changes at or after this time are not in the index. Sourcetrail writes the index time when indexing
 // ends and keeps it when a refresh re-indexes nothing, so while the index is still the one st's refresh

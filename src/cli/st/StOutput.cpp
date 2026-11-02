@@ -99,7 +99,7 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
 			lines.end());
 		if (lines.size() < all)
 		{
-			std::cerr << "st: " << all - lines.size() << " generated lines hidden (--no-generated)\n";
+			*options.err << "st: " << all - lines.size() << " generated lines hidden (--no-generated)\n";
 		}
 	}
 	std::stable_sort(lines.begin(), lines.end(), [](const ResultLine& a, const ResultLine& b) {

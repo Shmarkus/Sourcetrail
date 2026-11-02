@@ -3,6 +3,8 @@
 
 #include <QString>
 
+#include <iostream>
+
 #include "FilePath.h"
 
 namespace st
@@ -15,7 +17,7 @@ FilePath findProject(const FilePath& cwd, const FilePath& registryFile);
 QString projectLockFile(const FilePath& project);
 
 // Records the Gradle root of every enabled Gradle source group as `<root>\t<project>`.
-void registerProject(const FilePath& registryFile, const FilePath& project);
+void registerProject(const FilePath& registryFile, const FilePath& project, std::ostream& err = std::cerr);
 }
 
 #endif

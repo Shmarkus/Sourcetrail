@@ -1,3 +1,6 @@
+#include <QDateTime>
+#include <QTemporaryDir>
+
 #include <algorithm>
 #include <functional>
 #include <set>
@@ -5,6 +8,7 @@
 #include <stdexcept>
 
 #include "StArchitecture.h"
+#include "StCommand.h"
 #include "StFiles.h"
 #include "StFilter.h"
 #include "StGaps.h"
@@ -12,6 +16,7 @@
 #include "StInput.h"
 #include "StKey.h"
 #include "StLombok.h"
+#include "ProjectSettings.h"
 #include "StTestSupport.h"
 
 using namespace st::test;
@@ -1333,4 +1338,101 @@ TEST_CASE("st gaps count walked symbols whose type two modules declare")
 	}
 	CHECK(printed({2, 0, 1}) ==
 		"st: incomplete: 1 symbols declared in several modules, 2 links to unresolved symbols (see st status)\n");
+}
+
+namespace
+{
+// A project file without source groups next to an index holding the class p.A; returns the project file.
+QString writeProject(const QString& base, bool withIndex = true)
+{
+	const QString project = base + "/x.srctrlprj";
+	st::test::write(project, QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups/><version>8</version></config>\n").toUtf8());
+	if (withIndex)
+	{
+		PersistentStorage storage(FilePath((base + "/x.srctrldb").toStdWString()), FilePath((base + "/x.srctrlbm").toStdWString()));
+		storage.setup();
+		NameHierarchy name(NAME_DELIMITER_JAVA);
+		name.push(L"p");
+		name.push(L"A");
+		const Id id = st::test::add(storage, name, NODE_CLASS);
+		st::test::addLocation(storage, id, st::test::addFile(storage, L"/r/p/A.java"), 1);
+		storage.updateVersion();
+	}
+	return project;
+}
+}
+
+TEST_CASE("runCommand writes usage errors to the given stream")
+{
+	std::stringstream in;
+	std::ostringstream out;
+	std::ostringstream err;
+	std::ostringstream global;
+	std::streambuf* const original = std::cerr.rdbuf(global.rdbuf());
+	st::IndexCache cache;
+	const int code = st::runCommand({{"st", "bogus"}, QDir::currentPath(), true}, {in, out, err}, cache);
+	std::cerr.rdbuf(original);
+	CHECK(code == st::EXIT_USAGE);
+	CHECK(err.str().find("Usage") != std::string::npos);
+	CHECK(out.str().empty());
+	CHECK(global.str().empty());
+}
+
+TEST_CASE("runCommand reads piped keys from the given stream")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString project = writeProject(base);
+	std::stringstream in("p.A\n");
+	std::ostringstream out;
+	std::ostringstream err;
+	st::IndexCache cache;
+	const int code = st::runCommand({{"st", "find", "--project", project, "--no-source", "--no-refresh"}, base, false},
+		{in, out, err}, cache);
+	INFO(err.str());
+	CHECK(code == st::EXIT_RESULTS);
+	CHECK(out.str().find("p.A\tclass") == 0);
+	CHECK(err.str().find("find: 1 (project x)") != std::string::npos);
+
+	// a relative --project resolves against the request's directory, not the process's
+	std::stringstream again("p.A\n");
+	std::ostringstream out2;
+	std::ostringstream err2;
+	CHECK(st::runCommand({{"st", "find", "--project", "x.srctrlprj", "--no-source", "--no-refresh"}, base, false},
+			  {again, out2, err2}, cache) == st::EXIT_RESULTS);
+	CHECK(out2.str() == out.str());
+}
+
+TEST_CASE("index cache reloads when the database file changes")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString project = writeProject(base);
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath(project.toStdWString()), true));
+
+	st::IndexCache cache;
+	cache.storage(settings);
+	CHECK_FALSE(cache.reusedLast());
+	cache.storage(settings);
+	CHECK(cache.reusedLast());
+
+	// same file, new content and time
+	QFile db(base + "/x.srctrldb");
+	REQUIRE(db.open(QIODevice::ReadWrite));
+	REQUIRE(db.setFileTime(QDateTime::currentDateTime().addSecs(60), QFileDevice::FileModificationTime));
+	db.close();
+	cache.storage(settings);
+	CHECK_FALSE(cache.reusedLast());
+	cache.storage(settings);
+	CHECK(cache.reusedLast());
+
+	// a replacement with the same content has another inode
+	REQUIRE(QFile::copy(base + "/x.srctrldb", base + "/copy"));
+	REQUIRE(QFile::remove(base + "/x.srctrldb"));
+	REQUIRE(QFile::rename(base + "/copy", base + "/x.srctrldb"));
+	cache.storage(settings);
+	CHECK_FALSE(cache.reusedLast());
 }

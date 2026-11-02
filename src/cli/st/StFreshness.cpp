@@ -197,13 +197,13 @@ std::optional<RefreshRecord> lastRefresh(const ProjectSettings& settings)
 	}
 }
 
-void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record)
+void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record, std::ostream& err)
 {
 	QSaveFile file(refreshFile(settings));
 	const std::string text = toPreciseString(record.startedAt) + "\n" + record.indexedAt.toString() + "\n";
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text) || file.write(text.c_str()) < 0 || !file.commit())
 	{
-		std::cerr << "st: cannot write " << file.fileName().toStdString() << '\n';
+		err << "st: cannot write " << file.fileName().toStdString() << '\n';
 	}
 }
 

@@ -17,6 +17,9 @@
 #if BUILD_CXX_LANGUAGE_PACKAGE
 #  include "LanguagePackageCxx.h"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "LanguagePackageJava.h"
+#endif
 
 #ifdef _WIN32
 #  include <Windows.h>
@@ -113,6 +116,9 @@ int main(int argc, char* argv[]) {
 #if BUILD_CXX_LANGUAGE_PACKAGE
   LanguagePackageManager::getInstance()->addPackage(std::make_shared<LanguagePackageCxx>());
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  LanguagePackageManager::getInstance()->addPackage(std::make_shared<LanguagePackageJava>());
+#endif
 
   try {
     InterprocessIndexer indexer(instanceUuid, Id(processId));

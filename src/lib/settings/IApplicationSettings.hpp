@@ -179,6 +179,29 @@ struct IApplicationSettings : Settings {
   [[nodiscard]] virtual bool getControlsGraphZoomOnMouseWheel() const noexcept = 0;
   virtual void setControlsGraphZoomOnMouseWheel(bool zoomingDefault) noexcept = 0;
 
+  // java: implemented here on top of the settings keys, so the mocks need not mock them
+  [[nodiscard]] virtual FilePath getJavaPath() const;
+  virtual void setJavaPath(const FilePath& path);
+
+  [[nodiscard]] virtual bool getHasPrefilledJavaPath() const;
+  virtual void setHasPrefilledJavaPath(bool v);
+
+  [[nodiscard]] virtual int getJavaMaximumMemory() const;
+  virtual void setJavaMaximumMemory(int size);
+
+  [[nodiscard]] virtual std::vector<FilePath> getJreSystemLibraryPaths() const;
+  [[nodiscard]] virtual std::vector<FilePath> getJreSystemLibraryPathsExpanded() const;
+  virtual bool setJreSystemLibraryPaths(const std::vector<FilePath>& paths);
+
+  [[nodiscard]] virtual bool getHasPrefilledJreSystemLibraryPaths() const;
+  virtual void setHasPrefilledJreSystemLibraryPaths(bool v);
+
+  [[nodiscard]] virtual FilePath getMavenPath() const;
+  virtual void setMavenPath(const FilePath& path);
+
+  [[nodiscard]] virtual bool getHasPrefilledMavenPath() const;
+  virtual void setHasPrefilledMavenPath(bool v);
+
 private:
   static Ptr mInstance;
 };

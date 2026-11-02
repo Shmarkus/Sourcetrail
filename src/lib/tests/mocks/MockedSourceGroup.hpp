@@ -9,7 +9,7 @@
 #include "StorageProvider.h"
 
 struct MockedSourceGroup : SourceGroup {
-  MOCK_METHOD(bool, prepareIndexing, (), (override));
+  MOCK_METHOD(bool, prepareIndexing, (bool), (override));
   MOCK_METHOD(bool, allowsPartialClearing, (), (const, override));
   MOCK_METHOD(bool, allowsShallowIndexing, (), (const, override));
 

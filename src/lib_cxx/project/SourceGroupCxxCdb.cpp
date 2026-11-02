@@ -21,7 +21,7 @@
 
 SourceGroupCxxCdb::SourceGroupCxxCdb(std::shared_ptr<SourceGroupSettingsCxxCdb> settings) : m_settings(std::move(settings)) {}
 
-bool SourceGroupCxxCdb::prepareIndexing() {
+bool SourceGroupCxxCdb::prepareIndexing(bool) {
   FilePath cdbPath = m_settings->getCompilationDatabasePathExpandedAndAbsolute();
   if(!cdbPath.empty() && !cdbPath.exists()) {
     std::wstring error =

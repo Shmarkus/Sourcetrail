@@ -1,0 +1,32 @@
+plugins {
+	id 'java'
+	id 'eclipse'
+	id 'application'
+}
+
+application {
+	mainClass = 'hello.HelloWorld'
+}
+
+repositories {
+	mavenCentral()
+}
+
+jar {
+	archiveBaseName = 'gs-gradle-delombok'
+	archiveVersion = '0.1.0'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+dependencies {
+	implementation "joda-time:joda-time:2.2"
+	compileOnly "org.projectlombok:lombok:1.18.34"
+	annotationProcessor "org.projectlombok:lombok:1.18.34"
+	testImplementation "junit:junit:4.12"
+	testCompileOnly "org.projectlombok:lombok:1.18.34"
+	testAnnotationProcessor "org.projectlombok:lombok:1.18.34"
+}

@@ -371,6 +371,15 @@ add_files(
   # }
 )
 
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  add_files(
+    LIB
+    settings/source_group/component/java/SourceGroupSettingsWithClasspath.cpp
+    settings/source_group/component/java/SourceGroupSettingsWithJavaGradle.cpp
+    settings/source_group/component/java/SourceGroupSettingsWithJavaMaven.cpp
+    settings/source_group/component/java/SourceGroupSettingsWithJavaStandard.cpp)
+endif()
+
 if(BUILD_CXX_LANGUAGE_PACKAGE)
   add_files(
     LIB

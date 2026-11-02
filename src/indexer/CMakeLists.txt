@@ -31,7 +31,8 @@ endif()
 
 target_link_libraries(
   Sourcetrail_indexer
-  PRIVATE $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>
+  PRIVATE $<$<BOOL:${BUILD_JAVA_LANGUAGE_PACKAGE}>:Sourcetrail::lib_java>
+         $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>
           Qt6::Core
           Sourcetrail::core
           Sourcetrail::lib

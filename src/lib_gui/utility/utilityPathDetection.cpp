@@ -12,6 +12,11 @@
 #  include "CxxVs17HeaderPathDetector.hpp"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "MavenPathDetectorUnix.h"
+#  include "MavenPathDetectorWindows.h"
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+
 std::shared_ptr<CombinedPathDetector> utility::getCxxVsHeaderPathDetector() {
   std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
 
@@ -75,5 +80,24 @@ std::shared_ptr<CombinedPathDetector> utility::getCxxFrameworkPathDetector() {
   combinedDetector->addDetector(std::make_shared<CxxFrameworkPathDetector>("clang"));
   combinedDetector->addDetector(std::make_shared<CxxFrameworkPathDetector>("gcc"));
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+  return combinedDetector;
+}
+
+std::shared_ptr<CombinedPathDetector> utility::getMavenExecutablePathDetector() {
+  std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  switch(utility::getOsType()) {
+  case OsType::Windows:
+    combinedDetector->addDetector(std::make_shared<MavenPathDetectorWindows>());
+    break;
+  case OsType::Mac:
+  case OsType::Linux:
+    combinedDetector->addDetector(std::make_shared<MavenPathDetectorUnix>());
+    break;
+  default:
+    LOG_WARNING("No suitable Maven path detector found");
+    break;
+  }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   return combinedDetector;
 }

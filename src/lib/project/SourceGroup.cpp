@@ -30,7 +30,7 @@ SourceGroupStatusType SourceGroup::getStatus() const {
   return getSourceGroupSettings()->getStatus();
 }
 
-bool SourceGroup::prepareIndexing() {
+bool SourceGroup::prepareIndexing(bool /*fullRefresh*/) {
   return true;
 }
 

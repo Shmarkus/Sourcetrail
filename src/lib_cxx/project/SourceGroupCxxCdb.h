@@ -18,7 +18,7 @@ class SourceGroupCxxCdb : public SourceGroup {
 public:
   SourceGroupCxxCdb(std::shared_ptr<SourceGroupSettingsCxxCdb> settings);
 
-  bool prepareIndexing() override;
+  bool prepareIndexing(bool fullRefresh) override;
   std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const override;
   std::set<FilePath> getAllSourceFilePaths() const override;
   std::set<FilePath> getAllSourceFilePaths(std::shared_ptr<clang::tooling::JSONCompilationDatabase> cdb) const;

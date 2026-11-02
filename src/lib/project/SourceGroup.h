@@ -23,7 +23,7 @@ class SourceGroup {
 public:
   virtual ~SourceGroup();
 
-  virtual bool prepareIndexing();
+  virtual bool prepareIndexing(bool fullRefresh);
   virtual bool allowsPartialClearing() const;
   virtual bool allowsShallowIndexing() const;
 

@@ -201,6 +201,9 @@ add_subdirectory(src/lib_gui/utility/utilityApp)
 if(BUILD_CXX_LANGUAGE_PACKAGE)
   add_subdirectory(src/lib_cxx)
 endif()
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  add_subdirectory(src/lib_java)
+endif()
 # Lib ----------------------------------------------------------------------------------------------------------------------------
 add_library(Sourcetrail_lib ${LIB_FILES})
 add_library(Sourcetrail::lib ALIAS Sourcetrail_lib)
@@ -243,6 +246,7 @@ target_link_libraries(
           Sourcetrail::core::utility::file::utilityFile
           Sourcetrail::core::utility::file::FileManager
           $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>
+          $<$<BOOL:${BUILD_JAVA_LANGUAGE_PACKAGE}>:Sourcetrail::lib_java>
           Boost::filesystem
           Boost::program_options
           Boost::system
@@ -262,6 +266,11 @@ target_sources(
 
 target_include_directories(Sourcetrail_lib_gui_utility PUBLIC src/lib_gui/utility/ src/lib_gui/utility/path_detector/
                                                               src/lib_gui/utility/path_detector/cxx_header/)
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  target_sources(Sourcetrail_lib_gui_utility PRIVATE src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorUnix.cpp
+                                                     src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorWindows.cpp)
+  target_include_directories(Sourcetrail_lib_gui_utility PUBLIC src/lib_gui/utility/path_detector/maven_executable/)
+endif()
 
 target_link_libraries(
   Sourcetrail_lib_gui_utility
@@ -379,6 +388,9 @@ if(ENABLE_UNIT_TEST
     add_subdirectory(${CMAKE_SOURCE_DIR}/src/lib_gui/tests/)
     if(BUILD_CXX_LANGUAGE_PACKAGE)
       add_subdirectory(${CMAKE_SOURCE_DIR}/src/lib_cxx/tests/)
+    endif()
+    if(BUILD_JAVA_LANGUAGE_PACKAGE)
+      add_subdirectory(${CMAKE_SOURCE_DIR}/src/lib_java/tests/)
     endif()
   endif()
 

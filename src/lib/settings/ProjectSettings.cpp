@@ -15,6 +15,11 @@
 #  include "SourceGroupSettingsCppEmpty.h"
 #  include "SourceGroupSettingsCxxCdb.h"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsJavaEmpty.h"
+#  include "SourceGroupSettingsJavaGradle.h"
+#  include "SourceGroupSettingsJavaMaven.h"
+#endif
 
 // clang-format off
 const std::wstring ProjectSettings::PROJECT_FILE_EXTENSION       = L".srctrlprj";
@@ -153,6 +158,17 @@ std::vector<std::shared_ptr<SourceGroupSettings>> ProjectSettings::getAllSourceG
       settings = std::make_shared<SourceGroupSettingsCxxCdb>(id, this);
       break;
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+    case SOURCE_GROUP_JAVA_EMPTY:
+      settings = std::make_shared<SourceGroupSettingsJavaEmpty>(id, this);
+      break;
+    case SOURCE_GROUP_JAVA_MAVEN:
+      settings = std::make_shared<SourceGroupSettingsJavaMaven>(id, this);
+      break;
+    case SOURCE_GROUP_JAVA_GRADLE:
+      settings = std::make_shared<SourceGroupSettingsJavaGradle>(id, this);
+      break;
+#endif
     case SOURCE_GROUP_CUSTOM_COMMAND:
       settings = std::make_shared<SourceGroupSettingsCustomCommand>(id, this);
       break;

@@ -333,7 +333,7 @@ void Project::refresh(std::shared_ptr<DialogView> dialogView, RefreshMode refres
 
   m_sourceGroups = SourceGroupFactory::getInstance()->createSourceGroups(m_settings->getAllSourceGroupSettings());
   for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
-    if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED && !sourceGroup->prepareIndexing()) {
+    if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED && !sourceGroup->prepareIndexing(refreshMode == RefreshMode::AllFiles)) {
       m_refreshStage = RefreshStageType::NONE;
       return;
     }

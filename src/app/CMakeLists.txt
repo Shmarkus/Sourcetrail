@@ -33,6 +33,7 @@ target_link_libraries(
   PUBLIC Sourcetrail::core
          Sourcetrail::lib
          Sourcetrail::lib_gui
+         $<$<BOOL:${BUILD_JAVA_LANGUAGE_PACKAGE}>:Sourcetrail::lib_java>
          $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>
          Qt6::Widgets
          Qt6::Network

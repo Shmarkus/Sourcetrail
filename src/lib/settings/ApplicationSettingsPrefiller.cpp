@@ -4,6 +4,7 @@
 #include <range/v3/view/transform.hpp>
 
 #include "IApplicationSettings.hpp"
+#include "language_packages.h"
 #include "logging.h"
 #include "type/MessageStatus.h"
 #include "utility.h"
@@ -14,6 +15,9 @@ void ApplicationSettingsPrefiller::prefillPaths(IApplicationSettings* settings) 
 
   updated |= prefillCxxHeaderPaths(settings);
   updated |= prefillCxxFrameworkPaths(settings);
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  updated |= prefillMavenExecutablePath(settings);
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
   if(updated) {
     settings->save();
@@ -59,5 +63,25 @@ bool ApplicationSettingsPrefiller::prefillCxxFrameworkPaths(IApplicationSettings
   }
 
   settings->setHasPrefilledFrameworkSearchPaths(true);
+  return true;
+}
+
+bool ApplicationSettingsPrefiller::prefillMavenExecutablePath(IApplicationSettings* settings) {
+  if(settings->getHasPrefilledMavenPath() && !settings->getMavenPath().empty()) {
+    return false;
+  }
+
+  LOG_INFO("Prefilling Maven path");
+  std::shared_ptr<CombinedPathDetector> mavenPathDetector = utility::getMavenExecutablePathDetector();
+  std::vector<FilePath> paths = mavenPathDetector->getPaths();
+  if(!paths.empty()) {
+    MessageStatus(L"Ran Maven executable path detection, found: " + paths.front().wstr()).dispatch();
+
+    settings->setMavenPath(paths.front());
+  } else {
+    MessageStatus(L"Ran Maven executable path detection, no path found.").dispatch();
+  }
+
+  settings->setHasPrefilledMavenPath(true);
   return true;
 }

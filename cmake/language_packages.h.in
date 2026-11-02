@@ -1,3 +1,4 @@
 #pragma once
 
 #cmakedefine01 BUILD_CXX_LANGUAGE_PACKAGE
+#cmakedefine01 BUILD_JAVA_LANGUAGE_PACKAGE

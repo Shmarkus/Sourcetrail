@@ -30,3 +30,7 @@ FilePath ResourcePaths::getLicenseDirectoryPath() {
 FilePath ResourcePaths::getCxxCompilerHeaderDirectoryPath() {
   return AppPath::getSharedDataDirectoryPath().concatenate(L"data/cxx/include/").getCanonical();
 }
+
+FilePath ResourcePaths::getJavaDirectoryPath() {
+  return AppPath::getSharedDataDirectoryPath().concatenate(L"data/java/");
+}

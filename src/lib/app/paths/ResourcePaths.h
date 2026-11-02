@@ -11,4 +11,5 @@ public:
   static FilePath getGuiDirectoryPath();
   static FilePath getLicenseDirectoryPath();
   static FilePath getCxxCompilerHeaderDirectoryPath();
+  static FilePath getJavaDirectoryPath();
 };

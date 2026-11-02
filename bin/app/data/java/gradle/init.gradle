@@ -1,0 +1,107 @@
+def copyDependencies(source, destination) {
+        copy {
+                into destination
+                from source
+                eachFile { println "copying file \"" + it.file.name + "\" to \"" + destination + "\"" }
+        }
+}
+
+def findLombokJar(project, configurationNames) {
+	for (String configurationName : configurationNames) {
+		def configuration = project.configurations.findByName(configurationName)
+		if (configuration == null) {
+			continue
+		}
+
+		try {
+			def lombokJar = configuration.files.find { file ->
+				file.name ==~ /lombok-\d.*\.jar/
+			}
+			if (lombokJar != null) {
+				return lombokJar
+			}
+		}
+		catch (Exception ignored) {
+		}
+	}
+
+	return null
+}
+
+allprojects { pp ->
+	task printMainSrcDirs {
+		doLast {
+			if (project.hasProperty("sourceSets")) {
+				if (project.sourceSets.hasProperty("main")) {
+					project.sourceSets.main.java.srcDirs.each { dir ->
+						println "${dir}"
+					}
+				}
+			}
+		}
+	}
+
+	// every source set besides main, one "<sourceSetName>|<dir>" line per directory
+	task printTestSrcDirs {
+		doLast {
+			if (project.hasProperty("sourceSets")) {
+				project.sourceSets.matching { it.name != "main" }.each { sourceSet ->
+					sourceSet.java.srcDirs.each { dir ->
+						println "${sourceSet.name}|${dir}"
+					}
+				}
+			}
+		}
+	}
+
+	task printLombokInfo {
+		doLast {
+			if (project.hasProperty("sourceSets")) {
+				project.sourceSets.each { sourceSet ->
+					def lombokJar = findLombokJar(project, [
+						sourceSet.annotationProcessorConfigurationName,
+						sourceSet.compileOnlyConfigurationName,
+						sourceSet.compileClasspathConfigurationName])
+					if (lombokJar != null) {
+						println "${sourceSet.name}|${lombokJar}"
+					}
+				}
+			}
+		}
+	}
+	
+	task copyCompileLibs {
+		doLast {
+			File rootDir = pp.getRootDir()
+			String destination = project.hasProperty('sourcetrail_lib_path') ? project.property('sourcetrail_lib_path').replace("\"", "") : rootDir.getPath() + rootDir.separator + "lib"
+			println destination;
+                        if (pp.configurations.hasProperty("compile")) {
+                                copyDependencies(pp.configurations.compile, destination)
+                        }
+                        if (pp.configurations.hasProperty("compileClasspath")) {
+                                copyDependencies(pp.configurations.compileClasspath, destination)
+                        }
+		}
+	}
+	
+	task copyTestCompileLibs {
+		doLast {
+			File rootDir = pp.getRootDir()
+			String destination = project.hasProperty('sourcetrail_lib_path') ? project.property('sourcetrail_lib_path') : rootDir.getPath() + rootDir.separator + "lib"
+                        if (pp.configurations.hasProperty("testCompile")) {
+                                copyDependencies(pp.configurations.testCompile, destination)
+                        }
+                        if (pp.configurations.hasProperty("testCompileClasspath")) {
+                                copyDependencies(pp.configurations.testCompileClasspath, destination)
+                        }
+			if (pp.hasProperty("sourceSets")) {
+				pp.sourceSets.matching { it.name != "main" && it.name != "test" }.each { sourceSet ->
+					def classpath = pp.configurations.findByName(sourceSet.compileClasspathConfigurationName)
+					if (classpath != null) {
+						copyDependencies(classpath, destination)
+					}
+				}
+			}
+		}
+	}
+}

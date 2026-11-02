@@ -62,6 +62,13 @@ struct ServeOptions
 	bool watch = true;	// Task 5 reads watch; --no-watch clears it
 };
 
+// Asks the server for the project to stop; 0 once it has, EXIT_EMPTY when none answers.
+int stopServer(const FilePath& projectFile, std::ostream& err);
+
+// Starts `st serve` for the project in the background, logging to <project dir>/.st-serve.log, and waits up to 30 s
+// for it to answer; 0 once it does, else EXIT_INTERNAL with the log's tail on err.
+int detachServer(const FilePath& projectFile, std::ostream& err);
+
 // Answers requests for the project until the process ends. Needs a QCoreApplication.
 int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream& err);
 }

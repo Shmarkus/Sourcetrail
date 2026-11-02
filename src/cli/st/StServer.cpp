@@ -6,13 +6,24 @@
 #include <QDateTime>
 #include <QDeadlineTimer>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QProcess>
+#include <QSocketNotifier>
+#include <QThread>
 #include <QtEndian>
 
+#include <algorithm>
 #include <optional>
 #include <sstream>
+
+#ifndef _WIN32
+#include <csignal>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 #include "StOutput.h"
 
@@ -22,6 +33,8 @@ constexpr quint32 MAX_FRAME = 256 * 1024 * 1024;
 constexpr int PROBE_MS = 50;
 constexpr int READ_MS = 5000;
 constexpr char ACK = 0x06;
+constexpr int DETACH_MS = 30000;
+constexpr int LOG_TAIL = 20;
 
 QDataStream& stream(QDataStream& data)
 {
@@ -40,7 +53,8 @@ QString canonicalPath(const FilePath& path)
 }
 
 // The reply to one request, or nullopt to close the connection without one.
-std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath& served, st::IndexCache& cache)
+std::optional<st::WireReply> answer(
+	const st::WireRequest& wire, const FilePath& served, st::IndexCache& cache, bool* stop)
 {
 	st::WireReply reply{st::EXIT_INTERNAL, {}, {}};
 	const auto refuse = [&reply](const char* reason) {
@@ -51,6 +65,13 @@ std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath&
 	if (wire.version != st::PROTOCOL_VERSION)
 	{
 		return refuse("speaks another protocol version");
+	}
+	// A stop is obeyed whatever the build, so a server left over from a rebuild can still be ended.
+	if (wire.request.arguments == QStringList{"st", "serve", "--stop"})
+	{
+		*stop = true;
+		reply.exitCode = st::EXIT_RESULTS;
+		return reply;
 	}
 	if (wire.buildId != st::buildId())
 	{
@@ -80,19 +101,57 @@ std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath&
 	return reply;
 }
 
-void handle(QLocalSocket& socket, const FilePath& served, st::IndexCache& cache)
+// Whether the server should stop after this connection.
+bool handle(QLocalSocket& socket, const FilePath& served, st::IndexCache& cache)
 {
+	bool stop = false;
 	QByteArray payload;
 	st::WireRequest request;
 	if (st::readFrame(socket, &payload, READ_MS) && st::decode(payload, &request) && st::writeAck(socket, READ_MS))
 	{
-		if (const std::optional<st::WireReply> reply = answer(request, served, cache))
+		if (const std::optional<st::WireReply> reply = answer(request, served, cache, &stop))
 		{
 			st::writeFrame(socket, st::encode(*reply), READ_MS);
 		}
 	}
 	socket.disconnectFromServer();
+	return stop;
 }
+
+#ifndef _WIN32
+int signalPipe[2] = {-1, -1};
+
+extern "C" void onSignal(int signal)
+{
+	const char byte = static_cast<char>(signal);
+	const ssize_t ignored = write(signalPipe[1], &byte, 1);
+	(void)ignored;
+}
+
+// Quits the event loop on SIGTERM, SIGINT and SIGHUP, so the server removes its socket file on the way out.
+bool quitOnSignals()
+{
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, signalPipe) != 0)
+	{
+		return false;
+	}
+	auto* notifier = new QSocketNotifier(signalPipe[0], QSocketNotifier::Read, QCoreApplication::instance());
+	QObject::connect(notifier, &QSocketNotifier::activated, []() { QCoreApplication::quit(); });
+	struct sigaction action = {};
+	action.sa_handler = onSignal;
+	sigemptyset(&action.sa_mask);
+	for (const int signal : {SIGTERM, SIGINT, SIGHUP})
+	{
+		sigaction(signal, &action, nullptr);
+	}
+	return true;
+}
+#else
+bool quitOnSignals()
+{
+	return true;
+}
+#endif
 
 bool readExactly(QLocalSocket& socket, qint64 size, QByteArray* data, const QDeadlineTimer& deadline)
 {
@@ -223,6 +282,68 @@ bool serverRunning(const FilePath& projectFile)
 	return socket.waitForConnected(PROBE_MS);
 }
 
+int stopServer(const FilePath& projectFile, std::ostream& err)
+{
+	QLocalSocket socket;
+	socket.connectToServer(serverSocketName(projectFile));
+	QByteArray payload;
+	WireReply reply;
+	if (!socket.waitForConnected(PROBE_MS) ||
+		!writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), {{"st", "serve", "--stop"}, {}, false}, {}}), READ_MS) ||
+		!readAck(socket, READ_MS) || !readFrame(socket, &payload, READ_MS) || !decode(payload, &reply) || reply.refused)
+	{
+		err << "st: no server running\n";
+		return EXIT_EMPTY;
+	}
+	err << "st: server stopped\n";
+	return 0;
+}
+
+int detachServer(const FilePath& projectFile, std::ostream& err)
+{
+	const QString project = QString::fromStdWString(projectFile.wstr());
+	if (serverRunning(projectFile))
+	{
+		err << "st: server already running for " << project.toStdString() << '\n';
+		return 0;
+	}
+	const QString log = QFileInfo(project).absoluteDir().absoluteFilePath(".st-serve.log");
+	QProcess process;
+	process.setProgram(QCoreApplication::applicationFilePath());
+	process.setArguments({"serve", "--project", project});
+	process.setStandardInputFile(QProcess::nullDevice());
+	process.setStandardOutputFile(log, QIODevice::Truncate);
+	process.setStandardErrorFile(log, QIODevice::Append);
+	qint64 pid = 0;
+	if (!process.startDetached(&pid))
+	{
+		err << "st: cannot start " << process.program().toStdString() << ": " << process.errorString().toStdString() << '\n';
+		return EXIT_INTERNAL;
+	}
+	QDeadlineTimer deadline(DETACH_MS);
+	while (!serverRunning(projectFile))
+	{
+		if (deadline.hasExpired())
+		{
+			QFile file(log);
+			QStringList lines;
+			if (file.open(QIODevice::ReadOnly))
+			{
+				lines = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
+			}
+			err << "st: server did not start within 30 s; " << log.toStdString() << ":\n";
+			for (int i = std::max(0, static_cast<int>(lines.size()) - LOG_TAIL); i < lines.size(); i++)
+			{
+				err << lines[i].toStdString() << '\n';
+			}
+			return EXIT_INTERNAL;
+		}
+		QThread::msleep(100);
+	}
+	err << "st: server running for " << project.toStdString() << " (pid " << pid << ")\n";
+	return 0;
+}
+
 int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream& err)
 {
 	(void)options;
@@ -242,12 +363,18 @@ int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream
 		err << "st: cannot listen on " << name.toStdString() << ": " << server.errorString().toStdString() << '\n';
 		return EXIT_INTERNAL;
 	}
+	quitOnSignals();
 	IndexCache cache;
 	QObject::connect(&server, &QLocalServer::newConnection, [&]() {
 		while (QLocalSocket* socket = server.nextPendingConnection())
 		{
-			handle(*socket, projectFile, cache);
+			const bool stop = handle(*socket, projectFile, cache);
 			socket->deleteLater();
+			if (stop)
+			{
+				QCoreApplication::quit();
+				return;
+			}
 		}
 	});
 	err << "st: serving " << project.toStdString() << " on " << name.toStdString() << std::endl;

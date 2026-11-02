@@ -388,4 +388,32 @@ kill "$server_pid"
 wait "$server_pid" 2> /dev/null || true
 server_pid=
 
+# --detach starts a server in the background without holding the caller's pipes; --stop ends it.
+started="$(date +%s%N)"
+detached="$("$st" serve --detach 2> "$work/err")" || assert "serve --detach failed: $(cat "$work/err")"
+elapsed=$(( ($(date +%s%N) - started) / 1000000 ))
+[ "$elapsed" -lt 20000 ] || assert "serve --detach took $elapsed ms"
+case "$detached$(cat "$work/err")" in *'st: server running for '*' (pid '*')'*) ;; *) assert "serve --detach said: $detached" ;; esac
+[ -f "$work/project/.st-serve.log" ] || assert "no .st-serve.log"
+grep -qF 'st: serving ' "$work/project/.st-serve.log" || assert "log lacks the serving line: $(cat "$work/project/.st-serve.log")"
+run 0 status
+contains $'server\trunning' out
+run 0 serve --stop
+contains 'st: server stopped' err
+run 0 status
+contains $'server\toff' out
+run 1 serve --stop
+contains 'st: no server running' err
+
+# SIGTERM removes the socket file and ends the server.
+start_server
+socket="$(sed -n 's/^st: serving .* on //p' "$work/serve.err")"
+[ -S "$socket" ] || assert "no socket $socket"
+kill -TERM "$server_pid"
+for _ in $(seq 50); do kill -0 "$server_pid" 2> /dev/null || break; sleep 0.1; done
+! kill -0 "$server_pid" 2> /dev/null || assert "server survived SIGTERM"
+wait "$server_pid" 2> /dev/null || true
+server_pid=
+[ ! -e "$socket" ] || assert "socket left behind after SIGTERM"
+
 echo "st smoke passed"

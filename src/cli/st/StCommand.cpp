@@ -726,6 +726,8 @@ void addOptions(QCommandLineParser& parser)
 	parser.addOption({"no-generated", "Drop result lines that stay generated: Lombok-made code without an original line"});
 	parser.addOption({"no-refresh", "Do not refresh a stale index before querying"});
 	parser.addOption({"wait", "Milliseconds to wait for the project lock (default 30000)", "ms"});
+	parser.addOption({"detach", "serve only: start the server in the background"});
+	parser.addOption({"stop", "serve only: stop the running server"});
 	parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
 }
 
@@ -760,7 +762,16 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	{
 		if (args.size() != 1)
 		{
-			throw UsageError("Usage: st serve [--project P]");
+			throw UsageError("Usage: st serve [--detach|--stop] [--project P]");
+		}
+		if (parser.isSet("stop") || parser.isSet("detach"))
+		{
+			if (parser.isSet("stop") && parser.isSet("detach"))
+			{
+				throw UsageError("Usage: st serve [--detach|--stop] [--project P]");
+			}
+			const FilePath project = locateProject(io, parser, request.cwd);
+			return parser.isSet("stop") ? st::stopServer(project, io.err) : st::detachServer(project, io.err);
 		}
 		return st::serve(locateProject(io, parser, request.cwd), st::ServeOptions(), io.err);
 	}

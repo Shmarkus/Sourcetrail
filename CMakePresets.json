@@ -191,6 +191,37 @@
                 "ninja",
                 "window"
             ]
+        },
+        {
+            "name": "fork_release",
+            "displayName": "Fork GNU Release (gcc 13, lld, Java)",
+            "binaryDir": "${sourceDir}/build/fork-release",
+            "cacheVariables": {
+                "USE_ALTERNATE_LINKER": "lld",
+                "BUILD_JAVA_LANGUAGE_PACKAGE": "ON",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/fork-release/install"
+            },
+            "inherits": [
+                "ci_gnu_release"
+            ]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "fork_release",
+            "configurePreset": "fork_release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "fork_release",
+            "configurePreset": "fork_release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 1
+            }
         }
     ]
 }

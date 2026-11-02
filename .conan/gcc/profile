@@ -3,12 +3,11 @@ arch=x86_64
 compiler=gcc
 compiler.cppstd=20
 compiler.libcxx=libstdc++11
-compiler.version=13.2
+compiler.version=13
 os=Linux
 [buildenv]
 CC=gcc
 CXX=g++
-LD=mold
 [options]
 fmt*:wchar=False
 spdlog*:wchar_support=False

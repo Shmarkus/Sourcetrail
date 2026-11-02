@@ -14,7 +14,8 @@ Use `st` (Sourcetrail CLI) for Java structure. Use grep for text, config, string
 | Package or class dependencies | `st deps com.acme.order` (`--in` for incoming) |
 | Narrow any result | `... \| st filter --annotated Test` (also `--kind`, `--package`, `--file`, `--not`) |
 
-- **Names** are a short name (`Cls.method`) or a full key. Parameters take simple type names: `'Cls.method(Order, int)'`.
+- **Names** are a short name (`Cls.method`) or a full key. Parameters take simple type names: `'Cls.method(Order, int)'`,
+  except in `st find`, which takes the name alone (with a parameter list it finds nothing, exit 1).
   Each result is one line whose first column is the key, so commands pipe into each other.
 - **Trust the answer** without re-reading source, unless stderr shows `st: incomplete:` or the question touches a blind
   spot: text, config and strings; Java records; Lombok `@Builder` setters; JPA metamodel uses (`Order_.status`); calls

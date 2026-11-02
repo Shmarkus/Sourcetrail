@@ -39,7 +39,24 @@ void log(spdlog::level::level_enum level,
          FORMAT format,
          const Args&... args) {
   using namespace std::string_literals;
-  if constexpr(std::same_as<FORMAT, std::string> || std::same_as<FORMAT, std::string_view> || std::same_as<FORMAT, const char*>) {
+  if constexpr(sizeof...(Args) == 0) {
+    // Without arguments the message is text, not a format string: a path or tool output containing '{' or '}' is
+    // logged as it is instead of throwing fmt::format_error.
+    if constexpr(std::same_as<FORMAT, std::string> || std::same_as<FORMAT, std::string_view> || std::same_as<FORMAT, const char*>) {
+      spdlog::log(level, "{} {}:{} {}", fileName, function, line, std::string_view(format));
+    } else {
+#ifdef SPDLOG_WCHAR_TO_UTF8_SUPPORT
+      spdlog::log(level,
+                  L"{} {}:{} {}",
+                  utility::decodeFromUtf8(fileName),
+                  utility::decodeFromUtf8(function),
+                  line,
+                  std::wstring_view(format));
+#else
+      spdlog::log(level, "{} {}:{} {}", fileName, function, line, utility::encodeToUtf8(std::wstring(format)));
+#endif
+    }
+  } else if constexpr(std::same_as<FORMAT, std::string> || std::same_as<FORMAT, std::string_view> || std::same_as<FORMAT, const char*>) {
     spdlog::log(level, fmt::runtime("{} {}:{} "s + format), fileName, function, line, args...);
   } else if constexpr(std::same_as<FORMAT, std::wstring> || std::same_as<FORMAT, std::wstring_view> ||
                       std::same_as<FORMAT, const wchar_t*>) {

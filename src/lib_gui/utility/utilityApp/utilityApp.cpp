@@ -147,10 +147,7 @@ ProcessOutput executeProcess(const std::wstring& command,
       if(waitUntilNoOutput) {
         while(!safely_wait_for(*process, std::chrono::milliseconds(timeout))) {
           if(!outputReceived) {
-            LOG_WARNING(
-                "Canceling process because it did not generate any output during the "
-                "last " +
-                std::to_string(timeout / 1000) + " seconds.");
+            LOG_WARNING("Canceling process because it did not generate any output during the last {} seconds.", timeout / 1000);
             process->terminate();
             break;
           }
@@ -158,7 +155,7 @@ ProcessOutput executeProcess(const std::wstring& command,
         }
       } else {
         if(!safely_wait_for(*process, std::chrono::milliseconds(timeout))) {
-          LOG_WARNING("Canceling process because it timed out after " + std::to_string(timeout / 1000) + " seconds.");
+          LOG_WARNING("Canceling process because it timed out after {} seconds.", timeout / 1000);
           process->terminate();
         }
       }
@@ -168,7 +165,7 @@ ProcessOutput executeProcess(const std::wstring& command,
 
     if(logProcessOutput) {
       for(const std::string& line : splitToVector(logBuffer, "\n")) {
-        LOG_INFO(fmt::format("Process output: {}", line));
+        LOG_INFO("Process output: {}", line);
       }
     }
 
@@ -177,7 +174,7 @@ ProcessOutput executeProcess(const std::wstring& command,
     ProcessOutput ret;
     ret.error = decodeFromUtf8(e.code().message());
     ret.exitCode = e.code().value();
-    LOG_ERROR(fmt::format(L"Process error: {}", ret.error));
+    LOG_ERROR(L"Process error: {}", ret.error);
 
     return ret;
   }

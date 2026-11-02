@@ -235,7 +235,7 @@ run 4 --project "$work/empty/project.srctrlprj" find getName
 # st serve: answers through the server equal the cold ones, stay fresh, and fall back when it dies.
 # start_server: runs st serve in the background and waits until it listens.
 start_server() {
-    "$st" serve > "$work/serve.out" 2> "$work/serve.err" &
+    "${1:-$st}" serve > "$work/serve.out" 2> "$work/serve.err" &
     server_pid=$!
     for _ in $(seq 100); do
         grep -qF 'st: serving ' "$work/serve.err" && return
@@ -355,6 +355,35 @@ contains $'server\toff' out
 start_server
 run 0 status
 contains $'server\trunning' out
+
+# A suspended server takes the connection but never acknowledges it: st answers cold with the same stdin within 3 s.
+kill -STOP "$server_pid"
+started="$(date +%s%N)"
+"$st" callers < "$work/key.in" > "$work/out" 2> "$work/err" || assert "query to a suspended server failed"
+elapsed=$(( ($(date +%s%N) - started) / 1000000 ))
+[ "$elapsed" -lt 3500 ] || assert "query to a suspended server took $elapsed ms"
+contains 'st: server did not answer; answering without it' err
+contains 'example.Caller.shout(example.Person)' out
+kill -CONT "$server_pid"
+kill "$server_pid"
+wait "$server_pid" 2> /dev/null || true
+server_pid=
+
+# A rebuild replaces the binary under a running server: the server keeps its old identity and refuses the new client,
+# whose status then reports the server off.
+mkdir "$work/rebuilt"
+cp "$st" "$work/rebuilt/st"
+start_server "$work/rebuilt/st"
+cp "$work/rebuilt/st" "$work/rebuilt/st.new"
+printf 'x' >> "$work/rebuilt/st.new"
+mv "$work/rebuilt/st.new" "$work/rebuilt/st"
+ST_NO_SERVER=1 "$st" find getName > "$work/cold.out" 2> /dev/null || assert "cold find failed"
+"$work/rebuilt/st" find getName > "$work/out" 2> "$work/err" || assert "rebuilt st failed"
+contains 'st: server is from another build; answering without it' err
+diff "$work/cold.out" "$work/out" > /dev/null || assert "rebuilt st answered differently: $(diff "$work/cold.out" "$work/out")"
+"$work/rebuilt/st" status > "$work/out" 2> "$work/err" || assert "rebuilt st status failed"
+contains 'st: server is from another build; answering without it' err
+contains $'server\toff' out
 kill "$server_pid"
 wait "$server_pid" 2> /dev/null || true
 server_pid=

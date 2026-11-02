@@ -17,6 +17,7 @@ struct Request
 	QString cwd;	// absolute
 	bool stdinIsTerminal = true;
 	bool served = false;	// set by st serve, not sent
+	bool serverDeclined = false;	// st serve was tried and did not answer: status reports it off; not sent
 };
 
 struct Io

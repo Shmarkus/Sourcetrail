@@ -7,6 +7,9 @@
 namespace
 {
 constexpr int CONNECT_MS = 50;
+constexpr int ACK_MS = 2000;
+// A request may refresh the index first.
+constexpr int REPLY_MS = 15 * 60 * 1000;
 }
 
 namespace st
@@ -20,11 +23,11 @@ std::optional<int> tryServer(const FilePath& projectFile, const Request& request
 	{
 		return std::nullopt;
 	}
-	// A request may refresh the index first, which can take minutes: wait for the reply as long as the server is there.
+	// A server that accepts but does not acknowledge, e.g. a suspended one, is given up on quickly.
 	QByteArray payload;
 	WireReply reply;
-	if (!writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), request, stdinData}), -1) ||
-		!readFrame(socket, &payload, -1) || !decode(payload, &reply))
+	if (!writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), request, stdinData}), ACK_MS) || !readAck(socket, ACK_MS) ||
+		!readFrame(socket, &payload, REPLY_MS) || !decode(payload, &reply))
 	{
 		err << "st: server did not answer; answering without it\n";
 		return std::nullopt;

@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -1150,12 +1151,13 @@ TEST_CASE("socket name is stable, per project, and short")
 
 namespace
 {
-// Accepts one connection on the project's socket, reads its request and replies with reply, or closes without one.
+// Accepts one connection on the project's socket and reads its request. With a reply it acknowledges the request and
+// replies; without one it holds the connection for holdMs and closes it unacknowledged.
 class FakeServer
 {
 public:
-	FakeServer(const QString& name, std::optional<st::WireReply> reply)
-		: m_thread(QThread::create([this, name, reply]() {
+	FakeServer(const QString& name, std::optional<st::WireReply> reply, int holdMs = 0)
+		: m_thread(QThread::create([this, name, reply, holdMs]() {
 			QLocalServer server;
 			QLocalServer::removeServer(name);
 			m_listening.set_value(server.listen(name));
@@ -1168,7 +1170,12 @@ public:
 			m_received = st::readFrame(*socket, &payload, 5000) && st::decode(payload, &m_request);
 			if (reply)
 			{
+				st::writeAck(*socket, 5000);
 				st::writeFrame(*socket, st::encode(*reply), 5000);
+			}
+			else
+			{
+				QThread::msleep(holdMs);
 			}
 			socket->disconnectFromServer();
 			delete socket;
@@ -1212,10 +1219,14 @@ TEST_CASE("client answers cold when the server is from another build")
 	REQUIRE(dir.isValid());
 	const FilePath project((QDir(dir.path()).canonicalPath() + "/p.srctrlprj").toStdWString());
 	const st::Request request{{"st", "callers"}, dir.path(), false};
-	const auto ask = [&](std::optional<st::WireReply> reply, std::ostringstream& out, std::ostringstream& err) {
-		FakeServer server(st::serverSocketName(project), reply);
+	QElapsedTimer timer;
+	qint64 asked = 0;
+	const auto ask = [&](std::optional<st::WireReply> reply, std::ostringstream& out, std::ostringstream& err, int holdMs = 0) {
+		FakeServer server(st::serverSocketName(project), reply, holdMs);
 		REQUIRE(server.listening());
+		timer.start();
 		const std::optional<int> code = st::tryServer(project, request, "key\n", out, err);
+		asked = timer.elapsed();
 		return std::make_pair(code, server.request());
 	};
 
@@ -1241,4 +1252,65 @@ TEST_CASE("client answers cold when the server is from another build")
 	CHECK(ask(st::WireReply{2, "a\n", "st: ambiguous\n"}, out3, err3).first == std::optional<int>(2));
 	CHECK(out3.str() == "a\n");
 	CHECK(err3.str() == "st: ambiguous\n");
+
+	// a server that takes the request but never acknowledges it, e.g. a suspended one, is given up on after 2 s
+	std::ostringstream out4;
+	std::ostringstream err4;
+	CHECK_FALSE(ask(std::nullopt, out4, err4, 4000).first);
+	CHECK(asked >= 1900);
+	CHECK(asked < 3000);
+	CHECK(err4.str() == "st: server did not answer; answering without it\n");
+}
+
+TEST_CASE("frame read gives up on a slow client after one deadline")
+{
+	int argc = 1;
+	char program[] = "st";
+	char* argv[] = {program, nullptr};
+	QCoreApplication app(argc, argv);
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString name = dir.path() + "/s.sock";
+	QLocalServer server;
+	REQUIRE(server.listen(name));
+	// announces 100 bytes, then trickles one byte every 100 ms: each byte arrives within the timeout, the frame does not
+	std::unique_ptr<QThread> slow(QThread::create([name]() {
+		QLocalSocket socket;
+		socket.connectToServer(name);
+		socket.waitForConnected(1000);
+		const char header[4] = {0, 0, 0, 100};
+		socket.write(header, 4);
+		for (int i = 0; i < 20 && socket.state() == QLocalSocket::ConnectedState; i++)
+		{
+			socket.write("x", 1);
+			socket.waitForBytesWritten(1000);
+			QThread::msleep(100);
+		}
+	}));
+	slow->start();
+	REQUIRE(server.waitForNewConnection(2000));
+	std::unique_ptr<QLocalSocket> first(server.nextPendingConnection());
+	QByteArray payload;
+	QElapsedTimer timer;
+	timer.start();
+	CHECK_FALSE(st::readFrame(*first, &payload, 500));
+	CHECK(timer.elapsed() < 1000);
+	first->disconnectFromServer();
+
+	// the next client is still read
+	std::unique_ptr<QThread> quick(QThread::create([name]() {
+		QLocalSocket socket;
+		socket.connectToServer(name);
+		socket.waitForConnected(1000);
+		st::writeFrame(socket, "hello", 1000);
+		socket.waitForDisconnected(2000);
+	}));
+	quick->start();
+	REQUIRE(server.waitForNewConnection(2000));
+	std::unique_ptr<QLocalSocket> second(server.nextPendingConnection());
+	CHECK(st::readFrame(*second, &payload, 500));
+	CHECK(payload == "hello");
+	second->disconnectFromServer();
+	quick->wait();
+	slow->wait();
 }

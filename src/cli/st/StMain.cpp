@@ -40,6 +40,7 @@ int main(int argc, char** argv)
 	{
 		return *code;
 	}
+	request.serverDeclined = true;
 	std::istringstream in(input);
 	return st::runCommand(request, {in, std::cout, std::cerr}, cache);
 }

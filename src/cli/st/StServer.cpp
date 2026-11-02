@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QDateTime>
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFileInfo>
 #include <QLocalServer>
@@ -20,6 +21,7 @@ namespace
 constexpr quint32 MAX_FRAME = 256 * 1024 * 1024;
 constexpr int PROBE_MS = 50;
 constexpr int READ_MS = 5000;
+constexpr char ACK = 0x06;
 
 QDataStream& stream(QDataStream& data)
 {
@@ -82,7 +84,7 @@ void handle(QLocalSocket& socket, const FilePath& served, st::IndexCache& cache)
 {
 	QByteArray payload;
 	st::WireRequest request;
-	if (st::readFrame(socket, &payload, READ_MS) && st::decode(payload, &request))
+	if (st::readFrame(socket, &payload, READ_MS) && st::decode(payload, &request) && st::writeAck(socket, READ_MS))
 	{
 		if (const std::optional<st::WireReply> reply = answer(request, served, cache))
 		{
@@ -92,16 +94,32 @@ void handle(QLocalSocket& socket, const FilePath& served, st::IndexCache& cache)
 	socket.disconnectFromServer();
 }
 
-bool readExactly(QLocalSocket& socket, qint64 size, QByteArray* data, int timeoutMs)
+bool readExactly(QLocalSocket& socket, qint64 size, QByteArray* data, const QDeadlineTimer& deadline)
 {
 	data->clear();
 	while (data->size() < size)
 	{
-		if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(timeoutMs))
+		if (socket.bytesAvailable() == 0 && (deadline.hasExpired() || !socket.waitForReadyRead(deadline.remainingTime())))
 		{
 			return false;
 		}
 		data->append(socket.read(size - data->size()));
+	}
+	return true;
+}
+
+bool writeAll(QLocalSocket& socket, const QByteArray& data, const QDeadlineTimer& deadline)
+{
+	if (socket.write(data) != data.size())
+	{
+		return false;
+	}
+	while (socket.bytesToWrite() > 0)
+	{
+		if (deadline.hasExpired() || !socket.waitForBytesWritten(deadline.remainingTime()))
+		{
+			return false;
+		}
 	}
 	return true;
 }
@@ -122,9 +140,13 @@ QString serverSocketName(const FilePath& projectFile)
 
 QString buildId()
 {
-	const QFileInfo binary(QCoreApplication::applicationFilePath());
-	return binary.absoluteFilePath() + '|' + QString::number(binary.size()) + '|' +
-		QString::number(binary.lastModified().toMSecsSinceEpoch());
+	// Taken once: a rebuild replaces the file under a running server, which must keep its own identity.
+	static const QString id = []() {
+		const QFileInfo binary(QCoreApplication::applicationFilePath());
+		return binary.absoluteFilePath() + '|' + QString::number(binary.size()) + '|' +
+			QString::number(binary.lastModified().toMSecsSinceEpoch());
+	}();
+	return id;
 }
 
 QByteArray encode(const WireRequest& request)
@@ -166,31 +188,32 @@ bool decode(const QByteArray& data, WireReply* reply)
 
 bool writeFrame(QLocalSocket& socket, const QByteArray& payload, int timeoutMs)
 {
-	char header[4];
-	qToBigEndian<quint32>(static_cast<quint32>(payload.size()), header);
-	if (socket.write(header, 4) != 4 || socket.write(payload) != payload.size())
-	{
-		return false;
-	}
-	while (socket.bytesToWrite() > 0)
-	{
-		if (!socket.waitForBytesWritten(timeoutMs))
-		{
-			return false;
-		}
-	}
-	return true;
+	QByteArray frame(4, '\0');
+	qToBigEndian<quint32>(static_cast<quint32>(payload.size()), frame.data());
+	return writeAll(socket, frame + payload, QDeadlineTimer(timeoutMs));
 }
 
 bool readFrame(QLocalSocket& socket, QByteArray* payload, int timeoutMs)
 {
+	const QDeadlineTimer deadline(timeoutMs);
 	QByteArray header;
-	if (!readExactly(socket, 4, &header, timeoutMs))
+	if (!readExactly(socket, 4, &header, deadline))
 	{
 		return false;
 	}
 	const quint32 size = qFromBigEndian<quint32>(header.constData());
-	return size <= MAX_FRAME && readExactly(socket, size, payload, timeoutMs);
+	return size <= MAX_FRAME && readExactly(socket, size, payload, deadline);
+}
+
+bool writeAck(QLocalSocket& socket, int timeoutMs)
+{
+	return writeAll(socket, QByteArray(1, ACK), QDeadlineTimer(timeoutMs));
+}
+
+bool readAck(QLocalSocket& socket, int timeoutMs)
+{
+	QByteArray ack;
+	return readExactly(socket, 1, &ack, QDeadlineTimer(timeoutMs)) && ack[0] == ACK;
 }
 
 bool serverRunning(const FilePath& projectFile)
@@ -203,6 +226,7 @@ bool serverRunning(const FilePath& projectFile)
 int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream& err)
 {
 	(void)options;
+	buildId();
 	const QString project = QString::fromStdWString(projectFile.wstr());
 	const QString name = serverSocketName(projectFile);
 	if (serverRunning(projectFile))

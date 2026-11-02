@@ -947,7 +947,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	}
 	if (command == "status")
 	{
-		return status(io, storage, freshness, request.served || st::serverRunning(projectFile));
+		return status(io, storage, freshness, request.served || (!request.serverDeclined && st::serverRunning(projectFile)));
 	}
 	if (command == "find")
 	{

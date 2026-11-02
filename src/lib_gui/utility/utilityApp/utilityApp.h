@@ -31,12 +31,13 @@ void killRunningProcesses();
 
 int getIdealThreadCount();
 
+// boost/predef defines every BOOST_OS_* and BOOST_ARCH_* macro (0 when it does not apply), so test their values.
 constexpr OsType getOsType() {
-#if defined(BOOST_OS_WINDOWS)
+#if BOOST_OS_WINDOWS
   return OsType::Windows;
-#elif defined(BOOST_OS_MACOS)
+#elif BOOST_OS_MACOS
   return OsType::Mac;
-#elif defined(BOOST_OS_LINUX)
+#elif BOOST_OS_LINUX
   return OsType::Linux;
 #else
   return OsType::Unknown;
@@ -44,11 +45,11 @@ constexpr OsType getOsType() {
 }
 
 constexpr ApplicationArchitectureType getApplicationArchitectureType() {
-#if defined(BOOST_ARCH_X86_64)
+#if BOOST_ARCH_X86_64
   return ApplicationArchitectureType::X86_64;
-#elif defined(BOOST_ARCH_X86_32)
+#elif BOOST_ARCH_X86_32
   return ApplicationArchitectureType::X86_32;
-#elif defined(BOOST_ARCH_ARM)
+#elif BOOST_ARCH_ARM
   return ApplicationArchitectureType::ARM;
 #else
   return ApplicationArchitectureType::Unknown;

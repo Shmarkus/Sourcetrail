@@ -25,9 +25,19 @@ TEST(utilityAppTestSuite, emptyPath) {
 }
 
 TEST(utilityAppTestSuite, getOsType) {
-#if defined(D_WINDOWS)
+#if defined(_WIN32)
   EXPECT_EQ(utility::getOsType(), OsType::Windows);
-#elif defined(D_LINUX)
+#elif defined(__APPLE__)
+  EXPECT_EQ(utility::getOsType(), OsType::Mac);
+#elif defined(__linux__)
   EXPECT_EQ(utility::getOsType(), OsType::Linux);
+#endif
+}
+
+TEST(utilityAppTestSuite, getApplicationArchitectureType) {
+#if defined(__x86_64__) || defined(_M_X64)
+  EXPECT_EQ(utility::getApplicationArchitectureType(), ApplicationArchitectureType::X86_64);
+#elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64)
+  EXPECT_EQ(utility::getApplicationArchitectureType(), ApplicationArchitectureType::ARM);
 #endif
 }

@@ -12,6 +12,7 @@ read ans
 case ${ans:=y} in [yY]*) ;; *) exit ;; esac
 
 rm /usr/bin/sourcetrail
+rm -f /usr/bin/st /usr/bin/Sourcetrail_cli
 rm /usr/share/mime/packages/sourcetrail-mime.xml
 rm /usr/share/applications/sourcetrail.desktop
 rm /usr/share/icons/sourcetrail.png

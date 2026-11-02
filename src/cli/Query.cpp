@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QProcess>
 
 #include <iostream>
@@ -151,6 +152,12 @@ void prepareIndexer(QProcess& process, const QString& project, bool full)
 	QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
 #ifdef _WIN32
 	executable += ".exe";
+#else
+	// The Linux package installs the application as lower-case `sourcetrail`.
+	if (!QFileInfo::exists(executable))
+	{
+		executable = QCoreApplication::applicationDirPath() + "/sourcetrail";
+	}
 #endif
 	process.setProgram(executable);
 	process.setWorkingDirectory(QCoreApplication::applicationDirPath());

@@ -20,6 +20,8 @@ cp "$MY_PATH/share/data/gui/icon/logo_1024_1024.png" /usr/share/icons/sourcetrai
 cp "$MY_PATH/share/data/gui/icon/project_256_256.png" /usr/share/icons/project-sourcetrail.png > /dev/null
 
 ln -f -s /opt/sourcetrail/Sourcetrail.sh /usr/bin/sourcetrail
+ln -f -s /opt/sourcetrail/bin/st /usr/bin/st
+ln -f -s /opt/sourcetrail/bin/Sourcetrail_cli /usr/bin/Sourcetrail_cli
 
 update-mime-database /usr/share/mime > /dev/null
 update-desktop-database > /dev/null

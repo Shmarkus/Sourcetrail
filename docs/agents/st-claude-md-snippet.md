@@ -7,3 +7,4 @@
   calls through a field of an unresolved type).
 - Exit 2: pick a key from the candidates on stderr. Exit 3: check the name, the parameters and the project (`st find <name>` names it on stderr).
 - Which command to run, and pipeline recipes: "For agents" in `<path to Sourcetrail README.md>`.
+- Faster: `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).

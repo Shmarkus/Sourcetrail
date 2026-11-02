@@ -292,9 +292,8 @@ existing Sourcetrail index, as plain text lines that pipe into each other.
 | How does A reach B? | `st path OrderController.create OrderRepository.save` |
 | What breaks if X changes? | `st impact OrderService.place --group file` |
 | A stack-trace line: its method and callers | `st at OrderService.java:42 \| st callers --depth 3` |
-| Members of a class or file | `st outline OrderService`, `st outline src/main/java/com/acme/shop/OrderService.java` |
+| Members of a class or file; package or class dependencies | `st outline OrderService`, `st outline src/main/java/com/acme/shop/OrderService.java`; `st deps com.acme.shop.order` (`--in` for incoming) |
 | Files in a git diff to symbols | `git diff --name-only \| st symbols-in` |
-| Package or class dependencies | `st deps com.acme.shop.order` (`--in` for incoming) |
 | What uses a library annotation or type (`@Scheduled`, `TaskScheduler`) | `st refs Scheduled`; a whole library package: `st impact org.springframework.scheduling --depth 1` |
 | Narrow a result by annotation, kind or file | `... \| st filter --annotated Test`, `--kind method`, `--not --file '*Test*'` |
 | Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
@@ -307,6 +306,7 @@ Names are a short name (`OrderService.place`) or a key; parameters take simple t
   **Exit 3** (not found): check the name, the parameters (count and simple type names; stderr lists the overloads), and the
   project: `st` picks it from the current directory, `st find <name>` names it (`find: 0 (project shop)`), `--project` overrides.
 
+Faster: `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).
 ```bash
 st at OrderService.java:42 | st callers --depth 4 | st filter --annotated Test            # stack trace -> callers -> tests
 git diff --name-only | st symbols-in | st impact | st filter --not --file '*Test*'          # diff -> what it can break, tests left out
@@ -449,6 +449,20 @@ and incrementally re-indexes if they changed, printing `refreshed N files in X.Y
 `--no-refresh` skips this and exits 5 when stale; `--wait <ms>` bounds the wait for the project lock (default 30000).
 File times are compared below the second; only a file saved within about 20 ms before a refresh started is refreshed once
 more.
+
+**`st serve`.** Opt-in resident server for one project: it keeps the index loaded and answers `st` calls over a Unix socket
+(under `$XDG_RUNTIME_DIR`, else the temp dir), so a query costs about 100-150 ms instead of 0.4-0.6 s on a large project.
+- `st serve` runs in the foreground; `st serve --detach` starts it in the background (output in `<project dir>/.st-serve.log`);
+  `st serve --stop` stops it. `st status` ends with `server<TAB>running` or `server<TAB>off`.
+- While it runs it watches the sources and re-indexes in the background after edits (log: `<project dir>/.st-refresh.log`), so
+  the next query does not wait for the indexer. `--no-watch` turns this off. Add both logs to `.gitignore`.
+- It is never started automatically, and there is one server per project. A client that finds no usable server answers itself.
+- `--no-server` (or `ST_NO_SERVER=1`) answers in the calling process even when a server runs.
+- Answers are identical with or without the server, and freshness is still checked per query. The server uses its own
+  environment (`HOME`, `JAVA_HOME`, ...); the client's is not forwarded.
+- stderr notes: `st: server <is from another build | speaks another protocol version | serves another project>; answering without it`,
+  `st: server did not answer; answering without it`, and `st: waited Xs for the background refresh` (a query that arrived
+  while a refresh was running). Measurements: `docs/superpowers/specs/2026-11-02-st-serve-results.md`.
 
 Tests for `st`: `ctest --test-dir build/Release -R cli.st` for the unit tests, and an end-to-end smoke test
 (isolated home, copied fixture, JDK 21):

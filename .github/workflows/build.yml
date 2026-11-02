@@ -34,6 +34,7 @@ jobs:
 
       - name: Package
         run: |
+          apt-get update && apt-get install -y --no-install-recommends patchelf
           ./setup/Linux/createPackages.sh
 
       - name: Archive artifacts

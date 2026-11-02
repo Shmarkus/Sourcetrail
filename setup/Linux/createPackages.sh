@@ -83,16 +83,9 @@ createIcon 128x128
 createIcon 64x64
 createIcon 48x48
 
-# create .AppImage
+# bundle libraries and Qt plugins
 
-linuxdeployqt AppDir/usr/bin/sourcetrail_indexer -executable=AppDir/usr/bin/Sourcetrail_cli -executable=AppDir/usr/bin/st -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python*
-rm -f AppDir/AppRun
-
-linuxdeployqt AppDir/usr/share/applications/sourcetrail.desktop -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python* -appimage
-
-rename x86_64 Linux_64bit *.AppImage
-rename - _ *.AppImage
-rename - _ *.AppImage
+./setup/Linux/bundleLibraries.sh AppDir/usr
 
 
 # create .tar.gz

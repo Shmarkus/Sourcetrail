@@ -11,6 +11,8 @@ root="$(realpath "$(dirname "$0")/../..")"
 [ -x "$st" ] || die "st binary not executable: $st"
 [ -x "$cli" ] || die "Sourcetrail_cli not found next to st: $cli"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-st-smoke.XXXXXX")"
+# Copies of st made below live in $work/<dir>/; a packaged st finds its libraries in ../lib.
+[ ! -d "$(dirname "$st")/../lib" ] || ln -s "$(realpath "$(dirname "$st")/../lib")" "$work/lib"
 server_pid=
 trap 'status=$?; [ -z "$server_pid" ] || kill -9 $server_pid 2> /dev/null || true; socket="$(sed -n "s/^st: serving .* on //p" "$work/serve.err" 2> /dev/null)"; [ -z "$socket" ] || rm -f "$socket" "$socket.lock"; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"

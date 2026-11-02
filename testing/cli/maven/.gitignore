@@ -1,0 +1,7 @@
+target/
+sourcetrail_dependencies/
+*.srctrldb*
+*.srctrlbm*
+*.srctrltmp*
+.sourcetrail/
+effective-pom.xml

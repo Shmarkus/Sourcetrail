@@ -2,6 +2,8 @@
 
 #include <fmt/format.h>
 
+#include "Application.h"
+#include "language_packages.h"
 #include "logging.h"
 #include "ProjectSettings.h"
 #include "SqliteStorageMigrationLambda.h"
@@ -23,7 +25,16 @@ void SqliteBookmarkStorage::migrateIfNecessary() {
 
   migrator.addMigration(
       2, std::make_shared<SqliteStorageMigrationLambda>([](const SqliteStorageMigration* migration, SqliteStorage* storage) {
-        const std::string separator = "::";
+        std::string separator = "::";
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+        // names of Java symbols are separated by '.', not '::'
+        if(const auto application = Application::getInstance(); application) {
+          const FilePath projectFilePath = application->getCurrentProjectPath();
+          if(!projectFilePath.empty() && ProjectSettings::getLanguageOfProject(projectFilePath) == LANGUAGE_JAVA) {
+            separator = ".";
+          }
+        }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
         migration->executeStatementInStorage(
             storage, "UPDATE bookmarked_node SET serialized_node_name = '" + separator + "\tm' || serialized_node_name");
         migration->executeStatementInStorage(

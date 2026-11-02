@@ -9,7 +9,7 @@
 #include "TextAccess.h"
 #include "utilityString.h"
 
-const size_t SqliteIndexStorage::sStorageVersion = 25;
+const size_t SqliteIndexStorage::sStorageVersion = 27;
 
 namespace {
 std::pair<std::wstring, std::wstring> splitLocalSymbolName(const std::wstring& name) {

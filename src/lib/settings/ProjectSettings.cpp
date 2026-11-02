@@ -266,6 +266,13 @@ SettingsMigrator ProjectSettings::getMigrations() const {
                                                                      sourceGroupKey + "/build_file_path/compilation_db_path"));
     migrator.addMigration(
         2, std::make_shared<SettingsMigrationMoveKey>("source/class_paths/class_path", sourceGroupKey + "/class_paths/class_path"));
+    migrator.addMigration(
+        2, std::make_shared<SettingsMigrationMoveKey>("source/maven/project_file_path", sourceGroupKey + "/maven/project_file_path"));
+    migrator.addMigration(2,
+                          std::make_shared<SettingsMigrationMoveKey>("source/maven/dependencies_directory",
+                                                                     sourceGroupKey + "/maven/dependencies_directory"));
+    migrator.addMigration(
+        2, std::make_shared<SettingsMigrationMoveKey>("source/maven/should_index_tests", sourceGroupKey + "/maven/should_index_tests"));
 
     migrator.addMigration(
         3, std::make_shared<SettingsMigrationLambda>([=](const SettingsMigration* migration, Settings* settings) {
@@ -285,6 +292,22 @@ SettingsMigrator ProjectSettings::getMigrations() const {
             }
           }
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+          if(language == "Java") {
+            const std::string mavenProjectFilePath = migration->getValueFromSettings<std::string>(
+                settings, sourceGroupKey + "/maven/project_file_path", "");
+            const std::string gradleProjectFilePath = migration->getValueFromSettings<std::string>(
+                settings, sourceGroupKey + "/gradle/project_file_path", "");
+            // the fork let the Gradle check overwrite a Maven match with "empty"; a Maven project stays Maven here
+            if(!mavenProjectFilePath.empty()) {
+              type = SOURCE_GROUP_JAVA_MAVEN;
+            } else if(!gradleProjectFilePath.empty()) {
+              type = SOURCE_GROUP_JAVA_GRADLE;
+            } else {
+              type = SOURCE_GROUP_JAVA_EMPTY;
+            }
+          }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
           migration->setValueInSettings(settings, sourceGroupKey + "/type", sourceGroupTypeToString(type));
         }));
   }
@@ -323,6 +346,11 @@ SettingsMigrator ProjectSettings::getMigrations() const {
       languageName = "cpp";
       break;
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+    case LANGUAGE_JAVA:
+      languageName = "java";
+      break;
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
     case LANGUAGE_CUSTOM:
       [[fallthrough]];
     default:

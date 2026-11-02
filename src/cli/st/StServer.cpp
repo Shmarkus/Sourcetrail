@@ -20,6 +20,7 @@
 #include <sstream>
 
 #ifndef _WIN32
+#include <cerrno>
 #include <csignal>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -33,6 +34,7 @@ constexpr quint32 MAX_FRAME = 256 * 1024 * 1024;
 constexpr int PROBE_MS = 50;
 constexpr int READ_MS = 5000;
 constexpr char ACK = 0x06;
+constexpr int STOP_MS = 5000;
 constexpr int DETACH_MS = 30000;
 constexpr int LOG_TAIL = 20;
 
@@ -123,9 +125,16 @@ int signalPipe[2] = {-1, -1};
 
 extern "C" void onSignal(int signal)
 {
+	const int saved = errno;
 	const char byte = static_cast<char>(signal);
 	const ssize_t ignored = write(signalPipe[1], &byte, 1);
 	(void)ignored;
+	errno = saved;
+}
+
+bool processAlive(qint64 pid)
+{
+	return kill(static_cast<pid_t>(pid), 0) == 0;
 }
 
 // Quits the event loop on SIGTERM, SIGINT and SIGHUP, so the server removes its socket file on the way out.
@@ -148,6 +157,11 @@ bool quitOnSignals()
 }
 #else
 bool quitOnSignals()
+{
+	return true;
+}
+
+bool processAlive(qint64)
 {
 	return true;
 }
@@ -295,6 +309,17 @@ int stopServer(const FilePath& projectFile, std::ostream& err)
 		err << "st: no server running\n";
 		return EXIT_EMPTY;
 	}
+	// The server answers until its event loop has ended and the socket is closed.
+	const QDeadlineTimer deadline(STOP_MS);
+	while (serverRunning(projectFile))
+	{
+		if (deadline.hasExpired())
+		{
+			err << "st: server did not stop\n";
+			return EXIT_INTERNAL;
+		}
+		QThread::msleep(20);
+	}
 	err << "st: server stopped\n";
 	return 0;
 }
@@ -323,7 +348,7 @@ int detachServer(const FilePath& projectFile, std::ostream& err)
 	QDeadlineTimer deadline(DETACH_MS);
 	while (!serverRunning(projectFile))
 	{
-		if (deadline.hasExpired())
+		if (deadline.hasExpired() || !processAlive(pid))
 		{
 			QFile file(log);
 			QStringList lines;
@@ -331,7 +356,7 @@ int detachServer(const FilePath& projectFile, std::ostream& err)
 			{
 				lines = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
 			}
-			err << "st: server did not start within 30 s; " << log.toStdString() << ":\n";
+			err << (deadline.hasExpired() ? "st: server did not start within 30 s; " : "st: server exited; ") << log.toStdString() << ":\n";
 			for (int i = std::max(0, static_cast<int>(lines.size()) - LOG_TAIL); i < lines.size(); i++)
 			{
 				err << lines[i].toStdString() << '\n';

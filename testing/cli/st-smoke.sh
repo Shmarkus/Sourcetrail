@@ -405,6 +405,17 @@ contains $'server\toff' out
 run 1 serve --stop
 contains 'st: no server running' err
 
+# --stop returns only once the socket is closed: a detach or a status right after it sees no old server.
+run 0 serve --detach
+run 0 serve --stop
+run 0 serve --detach
+! grep -qF 'already running' "$work/err" || assert "detach right after stop found the old server"
+run 0 serve --stop
+"$st" serve --detach > /dev/null 2>&1
+"$st" serve --stop > /dev/null 2>&1
+run 0 status
+contains $'server\toff' out
+
 # SIGTERM removes the socket file and ends the server.
 start_server
 socket="$(sed -n 's/^st: serving .* on //p' "$work/serve.err")"

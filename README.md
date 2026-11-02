@@ -295,6 +295,7 @@ existing Sourcetrail index, as plain text lines that pipe into each other.
 | Members of a class or file | `st outline OrderService`, `st outline src/main/java/com/acme/shop/OrderService.java` |
 | Files in a git diff to symbols | `git diff --name-only \| st symbols-in` |
 | Package or class dependencies | `st deps com.acme.shop.order` (`--in` for incoming) |
+| What uses a library annotation or type (`@Scheduled`, `TaskScheduler`) | `st refs Scheduled`; a whole library package: `st impact org.springframework.scheduling --depth 1` |
 | Narrow a result by annotation, kind or file | `... \| st filter --annotated Test`, `--kind method`, `--not --file '*Test*'` |
 | Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
 

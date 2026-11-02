@@ -115,7 +115,8 @@ bool parametersMatch(const std::vector<std::wstring>& wanted, const std::vector<
 	return true;
 }
 
-std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& query, NodeKindMask kinds)
+// Project symbols only, or with `library` only the symbols without a definition in the project (library types).
+std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& query, NodeKindMask kinds, bool library = false)
 {
 	std::vector<Candidate> result;
 	std::set<Id> seen;
@@ -123,7 +124,7 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 	{
 		for (Id id: match.tokenIds)
 		{
-			if (!seen.insert(id).second || storage.getDefinitionKindForNodeId(id) == DEFINITION_NONE ||
+			if (!seen.insert(id).second || (storage.getDefinitionKindForNodeId(id) == DEFINITION_NONE) != library ||
 				!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds) || isUnsolvedSymbol(storage, id))
 			{
 				continue;
@@ -236,10 +237,19 @@ std::wstring symbolKey(const NameHierarchy& name)
 Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds)
 {
 	const std::wstring query = searchText(text);
-	Resolved resolved = pick(collect(storage, query, kinds), text);
-	if (resolved.status == Resolution::NotFound && query != text)
+	Resolved resolved;
+	// A project symbol wins; a library symbol (an annotation such as `Scheduled`) answers only when none has the name.
+	for (const bool library: {false, true})
 	{
-		resolved = pick(collect(storage, text, kinds), text);
+		resolved = pick(collect(storage, query, kinds, library), text);
+		if (resolved.status == Resolution::NotFound && query != text)
+		{
+			resolved = pick(collect(storage, text, kinds, library), text);
+		}
+		if (resolved.status != Resolution::NotFound)
+		{
+			break;
+		}
 	}
 	return resolved;
 }

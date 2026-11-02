@@ -191,6 +191,35 @@ TEST_CASE("st hides external symbols from resolution and find")
 	REQUIRE(st::findSymbols(storage, L"List", ALL_KINDS) == std::vector<Id>{localId});
 }
 
+TEST_CASE("st resolves a library symbol when no project symbol has the name")
+{
+	Code code;
+	NameHierarchy scheduled(NAME_DELIMITER_JAVA);
+	for (const wchar_t* element: {L"org", L"springframework", L"scheduling", L"annotation", L"Scheduled"})
+	{
+		scheduled.push(element);
+	}
+	// The indexer records a library annotation as a bare symbol without a definition.
+	const Id annotation = code.storage.addNode(StorageNodeData(nodeKindToInt(NODE_SYMBOL), NameHierarchy::serialize(scheduled))).first;
+	const Id job = code.type(L"Job");
+	const Id run = code.member(job, L"Job", L"run");
+	code.link(Edge::EDGE_ANNOTATION_USAGE, run, annotation, L"Job", {3});
+	code.storage.buildCaches();
+	REQUIRE(code.storage.getDefinitionKindForNodeId(annotation) == DEFINITION_NONE);
+	for (const std::wstring name: {L"Scheduled", L"org.springframework.scheduling.annotation.Scheduled"})
+	{
+		const auto resolved = st::resolveSymbol(code.storage, name, ALL_KINDS);
+		REQUIRE(resolved.status == st::Resolution::Found);
+		REQUIRE(resolved.ids == std::vector<Id>{annotation});
+	}
+	const auto lines = st::references(code.storage, {annotation});
+	REQUIRE(lines.size() == 1);
+	REQUIRE(lines[0].key == L"p.Job.run()");
+	REQUIRE(lines[0].kind == L"annotation usage");
+	// find lists project symbols only
+	REQUIRE(st::findSymbols(code.storage, L"Scheduled", ALL_KINDS).empty());
+}
+
 TEST_CASE("st find matches substrings only and ranks exact before suffix before substring")
 {
 	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));

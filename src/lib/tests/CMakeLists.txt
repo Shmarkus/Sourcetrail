@@ -69,6 +69,9 @@ target_link_libraries(LanguagePackageManagerTestSuite PRIVATE Sourcetrail::core:
 
 target_link_libraries(SingleValueCacheTestSuite PRIVATE Sourcetrail::core::utility::SingleValueCache)
 
+# setupPlatform() of the platform includes resolves the user data directory
+target_link_libraries(UserPathsTestSuite PRIVATE Sourcetrail::lib_gui)
+
 # target_link_libraries(StatusBarControllerTestSuite PRIVATE Sourcetrail::messaging)
 # target_link_libraries(StatusControllerTestSuite PRIVATE Sourcetrail::messaging)
 

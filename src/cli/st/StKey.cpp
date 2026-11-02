@@ -302,12 +302,17 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
 		// Type parameters (`failed<T>.T`) show up only when the mask is exactly the type-parameter kind (--kind takes one kind).
 		kinds &= ~NODE_TYPE_PARAMETER;
 	}
-	const std::wstring bare = withoutTypeParameters(text);
+	// A parameter list narrows the name's matches to the overloads it fits, as name resolution does.
+	const std::wstring name = searchText(text);
+	const bool hasParameters = name != text;
+	const std::vector<std::wstring> wanted = parameterTypes(text);
+	const std::wstring bare = withoutTypeParameters(name);
 	const std::wstring needle = lower(bare);
 	std::vector<std::pair<int, Id>> ranked;
-	for (const Candidate& candidate: collect(storage, text, search(storage, text), kinds))
+	for (const Candidate& candidate: collect(storage, name, search(storage, name), kinds))
 	{
-		if (lower(candidate.bareQualified).find(needle) == std::wstring::npos)
+		if (lower(candidate.bareQualified).find(needle) == std::wstring::npos ||
+			(hasParameters && !parametersMatch(wanted, candidate.parameters)))
 		{
 			continue;
 		}

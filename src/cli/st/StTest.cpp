@@ -255,6 +255,19 @@ TEST_CASE("st find matches substrings only and ranks exact before suffix before 
 	REQUIRE(st::findSymbols(storage, L"MARKFAILEDALL", ALL_KINDS) == std::vector<Id>{substring});
 }
 
+TEST_CASE("st find with a parameter list keeps the matching overloads")
+{
+	PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+	storage.setup();
+	const Id runInt = add(storage, method({L"example", L"Job"}, L"run", L"void", L"(int)"));
+	const Id runOrder = add(storage, method({L"example", L"Job"}, L"run", L"void", L"(com.acme.Order, int)"));
+	storage.buildCaches();
+	REQUIRE(st::findSymbols(storage, L"Job.run(int)", ALL_KINDS) == std::vector<Id>{runInt});
+	REQUIRE(st::findSymbols(storage, L"Job.run(Order, int)", ALL_KINDS) == std::vector<Id>{runOrder});
+	REQUIRE(st::findSymbols(storage, L"Job.run", ALL_KINDS).size() == 2);
+	REQUIRE(st::findSymbols(storage, L"Job.run(long)", ALL_KINDS).empty());
+}
+
 TEST_CASE("st output keeps best-ranked results under the limit")
 {
 	st::OutputOptions options;

@@ -12,7 +12,7 @@ root="$(realpath "$(dirname "$0")/../..")"
 [ -x "$cli" ] || die "Sourcetrail_cli not found next to st: $cli"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-st-smoke.XXXXXX")"
 server_pid=
-trap 'status=$?; [ -z "$server_pid" ] || kill -9 "$server_pid" 2> /dev/null || true; rm -f "$(sed -n "s/^st: serving .* on //p" "$work/serve.err" 2> /dev/null)"; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
+trap 'status=$?; [ -z "$server_pid" ] || kill -9 $server_pid 2> /dev/null || true; socket="$(sed -n "s/^st: serving .* on //p" "$work/serve.err" 2> /dev/null)"; [ -z "$socket" ] || rm -f "$socket" "$socket.lock"; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
 export HOME="$work/home"
 export SOURCETRAIL_VIA_SCRIPT=1
@@ -34,10 +34,31 @@ run() {
     [ "$code" = "$expected" ] || assert "'st $*' exited $code, expected $expected"
 }
 contains() { grep -qF -- "$1" "$work/$2" || assert "$2 lacks '$1'"; }
+# start_server [binary [serve options]]: runs st serve in the background and waits until it listens.
+start_server() {
+    "${1:-$st}" serve "${@:2}" > "$work/serve.out" 2> "$work/serve.err" &
+    server_pid=$!
+    for _ in $(seq 100); do
+        grep -qF 'st: serving ' "$work/serve.err" && return
+        kill -0 "$server_pid" 2> /dev/null || assert "st serve exited: $(cat "$work/serve.err")"
+        sleep 0.1
+    done
+    assert "st serve did not start listening: $(cat "$work/serve.err")"
+}
 
-# No index yet: exit 4, then build it and register the project with --project.
+# No index yet: exit 4, then build it and register the project with --project. A server started before the index
+# exists watches the sources once it does.
 run 4 --project "$project" find getName
+start_server "$st" --project "$project"
+# Past the server's first look (500 ms after it starts), which finds no index.
+sleep 1
 "$cli" index "$project" --full > "$work/index.json" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
+for _ in $(seq 100); do grep -qF 'st: watching ' "$work/serve.err" && break; sleep 0.1; done
+grep -qF 'st: watching ' "$work/serve.err" || assert "a server started without an index never watched: $(cat "$work/serve.err")"
+! grep -qF 'st: refreshing ' "$work/serve.err" || assert "a server refreshed a fresh index: $(cat "$work/serve.err")"
+kill "$server_pid"
+wait "$server_pid" 2> /dev/null || true
+server_pid=
 run 0 --project "$project" find getName
 run 0 find getName
 [ "$(head -n1 "$work/out" | cut -f1)" = "example.Person.getName()" ] || assert "first find column: $(head -n1 "$work/out")"
@@ -233,17 +254,6 @@ cp "$project" "$work/empty/project.srctrlprj"
 run 4 --project "$work/empty/project.srctrlprj" find getName
 
 # st serve: answers through the server equal the cold ones, stay fresh, and fall back when it dies.
-# start_server [binary [serve options]]: runs st serve in the background and waits until it listens.
-start_server() {
-    "${1:-$st}" serve "${@:2}" > "$work/serve.out" 2> "$work/serve.err" &
-    server_pid=$!
-    for _ in $(seq 100); do
-        grep -qF 'st: serving ' "$work/serve.err" && return
-        kill -0 "$server_pid" 2> /dev/null || assert "st serve exited: $(cat "$work/serve.err")"
-        sleep 0.1
-    done
-    assert "st serve did not start listening: $(cat "$work/serve.err")"
-}
 # same <stdin file> <args...>: stdout (without the server status line), stderr and exit code through the server
 # equal those of ST_NO_SERVER=1.
 same() {
@@ -385,6 +395,10 @@ diff "$work/cold.out" "$work/out" > /dev/null || assert "rebuilt st answered dif
 "$work/rebuilt/st" status > "$work/out" 2> "$work/err" || assert "rebuilt st status failed"
 contains 'st: server is from another build; answering without it' err
 contains $'server\toff' out
+run 70 serve
+contains 'st: a server from another build is running; run st serve --stop first' err
+run 70 serve --detach
+contains 'st: a server from another build is running; run st serve --stop first' err
 kill "$server_pid"
 wait "$server_pid" 2> /dev/null || true
 server_pid=
@@ -452,6 +466,47 @@ contains 'st: waited ' err
 contains 'example.Caller.sing(example.Person)' out
 settled
 run 0 serve --stop
+
+# A server stopped mid-refresh leaves the indexer running. An edit made during that refresh is not taken as indexed:
+# the next cold query refreshes it.
+run 0 serve --detach
+for _ in $(seq 100); do grep -qF 'st: watching ' "$log" && break; sleep 0.1; done
+sed -i 's/^}$/    public String hymn(Person person) { return person.getName().intern(); }\n}/' "$caller"
+refreshing 1
+run 0 serve --stop
+indexer="$(sed -n 's/^st: leaving the background refresh (pid \([0-9]*\)) to finish$/\1/p' "$log")"
+[ -n "$indexer" ] || assert "stopped server did not leave its refresh running: $(cat "$log")"
+sed -i 's/^}$/    public String drone(Person person) { return person.getName().stripLeading(); }\n}/' "$caller"
+kill -0 "$indexer" 2> /dev/null || assert "the refresh ended before the edit; the check below proves nothing"
+for _ in $(seq 600); do kill -0 "$indexer" 2> /dev/null || break; sleep 0.1; done
+! kill -0 "$indexer" 2> /dev/null || assert "the left refresh did not end within 60 s"
+run 0 callers 'example.Person.getName()'
+contains 'refreshed' err
+contains 'example.Caller.drone(example.Person)' out
+[ ! -e "$project.srctrlst-start" ] || assert "a completed refresh left the unfinished-refresh record behind"
+
+# Two servers starting at once: one serves, the other finds it running, and --stop leaves neither.
+"$st" serve --no-watch > "$work/a.out" 2> "$work/a.err" &
+first=$!
+"$st" serve --no-watch > "$work/b.out" 2> "$work/b.err" &
+second=$!
+server_pid="$first $second"
+for _ in $(seq 100); do
+    [ "$(cat "$work/a.err" "$work/b.err" | grep -cE '^st: (serving|server already running for) ')" = 2 ] && break
+    sleep 0.1
+done
+[ "$(cat "$work/a.err" "$work/b.err" | grep -c '^st: serving ')" = 1 ] \
+    || assert "not exactly one server serves: $(cat "$work/a.err" "$work/b.err")"
+[ "$(cat "$work/a.err" "$work/b.err" | grep -c '^st: server already running for ')" = 1 ] \
+    || assert "the other server did not find it running: $(cat "$work/a.err" "$work/b.err")"
+run 0 status
+contains $'server\trunning' out
+run 0 serve --stop
+for _ in $(seq 50); do kill -0 "$first" 2> /dev/null || kill -0 "$second" 2> /dev/null || break; sleep 0.1; done
+! kill -0 "$first" 2> /dev/null || assert "a server outlived --stop"
+! kill -0 "$second" 2> /dev/null || assert "a server outlived --stop"
+wait "$first" "$second" 2> /dev/null || true
+server_pid=
 
 # SIGTERM removes the socket file and ends the server.
 start_server

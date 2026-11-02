@@ -1,5 +1,6 @@
 #include "StClient.h"
 
+#include <QFileInfo>
 #include <QLocalSocket>
 
 #include "StServer.h"
@@ -17,8 +18,21 @@ namespace st
 std::optional<int> tryServer(const FilePath& projectFile, const Request& request, const QByteArray& stdinData,
 	std::ostream& out, std::ostream& err)
 {
+	const QString name = serverSocketName(projectFile);
+	const QString directory = QFileInfo(name).path();
+	switch (privateDirectory(directory, false))
+	{
+	case DirectoryState::MISSING:
+		return std::nullopt;
+	case DirectoryState::UNSAFE:
+		// Someone else could listen there and be sent this request.
+		err << "st: unsafe server directory " << directory.toStdString() << "; answering without it\n";
+		return std::nullopt;
+	case DirectoryState::PRIVATE:
+		break;
+	}
 	QLocalSocket socket;
-	socket.connectToServer(serverSocketName(projectFile));
+	socket.connectToServer(name);
 	if (!socket.waitForConnected(CONNECT_MS))
 	{
 		return std::nullopt;
@@ -37,8 +51,10 @@ std::optional<int> tryServer(const FilePath& projectFile, const Request& request
 		err << "st: server " << reply.refusal.toStdString() << "; answering without it\n";
 		return std::nullopt;
 	}
-	out.write(reply.out.constData(), reply.out.size());
+	// Notes first, as a cold run piped to a file shows them.
 	err.write(reply.err.constData(), reply.err.size());
+	err.flush();
+	out.write(reply.out.constData(), reply.out.size());
 	out.flush();
 	return reply.exitCode;
 }

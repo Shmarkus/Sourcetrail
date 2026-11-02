@@ -51,6 +51,11 @@ constexpr int LOG_TAIL = 20;
 constexpr int POLL_MS = 100;
 constexpr qint64 REFRESH_MS = 600000;	// as a request's refresh
 constexpr int LOCK_MS = 5000;
+constexpr qint64 RETRY_MS = 5000;	// while an indexer writes, or while there is no index to watch
+constexpr int PROBE_ACK_MS = 2000;
+// Fixed for every protocol version: any server stops on it, a server of any build or protocol can be ended.
+const QByteArray STOP_REQUEST = QByteArrayLiteral("st serve --stop");
+const QByteArray STOP_REPLY = QByteArrayLiteral("st serve stopping");
 
 QDataStream& stream(QDataStream& data)
 {
@@ -136,18 +141,28 @@ private:
 	enum class Index
 	{
 		READ,
-		BUSY,	// locked, or being written by an indexer
+		BUSY,	// locked by another st
+		INDEXING,	// being written by an indexer (or a temporary database left behind)
 		NONE	// missing, empty or incompatible
 	};
 
 	// Loads the index into the cache under the project lock.
 	Index readIndex(const ProjectSettings& settings, int waitMs, TimeStamp* indexedAt, std::vector<FilePath>* files)
 	{
+		// Checked before the lock too, so an indexer's temporary database does not have st take the lock repeatedly.
+		if (settings.getTempDBFilePath().exists())
+		{
+			return Index::INDEXING;
+		}
 		QLockFile lock(st::projectLockFile(m_project));
 		lock.setStaleLockTime(0);
-		if (!lock.tryLock(waitMs) || settings.getTempDBFilePath().exists())
+		if (!lock.tryLock(waitMs))
 		{
 			return Index::BUSY;
+		}
+		if (settings.getTempDBFilePath().exists())
+		{
+			return Index::INDEXING;
 		}
 		if (!settings.getDBFilePath().exists())
 		{
@@ -219,24 +234,34 @@ private:
 		}
 		m_watcher.settle();
 		recordPending(0);
-		if (m_scheduler.due(m_clock.elapsed()))
+		const qint64 now = m_clock.elapsed();
+		if (m_scheduler.due(now) && now >= m_retryAt)
 		{
+			begin();
+		}
+		else if (!m_watching && !m_process && !m_scheduler.pending() && now - m_attempted >= RETRY_MS)
+		{
+			// Started without an index: watch once one exists.
 			begin();
 		}
 	}
 
 	void begin()
 	{
+		m_attempted = m_clock.elapsed();
 		ProjectSettings settings;
 		TimeStamp indexedAt;
 		std::vector<FilePath> files;
 		const Index index = load(&settings) ? readIndex(settings, 0, &indexedAt, &files) : Index::NONE;
-		if (index == Index::BUSY)
+		if (index == Index::BUSY || index == Index::INDEXING)
 		{
-			// Another st or an indexer is at work: look again after the next quiet period.
+			// Another st or an indexer is at work: look again after the next quiet period, or later while an indexer
+			// writes.
 			m_scheduler.changed(m_clock.elapsed());
+			m_retryAt = index == Index::INDEXING ? m_clock.elapsed() + RETRY_MS : 0;
 			return;
 		}
+		m_retryAt = 0;
 		m_scheduler.started();
 		if (index == Index::NONE)
 		{
@@ -248,14 +273,16 @@ private:
 		{
 			watch(settings, files);
 		}
-		const st::Freshness freshness =
-			st::checkFreshness(settings, st::freshnessBaseline(indexedAt, st::lastRefresh(settings)), files);
+		const st::Freshness freshness = st::checkFreshness(
+			settings, st::freshnessBaseline(indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)), files);
 		if (!freshness.stale)
 		{
 			m_scheduler.finished();
 			return;
 		}
 		m_started = st::refreshStart();
+		// On disk before the indexer starts: a refresh this server leaves running when it stops is still accounted for.
+		st::recordRefreshStart(settings, m_started, m_err);
 		m_changed = freshness.changedFiles;
 		m_running.start();
 		m_process = new QProcess();
@@ -337,12 +364,14 @@ private:
 	TimeStamp m_started;
 	size_t m_changed = 0;
 	bool m_watching = false;
+	qint64 m_retryAt = 0;
+	qint64 m_attempted = 0;
 	st::PendingRecord m_pending;
 };
 
 // The reply to one request, or nullopt to close the connection without one.
 std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath& served, st::IndexCache& cache,
-	BackgroundRefresh* background, bool* stop)
+	BackgroundRefresh* background)
 {
 	st::WireReply reply{st::EXIT_INTERNAL, {}, {}};
 	const auto refuse = [&reply](const char* reason) {
@@ -353,13 +382,6 @@ std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath&
 	if (wire.version != st::PROTOCOL_VERSION)
 	{
 		return refuse("speaks another protocol version");
-	}
-	// A stop is obeyed whatever the build, so a server left over from a rebuild can still be ended.
-	if (wire.request.arguments == QStringList{"st", "serve", "--stop"})
-	{
-		*stop = true;
-		reply.exitCode = st::EXIT_RESULTS;
-		return reply;
 	}
 	if (wire.buildId != st::buildId())
 	{
@@ -404,9 +426,22 @@ bool handle(QLocalSocket& socket, const FilePath& served, st::IndexCache& cache,
 	bool stop = false;
 	QByteArray payload;
 	st::WireRequest request;
-	if (st::readFrame(socket, &payload, READ_MS) && st::decode(payload, &request) && st::writeAck(socket, READ_MS))
+	if (!st::readFrame(socket, &payload, READ_MS))
 	{
-		if (const std::optional<st::WireReply> reply = answer(request, served, cache, background, &stop))
+		// nothing to answer
+	}
+	else if (payload == STOP_REQUEST)
+	{
+		// Obeyed before any version or build check, so a server left over from a rebuild can still be ended.
+		stop = true;
+		if (st::writeAck(socket, READ_MS))
+		{
+			st::writeFrame(socket, STOP_REPLY, READ_MS);
+		}
+	}
+	else if (st::decode(payload, &request) && st::writeAck(socket, READ_MS))
+	{
+		if (const std::optional<st::WireReply> reply = answer(request, served, cache, background))
 		{
 			st::writeFrame(socket, st::encode(*reply), READ_MS);
 		}
@@ -495,17 +530,6 @@ bool writeAll(QLocalSocket& socket, const QByteArray& data, const QDeadlineTimer
 
 namespace st
 {
-QString serverSocketName(const FilePath& projectFile)
-{
-	const QString path = QString::fromStdWString(projectFile.wstr());
-	const QString canonical = QFileInfo(path).canonicalFilePath();
-	const QByteArray hash = QCryptographicHash::hash(
-		(canonical.isEmpty() ? QDir::cleanPath(QFileInfo(path).absoluteFilePath()) : canonical).toUtf8(),
-		QCryptographicHash::Sha1);
-	const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
-	return (runtime.isEmpty() ? QDir::tempPath() : runtime) + "/st-" + QString::fromLatin1(hash.toHex().left(16)) + ".sock";
-}
-
 QString buildId()
 {
 	// Taken once: a rebuild replaces the file under a running server, which must keep its own identity.
@@ -586,23 +610,44 @@ bool readAck(QLocalSocket& socket, int timeoutMs)
 
 bool serverRunning(const FilePath& projectFile)
 {
+	const QString name = serverSocketName(projectFile);
+	if (privateDirectory(QFileInfo(name).path(), false) != DirectoryState::PRIVATE)
+	{
+		return false;
+	}
 	QLocalSocket socket;
-	socket.connectToServer(serverSocketName(projectFile));
+	socket.connectToServer(name);
 	return socket.waitForConnected(PROBE_MS);
 }
 
 int stopServer(const FilePath& projectFile, std::ostream& err)
 {
+	const QString name = serverSocketName(projectFile);
+	const QString directory = QFileInfo(name).path();
+	if (privateDirectory(directory, false) == DirectoryState::UNSAFE)
+	{
+		err << "st: unsafe server directory " << directory.toStdString() << '\n';
+		return EXIT_INTERNAL;
+	}
 	QLocalSocket socket;
-	socket.connectToServer(serverSocketName(projectFile));
-	QByteArray payload;
-	WireReply reply;
-	if (!socket.waitForConnected(PROBE_MS) ||
-		!writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), {{"st", "serve", "--stop"}, {}, false}, {}}), READ_MS) ||
-		!readAck(socket, READ_MS) || !readFrame(socket, &payload, READ_MS) || !decode(payload, &reply) || reply.refused)
+	socket.connectToServer(name);
+	if (!socket.waitForConnected(PROBE_MS))
 	{
 		err << "st: no server running\n";
 		return EXIT_EMPTY;
+	}
+	QByteArray payload;
+	if (!writeFrame(socket, STOP_REQUEST, READ_MS) || !readAck(socket, READ_MS) || !readFrame(socket, &payload, READ_MS))
+	{
+		err << "st: server did not answer\n";
+		return EXIT_INTERNAL;
+	}
+	if (payload != STOP_REPLY)
+	{
+		WireReply reply;
+		err << "st: server " << (decode(payload, &reply) && reply.refused ? reply.refusal.toStdString() : "did not stop")
+			<< '\n';
+		return EXIT_INTERNAL;
 	}
 	// The server answers until its event loop has ended and the socket is closed.
 	const QDeadlineTimer deadline(STOP_MS);
@@ -619,13 +664,61 @@ int stopServer(const FilePath& projectFile, std::ostream& err)
 	return 0;
 }
 
+namespace
+{
+enum class Running
+{
+	NO,
+	THIS_BUILD,
+	OTHER_BUILD
+};
+
+// Whether a server for the project answers, and whether it is of this build: a server of this build closes the
+// connection on `st serve` without a reply, one of another build or protocol refuses it.
+Running runningServer(const FilePath& projectFile)
+{
+	if (!serverRunning(projectFile))
+	{
+		return Running::NO;
+	}
+	QLocalSocket socket;
+	socket.connectToServer(serverSocketName(projectFile));
+	if (!socket.waitForConnected(PROBE_MS))
+	{
+		return Running::NO;
+	}
+	const QString project = QString::fromStdWString(projectFile.wstr());
+	const Request probe{{"st", "serve", "--project", project}, QDir::currentPath(), true};
+	QByteArray payload;
+	WireReply reply;
+	if (writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), probe, {}}), READ_MS) && readAck(socket, PROBE_ACK_MS) &&
+		readFrame(socket, &payload, READ_MS) && decode(payload, &reply) && reply.refused)
+	{
+		return Running::OTHER_BUILD;
+	}
+	// Busy or silent: it is running all the same.
+	return Running::THIS_BUILD;
+}
+
+// The answer to `st serve` when a server already runs.
+int alreadyRunning(Running running, const QString& project, std::ostream& err)
+{
+	if (running == Running::OTHER_BUILD)
+	{
+		err << "st: a server from another build is running; run st serve --stop first\n";
+		return EXIT_INTERNAL;
+	}
+	err << "st: server already running for " << project.toStdString() << '\n';
+	return EXIT_RESULTS;
+}
+}
+
 int detachServer(const FilePath& projectFile, const ServeOptions& options, std::ostream& err)
 {
 	const QString project = QString::fromStdWString(projectFile.wstr());
-	if (serverRunning(projectFile))
+	if (const Running running = runningServer(projectFile); running != Running::NO)
 	{
-		err << "st: server already running for " << project.toStdString() << '\n';
-		return 0;
+		return alreadyRunning(running, project, err);
 	}
 	const QString log = QFileInfo(project).absoluteDir().absoluteFilePath(".st-serve.log");
 	QProcess process;
@@ -670,10 +763,29 @@ int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream
 	buildId();
 	const QString project = QString::fromStdWString(projectFile.wstr());
 	const QString name = serverSocketName(projectFile);
-	if (serverRunning(projectFile))
+	const QString directory = QFileInfo(name).path();
+	if (const DirectoryState state = privateDirectory(directory, true); state != DirectoryState::PRIVATE)
 	{
-		err << "st: server already running for " << project.toStdString() << '\n';
-		return EXIT_RESULTS;
+		err << "st: " << (state == DirectoryState::UNSAFE ? "unsafe server directory " : "cannot create server directory ")
+			<< directory.toStdString() << '\n';
+		return EXIT_INTERNAL;
+	}
+	// Held for the server's lifetime, so of two servers starting at once only one removes and claims the socket.
+	const QString lockName = name + ".lock";
+	QLockFile lock(lockName);
+	lock.setStaleLockTime(0);
+	if (!lock.tryLock(0))
+	{
+		if (lock.error() != QLockFile::LockFailedError)
+		{
+			err << "st: cannot lock " << lockName.toStdString() << '\n';
+			return EXIT_INTERNAL;
+		}
+		return alreadyRunning(runningServer(projectFile), project, err);
+	}
+	if (const Running running = runningServer(projectFile); running != Running::NO)
+	{
+		return alreadyRunning(running, project, err);
 	}
 	QLocalServer::removeServer(name);
 	QLocalServer server;

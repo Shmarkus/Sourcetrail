@@ -451,7 +451,8 @@ File times are compared below the second; only a file saved within about 20 ms b
 more.
 
 **`st serve`.** Opt-in resident server for one project: it keeps the index loaded and answers `st` calls over a Unix socket
-(under `$XDG_RUNTIME_DIR`, else the temp dir), so a query costs about 100-150 ms instead of 0.4-0.6 s on a large project.
+(in `$XDG_RUNTIME_DIR/st/`, else `/tmp/st-<uid>/`; a directory not private to you is refused), so a query costs
+about 100-150 ms instead of 0.4-0.6 s on a large project.
 - `st serve` runs in the foreground; `st serve --detach` starts it in the background (output in `<project dir>/.st-serve.log`);
   `st serve --stop` stops it. `st status` ends with `server<TAB>running` or `server<TAB>off`.
 - While it runs it watches the sources and re-indexes in the background after edits (log: `<project dir>/.st-refresh.log`), so

@@ -27,6 +27,11 @@ QString refreshFile(const ProjectSettings& settings)
 	return QString::fromStdWString(settings.getFilePath().replaceExtension(L".srctrlst").wstr());
 }
 
+QString startFile(const ProjectSettings& settings)
+{
+	return refreshFile(settings) + "-start";
+}
+
 // Sub-second, unlike FileSystem::getLastWriteTime: an edit and the refresh it triggers often share a second.
 bool changedSince(const FilePath& path, const TimeStamp& indexedAt)
 {
@@ -204,14 +209,72 @@ void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record,
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text) || file.write(text.c_str()) < 0 || !file.commit())
 	{
 		err << "st: cannot write " << file.fileName().toStdString() << '\n';
+		return;
+	}
+	// This refresh saw every edit made before it started, so an unfinished one that started no later is covered.
+	if (std::optional<TimeStamp> inProgress = refreshInProgress(settings))
+	{
+		TimeStamp startedAt = record.startedAt;
+		if (*inProgress <= startedAt)
+		{
+			QFile::remove(startFile(settings));
+		}
 	}
 }
 
-TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last)
+std::optional<TimeStamp> refreshInProgress(const ProjectSettings& settings)
+{
+	QFile file(startFile(settings));
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+	{
+		return std::nullopt;
+	}
+	try
+	{
+		const TimeStamp startedAt(QString::fromUtf8(file.readAll()).trimmed().toStdString());
+		return startedAt.isValid() ? std::optional<TimeStamp>(startedAt) : std::nullopt;
+	}
+	catch (const std::exception&)
+	{
+		return std::nullopt;
+	}
+}
+
+void recordRefreshStart(const ProjectSettings& settings, const TimeStamp& startedAt, std::ostream& err)
+{
+	if (std::optional<TimeStamp> earlier = refreshInProgress(settings))
+	{
+		TimeStamp start = startedAt;	// TimeStamp compares only non-const
+		if (*earlier <= start)
+		{
+			// An earlier refresh has not recorded its end: its start stays the conservative one.
+			return;
+		}
+	}
+	QSaveFile file(startFile(settings));
+	const std::string text = toPreciseString(startedAt) + "\n";
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text) || file.write(text.c_str()) < 0 || !file.commit())
+	{
+		err << "st: cannot write " << file.fileName().toStdString() << '\n';
+	}
+}
+
+TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last,
+	const std::optional<TimeStamp>& inProgress)
 {
 	if (last && last->indexedAt.toString() == indexedAt.toString())
 	{
 		return last->startedAt;
+	}
+	// A refresh started and never recorded its end, e.g. one left running by a server that stopped: the index it
+	// may have written misses edits made during it.
+	if (inProgress)
+	{
+		TimeStamp started = *inProgress;	// TimeStamp compares only non-const
+		if (started < indexedAt)
+		{
+			return started;
+		}
 	}
 	return indexedAt;
 }

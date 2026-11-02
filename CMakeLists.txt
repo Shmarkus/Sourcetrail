@@ -786,7 +786,7 @@ add_library(Sourcetrail_st_lib STATIC
 	src/cli/st/StKey.cpp src/cli/st/StOutput.cpp src/cli/st/StInput.cpp src/cli/st/StProject.cpp
 	src/cli/st/StGraph.cpp src/cli/st/StFreshness.cpp src/cli/st/StLombok.cpp
 	src/cli/st/StFilter.cpp src/cli/st/StFiles.cpp src/cli/st/StArchitecture.cpp src/cli/st/StGaps.cpp
-	src/cli/st/StCommand.cpp src/cli/st/StIndexCache.cpp src/cli/st/StServer.cpp src/cli/st/StClient.cpp
+	src/cli/st/StCommand.cpp src/cli/st/StIndexCache.cpp src/cli/st/StServer.cpp src/cli/st/StClient.cpp src/cli/st/StSocket.cpp
 	src/cli/st/StWatch.cpp)
 target_include_directories(Sourcetrail_st_lib PUBLIC ${PROJECT_SOURCE_DIR}/src/cli/st)
 target_link_libraries(Sourcetrail_st_lib PUBLIC Sourcetrail_cli_queries Qt5::Network)

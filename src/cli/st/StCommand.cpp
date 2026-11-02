@@ -648,7 +648,8 @@ int inspect(const st::Io& io, const ProjectSettings& settings, const QString& lo
 		indexedFiles.push_back(file.path);
 	}
 	*indexedAt = storage.getStorageStats().timestamp;
-	*freshness = st::checkFreshness(settings, st::freshnessBaseline(*indexedAt, st::lastRefresh(settings)), indexedFiles);
+	*freshness = st::checkFreshness(
+		settings, st::freshnessBaseline(*indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)), indexedFiles);
 	return st::EXIT_RESULTS;
 }
 
@@ -664,6 +665,8 @@ int refreshIfStale(const st::Io& io, const ProjectSettings& settings, const QStr
 	QElapsedTimer timer;
 	timer.start();
 	const TimeStamp started = st::refreshStart();
+	// On disk before the indexer starts: should this process end first, the index it leaves is not taken as current.
+	st::recordRefreshStart(settings, started, io.err);
 	const size_t changedFiles = freshness->changedFiles;
 	std::string log;
 	std::string failure;

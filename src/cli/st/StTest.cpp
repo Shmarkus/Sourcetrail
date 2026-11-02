@@ -9,6 +9,7 @@
 #include <QLocalSocket>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QtEndian>
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +19,11 @@
 #include <optional>
 #include <set>
 #include <sstream>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include <boost/date_time/c_local_time_adjustor.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -40,6 +46,7 @@
 #include "StOutput.h"
 #include "StProject.h"
 #include "StServer.h"
+#include "StSocket.h"
 #include "StTestSupport.h"
 #include "StWatch.h"
 #include "StorageNode.h"
@@ -780,6 +787,37 @@ TEST_CASE("st freshness baseline sees edits made during a refresh")
 	REQUIRE(st::freshnessBaseline(finished, std::nullopt).toString() == "2026-10-30 12:00:30");
 }
 
+TEST_CASE("st freshness baseline falls back to the start of an unfinished refresh")
+{
+	const TimeStamp started(std::string("2026-10-30 12:00:00"));
+	const TimeStamp finished(std::string("2026-10-30 12:00:30"));
+	const TimeStamp before(std::string("2026-10-30 11:00:00"));
+	// No refresh record matches the index a refresh left behind: its start is the baseline.
+	REQUIRE(st::freshnessBaseline(finished, std::nullopt, started).toString() == "2026-10-30 12:00:00");
+	REQUIRE(st::freshnessBaseline(finished, st::RefreshRecord{before, before}, started).toString() == "2026-10-30 12:00:00");
+	// The index predates the refresh: it is not that refresh's index yet.
+	REQUIRE(st::freshnessBaseline(before, std::nullopt, started).toString() == "2026-10-30 11:00:00");
+	// A matching record wins.
+	REQUIRE(st::freshnessBaseline(finished, st::RefreshRecord{started, finished}, before).toString() == "2026-10-30 12:00:00");
+
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	ProjectSettings settings(FilePath((QDir(dir.path()).canonicalPath() + "/x.srctrlprj").toStdWString()));
+	REQUIRE_FALSE(st::refreshInProgress(settings).has_value());
+	st::recordRefreshStart(settings, started);
+	REQUIRE(st::refreshInProgress(settings).has_value());
+	REQUIRE(st::refreshInProgress(settings)->toString() == "2026-10-30 12:00:00");
+	// A later start keeps the earlier, unfinished one.
+	st::recordRefreshStart(settings, TimeStamp(std::string("2026-10-30 12:05:00")));
+	REQUIRE(st::refreshInProgress(settings)->toString() == "2026-10-30 12:00:00");
+	// A completed refresh that started earlier does not cover it.
+	st::recordRefresh(settings, {before, finished});
+	REQUIRE(st::refreshInProgress(settings).has_value());
+	// One that started at or after it does.
+	st::recordRefresh(settings, {started, finished});
+	REQUIRE_FALSE(st::refreshInProgress(settings).has_value());
+}
+
 TEST_CASE("st freshness tells an edit just before a refresh from one during it within the same second")
 {
 	QTemporaryDir dir;
@@ -1309,6 +1347,73 @@ TEST_CASE("socket name is stable, per project, and short")
 		st::serverSocketName(FilePath(second.toStdWString())));
 }
 
+TEST_CASE("socket lives in a per-user directory and stays short under a long runtime dir")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const FilePath project((QDir(dir.path()).canonicalPath() + "/p.srctrlprj").toStdWString());
+	const QByteArray saved = qgetenv("XDG_RUNTIME_DIR");
+	const bool had = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+	const QString longRuntime = QDir(dir.path()).canonicalPath() + "/" + QString(200, 'r');
+	REQUIRE(QDir().mkpath(longRuntime));
+	qputenv("XDG_RUNTIME_DIR", longRuntime.toUtf8());
+	const QString fallback = st::serverSocketName(project);
+	const QString shortRuntime = QDir(dir.path()).canonicalPath();
+	qputenv("XDG_RUNTIME_DIR", shortRuntime.toUtf8());
+	const QString preferred = st::serverSocketName(project);
+	if (had)
+	{
+		qputenv("XDG_RUNTIME_DIR", saved);
+	}
+	else
+	{
+		qunsetenv("XDG_RUNTIME_DIR");
+	}
+	CHECK(fallback.toUtf8().size() <= 100);
+	CHECK(fallback.endsWith(".sock"));
+	CHECK_FALSE(fallback.startsWith(longRuntime));
+#ifndef _WIN32
+	CHECK(fallback.startsWith("/tmp/st-" + QString::number(getuid()) + "/st-"));
+#endif
+	if (shortRuntime.toUtf8().size() + 28 <= 100)
+	{
+		CHECK(preferred.startsWith(shortRuntime + "/st/st-"));
+	}
+	CHECK(QFileInfo(preferred).fileName() == QFileInfo(fallback).fileName());
+}
+
+#ifndef _WIN32
+TEST_CASE("server directory is created private and refused when a symlink or shared")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString own = base + "/st";
+	CHECK(st::privateDirectory(own, false) == st::DirectoryState::MISSING);
+	CHECK(st::privateDirectory(own, true) == st::DirectoryState::PRIVATE);
+	struct stat info = {};
+	REQUIRE(lstat(own.toLocal8Bit().constData(), &info) == 0);
+	CHECK((info.st_mode & 0777) == 0700);
+	CHECK(st::privateDirectory(own, true) == st::DirectoryState::PRIVATE);
+
+	REQUIRE(QFile::link(own, base + "/link"));
+	CHECK(st::privateDirectory(base + "/link", false) == st::DirectoryState::UNSAFE);
+	CHECK(st::privateDirectory(base + "/link", true) == st::DirectoryState::UNSAFE);
+
+	const QString shared = base + "/shared";
+	REQUIRE(QDir().mkdir(shared));
+	REQUIRE(chmod(shared.toLocal8Bit().constData(), 0770) == 0);
+	CHECK(st::privateDirectory(shared, true) == st::DirectoryState::UNSAFE);
+	REQUIRE(chmod(shared.toLocal8Bit().constData(), 0705) == 0);
+	CHECK(st::privateDirectory(shared, false) == st::DirectoryState::UNSAFE);
+
+	QFile file(base + "/file");
+	REQUIRE(file.open(QIODevice::WriteOnly));
+	file.close();
+	CHECK(st::privateDirectory(base + "/file", true) == st::DirectoryState::UNSAFE);
+}
+#endif
+
 namespace
 {
 // Accepts one connection on the project's socket and reads its request. With a reply it acknowledges the request and
@@ -1320,7 +1425,8 @@ public:
 		: m_thread(QThread::create([this, name, reply, holdMs]() {
 			QLocalServer server;
 			QLocalServer::removeServer(name);
-			m_listening.set_value(server.listen(name));
+			m_listening.set_value(st::privateDirectory(QFileInfo(name).path(), true) == st::DirectoryState::PRIVATE &&
+				server.listen(name));
 			if (!server.waitForNewConnection(5000))
 			{
 				return;
@@ -1420,6 +1526,35 @@ TEST_CASE("client answers cold when the server is from another build")
 	CHECK(asked >= 1900);
 	CHECK(asked < 3000);
 	CHECK(err4.str() == "st: server did not answer; answering without it\n");
+
+	// notes come before results, as on a cold run with both streams on one file
+	std::ostringstream both;
+	CHECK(ask(st::WireReply{0, "a\n", "callers: 1\n"}, both, both).first == std::optional<int>(0));
+	CHECK(both.str() == "callers: 1\na\n");
+}
+
+TEST_CASE("stop is one fixed frame and reports a refusal")
+{
+	int argc = 1;
+	char name[] = "st";
+	char* argv[] = {name, nullptr};
+	QCoreApplication app(argc, argv);
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const FilePath project((QDir(dir.path()).canonicalPath() + "/p.srctrlprj").toStdWString());
+	std::ostringstream none;
+	CHECK(st::stopServer(project, none) == st::EXIT_EMPTY);
+	CHECK(none.str() == "st: no server running\n");
+
+	FakeServer server(st::serverSocketName(project), st::WireReply{0, {}, {}, true, "speaks another protocol version"});
+	REQUIRE(server.listening());
+	std::ostringstream err;
+	CHECK(st::stopServer(project, err) == st::EXIT_INTERNAL);
+	CHECK(err.str() == "st: server speaks another protocol version\n");
+	// The frame is "st serve --stop" whatever the protocol: read as a request, its first four bytes are no version.
+	const std::optional<st::WireRequest> request = server.request();
+	REQUIRE(request);
+	CHECK(request->version == qFromBigEndian<quint32>("st s"));
 }
 
 TEST_CASE("frame read gives up on a slow client after one deadline")

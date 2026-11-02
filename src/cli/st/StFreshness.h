@@ -37,7 +37,13 @@ void recordRefresh(const ProjectSettings& settings, const RefreshRecord& record,
 // Changes at or after this time are not in the index. Sourcetrail writes the index time when indexing
 // ends and keeps it when a refresh re-indexes nothing, so while the index is still the one st's refresh
 // produced, that refresh's start is the baseline; after anyone else's indexing, the index time is.
-TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last);
+TimeStamp freshnessBaseline(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last,
+	const std::optional<TimeStamp>& inProgress = std::nullopt);
+
+// The start of a refresh that began and has not recorded its end, kept on disk (<project>.srctrlst-start) so a
+// refresh outliving its st process is still accounted for.
+std::optional<TimeStamp> refreshInProgress(const ProjectSettings& settings);
+void recordRefreshStart(const ProjectSettings& settings, const TimeStamp& startedAt, std::ostream& err = std::cerr);
 
 // The start time to record for a refresh that begins now.
 TimeStamp refreshStart();

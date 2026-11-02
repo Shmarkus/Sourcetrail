@@ -465,6 +465,20 @@ about 100-150 ms instead of 0.4-0.6 s on a large project.
   `st: server did not answer; answering without it`, and `st: waited Xs for the background refresh` (a query that arrived
   while a refresh was running). Measurements: `docs/superpowers/specs/2026-11-02-st-serve-results.md`.
 
+**Measured** (Nov 2, 2026, on a private 2k-file Spring/Gradle service with Lombok; `testing/benchmark`, `bench.py speed`):
+
+| | Without a server | With `st serve` | Target |
+|---|---|---|---|
+| Startup, `st status` | 400 ms | 83 ms | under 200 ms |
+| Query, median over the questions | 0.56 s | 0.14 s | under 1 s |
+| Query, slowest (`st at … \| st callers --depth 3`) | 1.11 s | 0.60 s | under 1 s |
+| First query right after a one-line edit (it refreshes) | 9.4 s | 8.4 s | under 5 s |
+
+With the watcher running, a query made some seconds after an edit finds the index already refreshed (about 120 ms).
+In the agent benchmark (`bench.py run`: 9 questions, 3 runs each, fresh headless agents, the same prompt with grep only
+or with `st` and the CLAUDE.md snippet), both arms answered 27 of 27 correctly; with `st`, agents used 23% fewer tokens,
+25% fewer tool calls and 12% less time per question (medians), and picked `st` unprompted on 18 of 21 structural questions.
+
 Tests for `st`: `ctest --test-dir build/Release -R cli.st` for the unit tests, and an end-to-end smoke test
 (isolated home, copied fixture, JDK 21):
 

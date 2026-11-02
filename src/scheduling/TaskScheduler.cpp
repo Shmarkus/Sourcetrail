@@ -29,24 +29,39 @@ void TaskScheduler::pushNextTask(std::shared_ptr<Task> task) {
 }
 
 void TaskScheduler::startSchedulerLoopThreaded() {
-  std::thread(&TaskScheduler::startSchedulerLoop, this).detach();
+  // Both flags are set before the thread starts, so a stopSchedulerLoop() right after this call
+  // can neither be missed by the loop nor return before the thread has finished.
+  if(!markLoopRunning()) {
+    return;
+  }
 
-  std::lock_guard<std::mutex> lock(m_threadMutex);
-  m_threadIsRunning = true;
+  {
+    std::lock_guard<std::mutex> lock(m_threadMutex);
+    m_threadIsRunning = true;
+  }
+
+  std::thread(&TaskScheduler::runSchedulerLoop, this).detach();
 }
 
 void TaskScheduler::startSchedulerLoop() {
-  {
-    std::lock_guard<std::mutex> lock(m_loopMutex);
+  if(markLoopRunning()) {
+    runSchedulerLoop();
+  }
+}
 
-    if(m_loopIsRunning) {
-      LOG_ERROR("Unable to start task scheduler. Loop is already running.");
-      return;
-    }
+bool TaskScheduler::markLoopRunning() {
+  std::lock_guard<std::mutex> lock(m_loopMutex);
 
-    m_loopIsRunning = true;
+  if(m_loopIsRunning) {
+    LOG_ERROR("Unable to start task scheduler. Loop is already running.");
+    return false;
   }
 
+  m_loopIsRunning = true;
+  return true;
+}
+
+void TaskScheduler::runSchedulerLoop() {
   while(true) {
     processTasks();
 
@@ -64,9 +79,7 @@ void TaskScheduler::startSchedulerLoop() {
 
   {
     std::lock_guard<std::mutex> lock(m_threadMutex);
-    if(m_threadIsRunning) {
-      m_threadIsRunning = false;
-    }
+    m_threadIsRunning = false;
   }
 }
 

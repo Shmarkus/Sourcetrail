@@ -92,18 +92,28 @@ void MessageQueue::processMessage(const std::shared_ptr<MessageBase>& message, b
 }
 
 void MessageQueue::startMessageLoopThreaded() noexcept {
-  // TODO(Hussein): Remove `detach()`
-  std::thread(&MessageQueue::startMessageLoop, this).detach();
-  mThreadIsRunning = true;
-}
-
-void MessageQueue::startMessageLoop() noexcept {
-  if(mLoopIsRunning) {
+  // Both flags are set before the thread starts, so a stopMessageLoop() right after this call
+  // can neither be missed by the loop nor return before the thread has finished.
+  if(mLoopIsRunning.exchange(true)) {
     LOG_ERROR("Loop is already running");
     return;
   }
-  mLoopIsRunning = true;
+  mThreadIsRunning = true;
 
+  // TODO(Hussein): Remove `detach()`
+  std::thread(&MessageQueue::runMessageLoop, this).detach();
+}
+
+void MessageQueue::startMessageLoop() noexcept {
+  if(mLoopIsRunning.exchange(true)) {
+    LOG_ERROR("Loop is already running");
+    return;
+  }
+
+  runMessageLoop();
+}
+
+void MessageQueue::runMessageLoop() noexcept {
   while(true) {
     processMessages();
 
@@ -115,9 +125,7 @@ void MessageQueue::startMessageLoop() noexcept {
     std::this_thread::sleep_for(25ms);
   }
 
-  if(mThreadIsRunning) {
-    mThreadIsRunning = false;
-  }
+  mThreadIsRunning = false;
 }
 
 void MessageQueue::stopMessageLoop() noexcept {

@@ -1,29 +1,29 @@
 #pragma once
+// STL
+#include <memory>
 // Qt5
 #include <QCoreApplication>
-// internal
-#include "MessageListener.h"
-#include "type/indexing/MessageIndexingStatus.h"
-#include "type/MessageQuitApplication.h"
-#include "type/MessageStatus.h"
 
-class QtCoreApplication
-    : public QCoreApplication
-    , public MessageListener<MessageQuitApplication>
-    , public MessageListener<MessageIndexingStatus>
-    , public MessageListener<MessageStatus> {
+/**
+ * @brief The application object of the headless (console) mode.
+ *
+ * Prints the indexing progress and status messages and quits on MessageQuitApplication. The message
+ * listeners are registered by startListening(), which must be called after Application::createInstance
+ * created the IMessageQueue: the application object itself has to exist before that.
+ */
+class QtCoreApplication : public QCoreApplication {
   // NOLINTNEXTLINE(readability-identifier-length)
   Q_OBJECT
 
 public:
-  QtCoreApplication(int argc, char** argv);
+  QtCoreApplication(int& argc, char** argv);
 
   ~QtCoreApplication() override;
 
+  void startListening();
+
 private:
-  void handleMessage(MessageQuitApplication* pMessage) override;
+  class ConsoleListener;
 
-  void handleMessage(MessageIndexingStatus* pMessage) override;
-
-  void handleMessage(MessageStatus* pMessage) override;
+  std::unique_ptr<ConsoleListener> mListener;
 };

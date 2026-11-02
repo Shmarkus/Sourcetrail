@@ -94,6 +94,7 @@ public:
   void setSendMessagesAsTasks(bool sendMessagesAsTasks) noexcept override;
 
 private:
+  void runMessageLoop() noexcept;
   void processMessages();
   void sendMessage(const std::shared_ptr<MessageBase>& message);
   void sendMessageAsTask(const std::shared_ptr<MessageBase>& message, bool asNextTask) const;

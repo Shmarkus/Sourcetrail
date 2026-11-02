@@ -26,6 +26,8 @@ public:
   void terminateRunningTasks();
 
 private:
+  bool markLoopRunning();
+  void runSchedulerLoop();
   void processTasks();
 
   const Id m_schedulerId;

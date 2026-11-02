@@ -70,7 +70,7 @@ void checkRunFromScript() {
 }
 
 int runConsole(int argc, char** argv, const Version& version, commandline::CommandLineParser& commandLineParser) {
-  const QtCoreApplication qtApp(argc, argv);
+  QtCoreApplication qtApp(argc, argv);
 
   checkRunFromScript();
 
@@ -79,6 +79,8 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
   auto factory = std::make_shared<lib::Factory>();
   Application::createInstance(version, factory, nullptr, nullptr);
   [[maybe_unused]] const ScopedFunctor scopedFunctor([]() { Application::destroyInstance(); });
+  // The listeners register with the IMessageQueue, which createInstance has just created.
+  qtApp.startListening();
 
   ApplicationSettingsPrefiller::prefillPaths(IApplicationSettings::getInstanceRaw());
   addLanguagePackages();
@@ -95,7 +97,7 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
   }
 
   if(commandLineParser.hasError()) {
-    std::wcout << commandLineParser.getError() << L'\n';
+    std::cout << utility::encodeToUtf8(commandLineParser.getError()) << '\n';
   } else {
     MessageLoadProject{commandLineParser.getProjectFilePath(),
                        false,
@@ -180,7 +182,7 @@ int main(int argc, char* argv[]) {
   std::vector<std::string> args;
   if(argc > 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    args = std::vector<std::string>(static_cast<size_t>(argc - 1), argv[1]);
+    args = std::vector<std::string>(argv + 1, argv + argc);
   }
 
   commandLineParser.preparse(std::move(args));

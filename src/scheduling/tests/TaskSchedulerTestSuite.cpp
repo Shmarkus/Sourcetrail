@@ -1,4 +1,6 @@
 #include <chrono>
+#include <future>
+#include <memory>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -101,6 +103,25 @@ TEST(TaskScheduler, loopStartsAndStops) {
   waitForThread(scheduler);
 
   EXPECT_TRUE(!scheduler.loopIsRunning());
+}
+
+TEST(TaskScheduler, stopRightAfterThreadedStartReturns) {
+  constexpr int Rounds = 50;
+  auto finished = std::make_shared<std::promise<void>>();
+  auto future = finished->get_future();
+
+  // Detached so that a hanging stop fails the test instead of blocking it forever.
+  std::thread([finished] {
+    for(int round = 0; round < Rounds; ++round) {
+      auto scheduler = std::make_unique<TaskScheduler>(0);
+      scheduler->startSchedulerLoopThreaded();
+      scheduler->stopSchedulerLoop();
+      EXPECT_FALSE(scheduler->loopIsRunning());
+    }
+    finished->set_value();
+  }).detach();
+
+  ASSERT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(20)));
 }
 
 TEST(TaskScheduler, tasksGetExecutedWithoutSchedulingInCorrectOrder) {

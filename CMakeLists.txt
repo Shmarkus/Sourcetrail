@@ -377,6 +377,7 @@ if(ENABLE_UNIT_TEST
 
   if(ENABLE_INTEGRATION_TEST)
     add_subdirectory(tests)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/src/app/tests/)
   endif()
 endif()
 # Assets -------------------------------------------------------------------------------------------------------------------------

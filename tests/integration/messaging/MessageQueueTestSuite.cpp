@@ -1,4 +1,5 @@
 #include <chrono>
+#include <future>
 #include <memory>
 #include <thread>
 
@@ -148,6 +149,25 @@ TEST_F(MessageQueueFix, messageLoopStartsAndStops) {
   waitForThread();
 
   EXPECT_FALSE(messageQueue->loopIsRunning());
+}
+
+TEST(MessageQueue, stopRightAfterThreadedStartReturns) {
+  constexpr int Rounds = 50;
+  auto finished = std::make_shared<std::promise<void>>();
+  auto future = finished->get_future();
+
+  // Detached so that a hanging stop fails the test instead of blocking it forever.
+  std::thread([finished] {
+    for(int round = 0; round < Rounds; ++round) {
+      auto messageQueue = std::make_unique<details::MessageQueue>();
+      messageQueue->startMessageLoopThreaded();
+      messageQueue->stopMessageLoop();
+      EXPECT_FALSE(messageQueue->loopIsRunning());
+    }
+    finished->set_value();
+  }).detach();
+
+  ASSERT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(20)));
 }
 
 TEST_F(MessageQueueFix, registeredListenerReceivesMessages) {

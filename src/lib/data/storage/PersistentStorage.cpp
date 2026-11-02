@@ -520,12 +520,15 @@ void PersistentStorage::buildQueryCaches()
 	buildHierarchyCache();
 }
 
-void PersistentStorage::optimizeMemory()
+void PersistentStorage::optimizeMemory(bool compact)
 {
 	TRACE();
 
 	m_sqliteIndexStorage.setTime();
-	m_sqliteIndexStorage.optimizeMemory();
+	if (compact)
+	{
+		m_sqliteIndexStorage.optimizeMemory();
+	}
 
 	m_sqliteBookmarkStorage.optimizeMemory();
 }

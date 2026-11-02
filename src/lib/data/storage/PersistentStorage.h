@@ -101,7 +101,8 @@ public:
 	// buildCaches() without the GUI-only member edge order, for read-only queries (st).
 	void buildQueryCaches();
 
-	void optimizeMemory();
+	// Records the index time; `compact` also rewrites the database file without its free pages.
+	void optimizeMemory(bool compact = true);
 
 	// StorageAccess implementation
 	Id getNodeIdForFileNode(const FilePath& filePath) const override;

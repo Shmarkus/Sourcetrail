@@ -32,8 +32,13 @@ Task::TaskState TaskFinishParsing::doUpdate(std::shared_ptr<Blackboard> blackboa
 {
 	TimeStamp start = TimeStamp::now();
 
+	// Rewriting the whole database to compact it costs seconds and gains nothing when a few files were refreshed.
+	int refreshedFileCount = 0;
+	blackboard->get("indexed_source_file_count", refreshedFileCount);
+	const bool compact = static_cast<size_t>(refreshedFileCount) * 20 >= m_storage->getStorageStats().fileCount;
+
 	m_dialogView->showUnknownProgressDialog(L"Finish Indexing", L"Optimizing database");
-	m_storage->optimizeMemory();
+	m_storage->optimizeMemory(compact);
 	m_dialogView->hideUnknownProgressDialog();
 
 	double time = TimeStamp::durationSeconds(start);

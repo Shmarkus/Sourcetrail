@@ -174,6 +174,9 @@ DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const 
 		}
 
 		std::vector<std::wstring> args;
+		// A short run: the JIT's top tier and a parallel collector only add start-up work.
+		args.push_back(L"-XX:TieredStopAtLevel=1");
+		args.push_back(L"-XX:+UseSerialGC");
 		args.push_back(L"-jar");
 		args.push_back(lombokJarPath.wstr());
 		args.push_back(L"delombok");

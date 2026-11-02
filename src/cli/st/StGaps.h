@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <ostream>
 #include <set>
 #include <vector>
@@ -35,6 +36,23 @@ struct Walked
 	std::map<Id, Id> links;
 };
 
+// What findGaps reads from the whole index rather than for one query, filled on first use. Keep one per loaded
+// index to share it between queries; never across a reload.
+class GapInputs
+{
+public:
+	GapInputs();
+	~GapInputs();
+	GapInputs(const GapInputs&) = delete;
+	GapInputs& operator=(const GapInputs&) = delete;
+
+	struct Data;
+	Data& data();
+
+private:
+	std::unique_ptr<Data> m_data;
+};
+
 struct Gaps
 {
 	size_t unresolvedLinks = 0;
@@ -48,9 +66,10 @@ struct Gaps
 // build-generated class), unless it is an implicit member of a defined type (a default constructor, an enum's
 // valueOf). An error belongs to the innermost named symbol around it (anonymous and local classes skipped); at type
 // level to the fields declared on its line, if any; outside every scope (an import) to the file's top-level types.
+// `memo`, if given, supplies and keeps the whole-index inputs.
 // A passed symbol or a type enclosing it that several files declare (a class two modules both have) is a gap too:
 // users of the other copy may be bound to this one or missing.
-Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines);
+Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines, GapInputs* memo = nullptr);
 
 // Unresolved symbols in the whole index, by the rule of findGaps.
 size_t countUnresolved(PersistentStorage& storage);

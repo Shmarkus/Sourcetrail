@@ -136,9 +136,10 @@ int find(const st::Io& io, PersistentStorage& storage, const std::vector<std::ws
 const QStringList GRAPH_COMMANDS = {"refs", "callers", "callees", "impls", "supers", "path", "impact", "deps"};
 
 // Prints on stderr the gaps of the index the results touch, or that they could not be checked.
-void printGaps(const st::Io& io, PersistentStorage& storage, const st::Walked& walked, const std::vector<st::ResultLine>& lines)
+void printGaps(const st::Io& io, PersistentStorage& storage, const st::Walked& walked, const std::vector<st::ResultLine>& lines,
+	st::GapInputs* inputs)
 {
-	st::printGaps([&]() { return st::findGaps(storage, walked, lines); }, io.err);
+	st::printGaps([&]() { return st::findGaps(storage, walked, lines, inputs); }, io.err);
 }
 
 // Prints the results, then on stderr the gaps of the index they touch.
@@ -146,7 +147,7 @@ int printWithGaps(const st::Io& io, PersistentStorage& storage, const std::vecto
 	const st::OutputOptions& options)
 {
 	const int code = st::printResults(lines, options, io.out);
-	printGaps(io, storage, walked, lines);
+	printGaps(io, storage, walked, lines, options.gapInputs);
 	return code;
 }
 
@@ -169,13 +170,13 @@ void printCandidates(const st::Io& io, PersistentStorage& storage, const std::ve
 
 // Resolves every name; ambiguous names list their candidates on stderr, and so does a parameter list matching none
 // of the name's overloads.
-int resolve(const st::Io& io, PersistentStorage& storage, const std::vector<std::wstring>& names, NodeKindMask kinds,
-	const st::OutputOptions& options, std::vector<Id>* ids)
+int resolve(const st::Io& io, st::IndexCache& cache, PersistentStorage& storage, const std::vector<std::wstring>& names,
+	NodeKindMask kinds, const st::OutputOptions& options, std::vector<Id>* ids)
 {
 	std::vector<Id> candidates;
 	for (const std::wstring& name: names)
 	{
-		const st::Resolved resolved = st::resolveSymbol(storage, name, kinds);
+		const st::Resolved resolved = cache.resolve(storage, name, kinds);
 		if (resolved.status == st::Resolution::NotFound)
 		{
 			io.err << "st: symbol not found: " << utility::encodeToUtf8(name) << '\n';
@@ -252,7 +253,7 @@ int path(const st::Io& io, PersistentStorage& storage, const std::vector<Id>& fr
 	{
 		io.out << "(+" << chains.size() - options.limit << " more paths, --limit)\n";
 	}
-	printGaps(io, storage, walked, hops);
+	printGaps(io, storage, walked, hops, options.gapInputs);
 	return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }
 
@@ -514,8 +515,8 @@ int inFiles(const st::Io& io, PersistentStorage& storage, const QString& command
 }
 
 // outline: the symbols defined in each file, and the direct members of each type (any other symbol outlines itself).
-int outlineInputs(const st::Io& io, PersistentStorage& storage, const std::vector<std::wstring>& inputs, const st::LombokRoots& lombok,
-	const st::OutputOptions& options)
+int outlineInputs(const st::Io& io, st::IndexCache& cache, PersistentStorage& storage, const std::vector<std::wstring>& inputs,
+	const st::LombokRoots& lombok, const st::OutputOptions& options)
 {
 	const st::IndexedFiles indexed = st::indexedFiles(storage, &lombok);
 	std::vector<Id> ids;
@@ -548,7 +549,7 @@ int outlineInputs(const st::Io& io, PersistentStorage& storage, const std::vecto
 		ambiguous |= found == FileLookup::Ambiguous;
 	}
 	std::vector<Id> symbols;
-	const int resolved = symbolNames.empty() ? st::EXIT_RESULTS : resolve(io, storage, symbolNames, ~NodeKindMask(0), options, &symbols);
+	const int resolved = symbolNames.empty() ? st::EXIT_RESULTS : resolve(io, cache, storage, symbolNames, ~NodeKindMask(0), options, &symbols);
 	if (resolved == st::EXIT_AMBIGUOUS || ambiguous)
 	{
 		return st::EXIT_AMBIGUOUS;
@@ -581,14 +582,14 @@ int outlineInputs(const st::Io& io, PersistentStorage& storage, const std::vecto
 	return st::printResults(std::move(lines), options, io.out);
 }
 
-int status(const st::Io& io, PersistentStorage& storage, const st::Freshness& freshness, bool serverRunning)
+int status(const st::Io& io, PersistentStorage& storage, size_t unresolved, const st::Freshness& freshness, bool serverRunning)
 {
 	const StorageStats stats = storage.getStorageStats();
 	io.out << "indexed_at\t" << stats.timestamp.toString() << '\n'
 			  << "files\t" << stats.fileCount << '\n'
 			  << "errors\t" << storage.getErrorCount().total << '\n'
 			  << "files_with_errors\t" << storage.getIncompleteFiles().size() << '\n'
-			  << "unresolved_symbols\t" << st::countUnresolved(storage) << '\n'
+			  << "unresolved_symbols\t" << unresolved << '\n'
 			  << "stale_files\t" << freshness.changedFiles << '\n'
 			  << "server\t" << (serverRunning ? "running" : "off") << '\n';
 	return st::EXIT_RESULTS;
@@ -932,14 +933,15 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	{
 		return code;
 	}
-	const st::LombokRoots lombok = st::lombokRoots(settings);
+	PersistentStorage& storage = cache.storage(settings);
+	options.gapInputs = &cache.gapInputs();
+	const st::LombokRoots lombok = cache.lombok(settings);
 	if (!lombok.delombokToOriginalRoots.empty())
 	{
 		options.mapLocation = [&lombok](const st::ResultLine& line) {
 			return st::toOriginal(line, lombok, st::readLinesFromDisk);
 		};
 	}
-	PersistentStorage& storage = cache.storage(settings);
 	if (storage.isEmpty() || storage.isIncompatible())
 	{
 		io.err << "st: index is empty or incompatible; reindex with --full\n";
@@ -947,7 +949,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	}
 	if (command == "status")
 	{
-		return status(io, storage, freshness, request.served || (!request.serverDeclined && st::serverRunning(projectFile)));
+		return status(io, storage, cache.unresolved(storage), freshness, request.served || (!request.serverDeclined && st::serverRunning(projectFile)));
 	}
 	if (command == "find")
 	{
@@ -959,14 +961,14 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	}
 	if (command == "outline")
 	{
-		return outlineInputs(io, storage, names, lombok, options);
+		return outlineInputs(io, cache, storage, names, lombok, options);
 	}
 	if (command == "filter")
 	{
 		return filter(io, storage, inputLines, filterOptions, options);
 	}
 	std::vector<Id> ids;
-	if (const int code = resolve(io, storage, names, kinds, options, &ids))
+	if (const int code = resolve(io, cache, storage, names, kinds, options, &ids))
 	{
 		return code;
 	}
@@ -983,7 +985,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 		return graph(io, storage, command, ids, depth, options);
 	}
 	std::vector<Id> targetIds;
-	if (const int code = resolve(io, storage, targets, ~0, options, &targetIds))
+	if (const int code = resolve(io, cache, storage, targets, ~0, options, &targetIds))
 	{
 		return code;
 	}

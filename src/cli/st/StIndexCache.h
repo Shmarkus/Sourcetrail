@@ -1,9 +1,17 @@
 #ifndef ST_INDEX_CACHE_H
 #define ST_INDEX_CACHE_H
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "NodeKind.h"
+#include "StKey.h"
+#include "StGaps.h"
+#include "StLombok.h"
 
 class PersistentStorage;
 class ProjectSettings;
@@ -24,10 +32,31 @@ public:
 	// Whether the last storage() call reused a loaded index.
 	bool reusedLast() const;
 
+	// What the lookups below return is exactly what a fresh computation returns. They keep their results until
+	// storage() reloads the index; `storage` is the one storage() returned.
+	// st::resolveSymbol.
+	Resolved resolve(PersistentStorage& storage, const std::wstring& text, NodeKindMask kinds);
+	// st::lombokRoots, without the per-command alignment caches.
+	LombokRoots lombok(const ProjectSettings& settings);
+	// st::countUnresolved.
+	size_t unresolved(PersistentStorage& storage);
+
+	// The whole-index inputs of the gap check, filled as findGaps needs them.
+	GapInputs& gapInputs();
+
+	// How many resolutions are memoized.
+	size_t memoized() const;
+
 private:
+	void drop();
+
 	std::unique_ptr<PersistentStorage> m_storage;
 	std::vector<std::string> m_signature;
 	bool m_reused = false;
+	std::map<std::pair<std::wstring, NodeKindMask>, Resolved> m_resolved;
+	std::optional<LombokRoots> m_lombok;
+	std::optional<size_t> m_unresolved;
+	std::unique_ptr<GapInputs> m_gapInputs;
 };
 }
 

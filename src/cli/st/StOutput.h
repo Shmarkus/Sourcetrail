@@ -38,6 +38,8 @@ struct ResultLine
 	size_t column = 0;
 };
 
+class GapInputs;
+
 struct OutputOptions
 {
 	size_t limit = 50;
@@ -51,6 +53,8 @@ struct OutputOptions
 	std::string project;
 	// Applied to every line before sorting; identity when empty.
 	std::function<ResultLine(const ResultLine&)> mapLocation;
+	// The index's whole-index gap inputs, kept by the caller across commands; findGaps reads them again when null.
+	GapInputs* gapInputs = nullptr;
 };
 
 // Keeps the best tiers (then path/line order) under the limit and prints those sorted by path then line; returns EXIT_RESULTS or EXIT_EMPTY.

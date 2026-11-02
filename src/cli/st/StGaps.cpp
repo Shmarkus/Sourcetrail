@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -90,11 +92,40 @@ struct Project
 	std::set<std::wstring> definedTypes;
 };
 
+}
+
+struct GapInputs::Data
+{
+	std::unique_ptr<Project> project;
+	std::optional<std::set<FilePath>> incomplete;
+	// Every index error's line and column, by file.
+	std::optional<std::map<FilePath, std::vector<std::pair<size_t, size_t>>>> errors;
+	// The symbols that have the symbol as a member, for every symbol asked about so far.
+	std::map<Id, std::vector<Id>> memberOwners;
+	// Whether several files declare the symbol, for every symbol asked about so far.
+	std::map<Id, bool> multiDeclared;
+};
+
+GapInputs::GapInputs()
+	: m_data(std::make_unique<Data>())
+{
+}
+
+GapInputs::~GapInputs() = default;
+
+GapInputs::Data& GapInputs::data()
+{
+	return *m_data;
+}
+
+namespace
+{
 class Unresolved
 {
 public:
-	explicit Unresolved(PersistentStorage& storage)
+	Unresolved(PersistentStorage& storage, GapInputs::Data& inputs)
 		: m_storage(storage)
+		, m_inputs(inputs)
 		, m_placeholder(storage.getNodeIdForNameHierarchy(NameHierarchy(L"unsolved-symbol", NAME_DELIMITER_JAVA)))
 	{
 	}
@@ -153,16 +184,16 @@ public:
 private:
 	const Project& project()
 	{
-		if (!m_project)
+		if (!m_inputs.project)
 		{
-			m_project = std::make_unique<Project>(m_storage);
+			m_inputs.project = std::make_unique<Project>(m_storage);
 		}
-		return *m_project;
+		return *m_inputs.project;
 	}
 
 	PersistentStorage& m_storage;
+	GapInputs::Data& m_inputs;
 	const Id m_placeholder;
-	std::unique_ptr<Project> m_project;
 };
 
 bool definesNames(const SourceLocation& location)
@@ -291,10 +322,14 @@ private:
 
 // Index errors belonging to a walked symbol or to the symbol enclosing a result row. Only the files with errors that
 // hold a result row or a walked symbol's definition are read; the errors themselves only when there are such files.
-size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const std::vector<ResultLine>& lines)
+size_t indexErrors(PersistentStorage& storage, GapInputs::Data& inputs, const std::set<Id>& nodes, const std::vector<ResultLine>& lines)
 {
 	// The indexer marks every file it reported errors in incomplete.
-	const std::set<FilePath> incomplete = storage.getIncompleteFiles();
+	if (!inputs.incomplete)
+	{
+		inputs.incomplete = storage.getIncompleteFiles();
+	}
+	const std::set<FilePath>& incomplete = *inputs.incomplete;
 	if (incomplete.empty())
 	{
 		return 0;
@@ -333,13 +368,21 @@ size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const 
 	{
 		return 0;
 	}
-	std::map<FilePath, std::vector<std::pair<size_t, size_t>>> errors;
-	for (const ErrorInfo& error: storage.getErrorInfos())
+	if (!inputs.errors)
 	{
-		const FilePath file(error.filePath);
-		if (files.count(file))
+		inputs.errors.emplace();
+		for (const ErrorInfo& error: storage.getErrorInfos())
 		{
-			errors[file].push_back({error.lineNumber, error.columnNumber});
+			(*inputs.errors)[FilePath(error.filePath)].push_back({error.lineNumber, error.columnNumber});
+		}
+	}
+	std::map<FilePath, std::vector<std::pair<size_t, size_t>>> errors;
+	for (const FilePath& file: files)
+	{
+		const auto found = inputs.errors->find(file);
+		if (found != inputs.errors->end())
+		{
+			errors[file] = found->second;
 		}
 	}
 
@@ -397,17 +440,43 @@ size_t indexErrors(PersistentStorage& storage, const std::set<Id>& nodes, const 
 
 // Passed symbols and the types enclosing them that more than one file declares: a class two modules both have,
 // whose other copy's users may be bound to this one or missing.
-size_t multiDeclared(PersistentStorage& storage, const std::set<Id>& nodes)
+size_t multiDeclared(PersistentStorage& storage, GapInputs::Data& inputs, const std::set<Id>& nodes)
 {
 	std::set<Id> symbols = nodes;
 	for (std::vector<Id> level(nodes.begin(), nodes.end()); !level.empty();)
 	{
-		std::vector<Id> owners;
-		for (const StorageEdge& edge: storage.getEdgesForTargetIds(level))
+		// A type's incoming links are all its uses; only the symbols not seen before are read.
+		std::vector<Id> unknown;
+		for (const Id id: level)
 		{
-			if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER && symbols.insert(edge.sourceNodeId).second)
+			if (!inputs.memberOwners.count(id))
 			{
-				owners.push_back(edge.sourceNodeId);
+				unknown.push_back(id);
+			}
+		}
+		if (!unknown.empty())
+		{
+			for (const Id id: unknown)
+			{
+				inputs.memberOwners[id];
+			}
+			for (const StorageEdge& edge: storage.getEdgesForTargetIds(unknown))
+			{
+				if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER)
+				{
+					inputs.memberOwners[edge.targetNodeId].push_back(edge.sourceNodeId);
+				}
+			}
+		}
+		std::vector<Id> owners;
+		for (const Id id: level)
+		{
+			for (const Id owner: inputs.memberOwners[id])
+			{
+				if (symbols.insert(owner).second)
+				{
+					owners.push_back(owner);
+				}
 			}
 		}
 		level = owners;
@@ -421,16 +490,36 @@ size_t multiDeclared(PersistentStorage& storage, const std::set<Id>& nodes)
 			candidates.push_back(node.id);
 		}
 	}
+	// Reading a symbol's declarations walks all its occurrences, so only the symbols not seen before are read.
+	std::vector<Id> unknown;
 	size_t count = 0;
-	for (const auto& [id, sites]: declarationSites(storage, candidates))
+	for (const Id id: candidates)
 	{
-		count += sites.size() > 1;
+		const auto known = inputs.multiDeclared.find(id);
+		if (known == inputs.multiDeclared.end())
+		{
+			unknown.push_back(id);
+		}
+		else
+		{
+			count += known->second;
+		}
+	}
+	const auto sites = declarationSites(storage, unknown);
+	for (const Id id: unknown)
+	{
+		const auto found = sites.find(id);
+		const bool several = found != sites.end() && found->second.size() > 1;
+		inputs.multiDeclared[id] = several;
+		count += several;
 	}
 	return count;
 }
 
-Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines)
+Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vector<ResultLine>& lines, GapInputs* memo)
 {
+	GapInputs local;
+	GapInputs::Data& inputs = (memo ? *memo : local).data();
 	std::map<Id, Id> links = walked.links;
 	for (const Scope& scope: walked.scopes)
 	{
@@ -465,20 +554,21 @@ Gaps findGaps(PersistentStorage& storage, const Walked& walked, const std::vecto
 	{
 		ends.insert(end);
 	}
-	const std::set<Id> unresolved = Unresolved(storage).of(std::vector<Id>(ends.begin(), ends.end()));
+	const std::set<Id> unresolved = Unresolved(storage, inputs).of(std::vector<Id>(ends.begin(), ends.end()));
 	Gaps gaps;
 	for (const auto& [edge, end]: links)
 	{
 		gaps.unresolvedLinks += unresolved.count(end);
 	}
-	gaps.indexErrors = indexErrors(storage, walked.nodes, lines);
-	gaps.multiDeclared = multiDeclared(storage, walked.passed);
+	gaps.indexErrors = indexErrors(storage, inputs, walked.nodes, lines);
+	gaps.multiDeclared = multiDeclared(storage, inputs, walked.passed);
 	return gaps;
 }
 
 size_t countUnresolved(PersistentStorage& storage)
 {
-	Unresolved unresolved(storage);
+	GapInputs inputs;
+	Unresolved unresolved(storage, inputs.data());
 	size_t count = 0;
 	// A copy: classifying may read all nodes again, which replaces the vector getStorageNodes returns.
 	const std::vector<StorageNode> nodes = storage.getStorageNodes();

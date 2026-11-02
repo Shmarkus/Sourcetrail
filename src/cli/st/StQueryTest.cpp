@@ -13,6 +13,7 @@
 #include "StFilter.h"
 #include "StGaps.h"
 #include "StGraph.h"
+#include "StIndexCache.h"
 #include "StInput.h"
 #include "StKey.h"
 #include "StLombok.h"
@@ -1340,6 +1341,33 @@ TEST_CASE("st gaps count walked symbols whose type two modules declare")
 		"st: incomplete: 1 symbols declared in several modules, 2 links to unresolved symbols (see st status)\n");
 }
 
+TEST_CASE("st gaps from kept inputs equal fresh ones")
+{
+	Code code;
+	const Id a = code.type(L"q", L"A");
+	const Id f = code.member(a, L"A", L"f");
+	const Id b = code.type(L"q", L"B");
+	const Id g = code.member(b, L"B", L"g");
+	code.link(Edge::EDGE_CALL, g, f, L"B", {3});
+	addLocation(code.storage, a, code.file(L"A"), 5);
+	addLocation(code.storage, a, addFile(code.storage, L"/r/sub/q/A.java"), 2);
+	addLocation(code.storage, b, code.file(L"B"), 5);
+	code.storage.buildCaches();
+
+	st::GapInputs inputs;
+	for (const Id id: {f, g, f})
+	{
+		st::Walked walked;
+		const auto lines = st::calls(code.storage, {id}, st::Direction::Incoming, 1, &walked);
+		const st::Gaps fresh = st::findGaps(code.storage, walked, lines);
+		const st::Gaps kept = st::findGaps(code.storage, walked, lines, &inputs);
+		CHECK(kept.multiDeclared == fresh.multiDeclared);
+		CHECK(kept.unresolvedLinks == fresh.unresolvedLinks);
+		CHECK(kept.indexErrors == fresh.indexErrors);
+	}
+	CHECK(st::findGaps(code.storage, {}, {}, &inputs).multiDeclared == 0);
+}
+
 namespace
 {
 // A project file without source groups next to an index holding the class p.A; returns the project file.
@@ -1435,4 +1463,59 @@ TEST_CASE("index cache reloads when the database file changes")
 	REQUIRE(QFile::rename(base + "/copy", base + "/x.srctrldb"));
 	cache.storage(settings);
 	CHECK_FALSE(cache.reusedLast());
+}
+
+TEST_CASE("index cache drops memoized data when the index reloads")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString project = writeProject(base);
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath(project.toStdWString()), true));
+
+	st::IndexCache cache;
+	PersistentStorage& storage = cache.storage(settings);
+	CHECK(cache.memoized() == 0);
+	CHECK(cache.resolve(storage, L"p.A", ~NodeKindMask(0)).status == st::Resolution::Found);
+	CHECK(cache.memoized() == 1);
+
+	// a reused index keeps its memo
+	cache.storage(settings);
+	CHECK(cache.reusedLast());
+	CHECK(cache.memoized() == 1);
+
+	QFile db(base + "/x.srctrldb");
+	REQUIRE(db.open(QIODevice::ReadWrite));
+	REQUIRE(db.setFileTime(QDateTime::currentDateTime().addSecs(60), QFileDevice::FileModificationTime));
+	db.close();
+	cache.storage(settings);
+	CHECK_FALSE(cache.reusedLast());
+	CHECK(cache.memoized() == 0);
+}
+
+TEST_CASE("memoized resolution returns the same ids as a fresh one")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString project = writeProject(base);
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath(project.toStdWString()), true));
+
+	st::IndexCache cache;
+	PersistentStorage& storage = cache.storage(settings);
+	for (const std::wstring& text: {std::wstring(L"p.A"), std::wstring(L"A"), std::wstring(L"Missing")})
+	{
+		const st::Resolved fresh = st::resolveSymbol(storage, text, ~NodeKindMask(0));
+		const st::Resolved first = cache.resolve(storage, text, ~NodeKindMask(0));
+		const st::Resolved again = cache.resolve(storage, text, ~NodeKindMask(0));
+		CHECK(first.status == fresh.status);
+		CHECK(first.ids == fresh.ids);
+		CHECK(again.status == fresh.status);
+		CHECK(again.ids == fresh.ids);
+	}
+	// the kinds are part of the key
+	CHECK(cache.resolve(storage, L"p.A", NODE_METHOD).status == st::Resolution::NotFound);
+	CHECK(cache.resolve(storage, L"p.A", ~NodeKindMask(0)).status == st::Resolution::Found);
 }

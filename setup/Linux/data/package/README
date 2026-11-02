@@ -7,6 +7,10 @@ Usage
 
 Run the Sourcetrail.sh script to start Sourcetrail.
 
+Command line: bin/st answers code navigation queries over an index (callers, implementations, paths, impact;
+see "st: code navigation for agents" in the project README), and bin/Sourcetrail_cli indexes a project and
+answers JSON queries. Both start bin/sourcetrail to refresh an index, so keep them in the same directory.
+
 
 Install
 -------

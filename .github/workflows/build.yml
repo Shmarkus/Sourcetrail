@@ -1,5 +1,7 @@
 name: Build and Test
 
+# Every push builds, tests and packages. Pushes to master refresh the rolling `latest` prerelease;
+# a pushed `v*` tag publishes a release of that version. Other branches only keep the run artifact.
 on: [push]
 
 jobs:
@@ -7,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     container: codehouseou/sourcetrail-builder:latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Configure java
         run: |
@@ -16,14 +18,19 @@ jobs:
 
       - name: Configure CMake
         run: |
-          mkdir -p build/Release                                                                                                                                                                                                                                                                                                                                                                     
+          mkdir -p build/Release
           cd build/Release
           bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && cmake -DCMAKE_BUILD_TYPE=\"Release\" -DBUILD_JAVA_LANGUAGE_PACKAGE=ON -DBUILD_PYTHON_LANGUAGE_PACKAGE=ON ../.."
 
       - name: Build
         run: |
-          cd build/Release                                                                                                                                                                                                                                                                                                                                                                       
-          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && make Sourcetrail"
+          cd build/Release
+          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && make -j4 Sourcetrail Sourcetrail_cli st Sourcetrail_cli_test Sourcetrail_st_test"
+
+      - name: Test the command line tools
+        run: |
+          cd build/Release
+          bash -c "source $HOME/.sdkman/bin/sdkman-init.sh && ctest --output-on-failure -R '^cli\.'"
 
       - name: Package
         run: |
@@ -37,19 +44,29 @@ jobs:
 
   release:
     needs: build
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: Sourcetrail_Linux_64bit
 
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+      - name: Refresh the latest prerelease
+        if: github.ref == 'refs/heads/master'
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest Sourcetrail_Linux_64bit.tar.gz --target "$GITHUB_SHA" --prerelease \
+            --title "Latest master build" \
+            --notes "Built from master at $GITHUB_SHA. Includes the GUI, Sourcetrail_cli and st."
+
+      - name: Publish the tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release create "$GITHUB_REF_NAME" Sourcetrail_Linux_64bit.tar.gz --verify-tag \
+            --title "Sourcetrail $GITHUB_REF_NAME" --generate-notes

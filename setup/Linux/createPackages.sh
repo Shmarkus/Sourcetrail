@@ -28,6 +28,8 @@ mkdir share
 cd bin
 cp ../../../build/Release/app/Sourcetrail sourcetrail
 cp ../../../build/Release/app/sourcetrail_indexer .
+cp ../../../build/Release/app/Sourcetrail_cli .
+cp ../../../build/Release/app/st .
 cd ..
 
 cd share
@@ -83,7 +85,7 @@ createIcon 48x48
 
 # create .AppImage
 
-linuxdeployqt AppDir/usr/bin/sourcetrail_indexer -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python*
+linuxdeployqt AppDir/usr/bin/sourcetrail_indexer -executable=AppDir/usr/bin/Sourcetrail_cli -executable=AppDir/usr/bin/st -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python*
 rm -f AppDir/AppRun
 
 linuxdeployqt AppDir/usr/share/applications/sourcetrail.desktop -qmake=$Qt5_DIR/bin/qmake -ignore-glob=*python* -appimage

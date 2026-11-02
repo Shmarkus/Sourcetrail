@@ -41,6 +41,7 @@
 #include "StProject.h"
 #include "StServer.h"
 #include "StTestSupport.h"
+#include "StWatch.h"
 #include "StorageNode.h"
 #include "StorageFile.h"
 #include "StorageSymbol.h"
@@ -605,6 +606,134 @@ TEST_CASE("st remembers its last refresh and the index time it produced")
 	REQUIRE(last.has_value());
 	REQUIRE(last->startedAt.toString() == "2026-10-30 12:34:56");
 	REQUIRE(last->indexedAt.toString() == "2026-10-30 12:35:10");
+}
+
+TEST_CASE("scheduler waits for a quiet period")
+{
+	st::RefreshScheduler scheduler(500);
+	REQUIRE_FALSE(scheduler.pending());
+	REQUIRE_FALSE(scheduler.due(10000));
+	scheduler.changed(0);
+	scheduler.changed(200);
+	scheduler.changed(400);
+	REQUIRE(scheduler.pending());
+	REQUIRE_FALSE(scheduler.due(800));
+	REQUIRE(scheduler.due(900));
+	scheduler.started();
+	REQUIRE(scheduler.running());
+	REQUIRE_FALSE(scheduler.pending());
+	REQUIRE_FALSE(scheduler.due(5000));
+	scheduler.finished();
+	REQUIRE_FALSE(scheduler.running());
+	REQUIRE_FALSE(scheduler.due(5000));
+}
+
+TEST_CASE("scheduler queues another refresh when changes arrive while one runs")
+{
+	st::RefreshScheduler scheduler(500);
+	scheduler.changed(0);
+	REQUIRE(scheduler.due(500));
+	scheduler.started();
+	scheduler.changed(1000);
+	REQUIRE_FALSE(scheduler.due(2000));
+	scheduler.finished();
+	REQUIRE(scheduler.pending());
+	REQUIRE_FALSE(scheduler.due(1400));
+	REQUIRE(scheduler.due(1500));
+}
+
+namespace
+{
+// A Gradle project at <base>/repo with its project file at <base>/prj/x.srctrlprj and src/main/java cached as its
+// source root.
+void gradleFixture(const QString& base, ProjectSettings* settings)
+{
+	const QString repo = base + "/repo";
+	write(repo + "/build.gradle", "plugins {}");
+	write(base + "/prj/x.srctrlprj", QString(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+		"<gradle><project_file_path>" + repo + "/build.gradle</project_file_path><should_index_tests>0</should_index_tests></gradle>"
+		"<source_extensions><source_extension>.java</source_extension></source_extensions>"
+		"<status>enabled</status><type>Java Source Group from Gradle</type>"
+		"</source_group_g1></source_groups><version>8</version></config>\n").toUtf8());
+	REQUIRE(settings->load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+	const FilePath project(repo.toStdWString());
+	utility::GradleProjectInfo info;
+	info.fingerprint = utility::gradleBuildFingerprint(project);
+	info.sourceDirectories[L"main"] = {project.getConcatenated(L"src/main/java")};
+	utility::saveGradleProjectInfo(FilePath((base + "/prj/sourcetrail_dependencies/g1/gradle").toStdWString()), info);
+}
+}
+
+TEST_CASE("watch paths skip build output and delombok copies")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/src/main/java/p/A.java", "class A {}");
+	write(repo + "/src/main/java/p/q/B.java", "class B {}");
+	write(repo + "/src/main/java/p/notes.txt", "");
+	write(repo + "/src/main/java/build/C.java", "class C {}");
+	write(repo + "/build/generated/p/G.java", "class G {}");
+	write(repo + "/.gradle/p/H.java", "class H {}");
+	write(repo + "/.git/p/I.java", "class I {}");
+	ProjectSettings settings;
+	gradleFixture(base, &settings);
+	const QString delombok = base + "/prj/sourcetrail_dependencies/g1/delombok/main/p/A.java";
+	write(delombok, "class A {}");
+	const std::vector<FilePath> indexed = {FilePath(delombok.toStdWString()),
+		FilePath((repo + "/build/generated/p/G.java").toStdWString()), FilePath((repo + "/src/main/java/p/A.java").toStdWString())};
+
+	const std::vector<QString> paths = st::watchPaths(settings, indexed);
+	const std::set<QString> watched(paths.begin(), paths.end());
+	CHECK(watched.size() == paths.size());
+	for (const QString& expected: {repo + "/build.gradle", repo + "/src/main/java", repo + "/src/main/java/p",
+			 repo + "/src/main/java/p/q", repo + "/src/main/java/p/A.java", repo + "/src/main/java/p/q/B.java"})
+	{
+		CHECK(watched.count(expected));
+	}
+	for (const QString& path: watched)
+	{
+		INFO(path.toStdString());
+		CHECK_FALSE(path.contains("/build/"));
+		CHECK_FALSE(path.endsWith("/build"));
+		CHECK_FALSE(path.contains("/.gradle"));
+		CHECK_FALSE(path.contains("/.git"));
+		CHECK_FALSE(path.contains("sourcetrail_dependencies"));
+		CHECK_FALSE(path.endsWith(".txt"));
+	}
+}
+
+TEST_CASE("watch paths fall back to directories above the limit")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString repo = base + "/repo";
+	write(repo + "/src/main/java/p/A.java", "class A {}");
+	ProjectSettings settings;
+	gradleFixture(base, &settings);
+	std::vector<FilePath> indexed;
+	for (int i = 0; i < 20001; i++)
+	{
+		indexed.push_back(FilePath((repo + "/src/main/java/p/r" + QString::number(i % 3) + "/F" + QString::number(i) + ".java").toStdWString()));
+	}
+
+	const std::vector<QString> paths = st::watchPaths(settings, indexed);
+	const std::set<QString> watched(paths.begin(), paths.end());
+	CHECK(watched.count(repo + "/src/main/java"));
+	CHECK(watched.count(repo + "/src/main/java/p"));
+	for (int i = 0; i < 3; i++)
+	{
+		CHECK(watched.count(repo + "/src/main/java/p/r" + QString::number(i)));
+	}
+	for (const QString& path: watched)
+	{
+		INFO(path.toStdString());
+		CHECK_FALSE(path.endsWith(".java"));
+		CHECK_FALSE(path.endsWith(".gradle"));
+	}
 }
 
 TEST_CASE("st freshness baseline sees edits made during a refresh")

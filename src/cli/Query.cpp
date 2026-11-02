@@ -146,6 +146,24 @@ QJsonObject status(PersistentStorage& storage)
 		{"freshness", "last_completed_index; source changes require reindexing"}};
 }
 
+void prepareIndexer(QProcess& process, const QString& project, bool full)
+{
+	QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
+#ifdef _WIN32
+	executable += ".exe";
+#endif
+	process.setProgram(executable);
+	process.setWorkingDirectory(QCoreApplication::applicationDirPath());
+	process.setProcessChannelMode(QProcess::MergedChannels);
+	QStringList args{"index"};
+	if (full)
+	{
+		args << "--full";
+	}
+	args << project;
+	process.setArguments(args);
+}
+
 void reindex(const QString& project, bool full, int timeoutMs, std::string* log)
 {
 	const auto output = [&](const QByteArray& text) {
@@ -158,20 +176,9 @@ void reindex(const QString& project, bool full, int timeoutMs, std::string* log)
 			std::cerr << text.constData() << std::flush;
 		}
 	};
-	QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
-#ifdef _WIN32
-	executable += ".exe";
-#endif
 	QProcess process;
-	process.setWorkingDirectory(QCoreApplication::applicationDirPath());
-	process.setProcessChannelMode(QProcess::MergedChannels);
-	QStringList args{"index"};
-	if (full)
-	{
-		args << "--full";
-	}
-	args << project;
-	process.start(executable, args);
+	prepareIndexer(process, project, full);
+	process.start();
 	if (!process.waitForStarted())
 	{
 		throw std::runtime_error("Cannot start adjacent Sourcetrail executable: " + process.errorString().toStdString());

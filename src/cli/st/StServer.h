@@ -59,7 +59,7 @@ bool serverRunning(const FilePath& projectFile);
 
 struct ServeOptions
 {
-	bool watch = true;	// Task 5 reads watch; --no-watch clears it
+	bool watch = true;	// watch the sources and refresh in the background; --no-watch clears it
 };
 
 // Asks the server for the project to stop; 0 once it has, EXIT_EMPTY when none answers.
@@ -67,9 +67,12 @@ int stopServer(const FilePath& projectFile, std::ostream& err);
 
 // Starts `st serve` for the project in the background, logging to <project dir>/.st-serve.log, and waits up to 30 s
 // for it to answer; 0 once it does, else EXIT_INTERNAL with the log's tail on err.
-int detachServer(const FilePath& projectFile, std::ostream& err);
+int detachServer(const FilePath& projectFile, const ServeOptions& options, std::ostream& err);
 
 // Answers requests for the project until the process ends. Needs a QCoreApplication.
+// With options.watch it watches the sources and, 500 ms after the last change, refreshes a stale index in the
+// background as a request would (indexer output in <project dir>/.st-refresh.log). A request arriving meanwhile
+// waits for that refresh first. A refresh still running when the server stops is left to finish.
 int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream& err);
 }
 

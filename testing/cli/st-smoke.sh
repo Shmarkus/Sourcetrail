@@ -233,9 +233,9 @@ cp "$project" "$work/empty/project.srctrlprj"
 run 4 --project "$work/empty/project.srctrlprj" find getName
 
 # st serve: answers through the server equal the cold ones, stay fresh, and fall back when it dies.
-# start_server: runs st serve in the background and waits until it listens.
+# start_server [binary [serve options]]: runs st serve in the background and waits until it listens.
 start_server() {
-    "${1:-$st}" serve > "$work/serve.out" 2> "$work/serve.err" &
+    "${1:-$st}" serve "${@:2}" > "$work/serve.out" 2> "$work/serve.err" &
     server_pid=$!
     for _ in $(seq 100); do
         grep -qF 'st: serving ' "$work/serve.err" && return
@@ -260,7 +260,8 @@ same() {
 # Settle the index first: neither mode may refresh during the comparison.
 ST_NO_SERVER=1 "$st" find getName > /dev/null 2>&1 || true
 sleep 1.1
-start_server
+# Without the watcher: these checks are about the request path, which a background refresh would race.
+start_server "$st" --no-watch
 run 0 serve
 contains 'st: server already running for ' err
 run 0 status
@@ -373,7 +374,7 @@ server_pid=
 # whose status then reports the server off.
 mkdir "$work/rebuilt"
 cp "$st" "$work/rebuilt/st"
-start_server "$work/rebuilt/st"
+start_server "$work/rebuilt/st" --no-watch
 cp "$work/rebuilt/st" "$work/rebuilt/st.new"
 printf 'x' >> "$work/rebuilt/st.new"
 mv "$work/rebuilt/st.new" "$work/rebuilt/st"
@@ -415,6 +416,29 @@ run 0 serve --stop
 "$st" serve --stop > /dev/null 2>&1
 run 0 status
 contains $'server\toff' out
+
+# The server watches the sources: an edit is refreshed in the background, and the next query finds it fresh.
+run 0 serve --detach
+log="$work/project/.st-serve.log"
+for _ in $(seq 100); do grep -qF 'st: watching ' "$log" && break; sleep 0.1; done
+grep -qF 'st: watching ' "$log" || assert "server does not watch: $(cat "$log")"
+sed -i 's/^}$/    public String hum(Person person) { return person.getName().strip(); }\n}/' "$caller"
+for _ in $(seq 600); do grep -qF 'st: background refresh of ' "$log" && break; sleep 0.1; done
+grep -qF 'st: background refresh of ' "$log" || assert "no background refresh within 60 s: $(cat "$log")"
+run 0 callers 'example.Person.getName()'
+! grep -q refreshed "$work/err" || assert "query after a background refresh refreshed again: $(cat "$work/err")"
+contains 'example.Caller.hum(example.Person)' out
+# An edit queried at once: the query refreshes itself or waits for the background refresh, and is current.
+sed -i 's/^}$/    public String sing(Person person) { return person.getName().repeat(2); }\n}/' "$caller"
+sleep 0.2
+run 0 callers 'example.Person.getName()'
+grep -qE 'refreshed|waited' "$work/err" || assert "query right after an edit neither refreshed nor waited: $(cat "$work/err")"
+contains 'example.Caller.sing(example.Person)' out
+# A stopped server leaves a running refresh to finish: let it end before the project goes away.
+background_done() { [ "$(grep -c 'st: refreshing ' "$log")" = "$(grep -cE 'st: background refresh (of|failed)' "$log")" ]; }
+for _ in $(seq 600); do background_done && break; sleep 0.1; done
+background_done || assert "background refresh did not end within 60 s: $(cat "$log")"
+run 0 serve --stop
 
 # SIGTERM removes the socket file and ends the server.
 start_server

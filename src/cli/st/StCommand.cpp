@@ -728,6 +728,7 @@ void addOptions(QCommandLineParser& parser)
 	parser.addOption({"wait", "Milliseconds to wait for the project lock (default 30000)", "ms"});
 	parser.addOption({"detach", "serve only: start the server in the background"});
 	parser.addOption({"stop", "serve only: stop the running server"});
+	parser.addOption({"no-watch", "serve only: do not watch the sources and refresh in the background"});
 	parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
 }
 
@@ -760,20 +761,22 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	const QString command = args.isEmpty() ? QString() : args[0];
 	if (command == "serve")
 	{
-		if (args.size() != 1)
+		const char* usage = "Usage: st serve [--detach|--stop] [--no-watch] [--project P]";
+		if (args.size() != 1 || (parser.isSet("stop") && (parser.isSet("detach") || parser.isSet("no-watch"))))
 		{
-			throw UsageError("Usage: st serve [--detach|--stop] [--project P]");
+			throw UsageError(usage);
 		}
-		if (parser.isSet("stop") || parser.isSet("detach"))
+		st::ServeOptions options;
+		options.watch = !parser.isSet("no-watch");
+		if (parser.isSet("stop"))
 		{
-			if (parser.isSet("stop") && parser.isSet("detach"))
-			{
-				throw UsageError("Usage: st serve [--detach|--stop] [--project P]");
-			}
-			const FilePath project = locateProject(io, parser, request.cwd);
-			return parser.isSet("stop") ? st::stopServer(project, io.err) : st::detachServer(project, io.err);
+			return st::stopServer(locateProject(io, parser, request.cwd), io.err);
 		}
-		return st::serve(locateProject(io, parser, request.cwd), st::ServeOptions(), io.err);
+		if (parser.isSet("detach"))
+		{
+			return st::detachServer(locateProject(io, parser, request.cwd), options, io.err);
+		}
+		return st::serve(locateProject(io, parser, request.cwd), options, io.err);
 	}
 	const bool isFiles = command == "symbols-in" || command == "at";
 	const bool takesMany = command == "symbols-in" || command == "outline";

@@ -1,0 +1,7 @@
+.gradle/
+build/
+*.srctrldb*
+*.srctrlbm*
+*.srctrltmp*
+.sourcetrail/
+*.lock

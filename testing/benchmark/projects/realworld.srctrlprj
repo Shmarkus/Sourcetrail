@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+    <source_groups>
+        <source_group_realworld>
+            <name>realworld</name>
+            <type>Java Source Group from Gradle</type>
+            <status>enabled</status>
+            <java_standard>11</java_standard>
+            <source_extensions><source_extension>.java</source_extension></source_extensions>
+            <gradle>
+                <project_file_path>build.gradle</project_file_path>
+                <should_index_tests>1</should_index_tests>
+            </gradle>
+        </source_group_realworld>
+    </source_groups>
+    <version>8</version>
+</config>

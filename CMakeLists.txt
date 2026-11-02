@@ -12,6 +12,9 @@ project(
 set(BUILD_CXX_LANGUAGE_PACKAGE
     OFF
     CACHE BOOL "Add C and C++ support to the Sourcetrail indexer.")
+set(BUILD_JAVA_LANGUAGE_PACKAGE
+    OFF
+    CACHE BOOL "Add Java support.")
 set(BUILD_DOC
     OFF
     CACHE BOOL "Build documentation.")
@@ -352,6 +355,10 @@ set_property(SOURCE ${CMAKE_BINARY_DIR}/src/lib_gui/productVersion.h PROPERTY SK
 add_subdirectory(src/indexer)
 # App ----------------------------------------------------------------------------------------------------------------------------
 add_subdirectory(src/app)
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  include(cmake/java_indexer.cmake)
+  add_dependencies(Sourcetrail java_indexer_jar)
+endif()
 # Tests --------------------------------------------------------------------------------------------------------------------------
 if(ENABLE_UNIT_TEST
    OR ENABLE_GUI_TEST

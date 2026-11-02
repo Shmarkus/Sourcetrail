@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<config>
+    <indexing>
+        <cxx>
+            <header_search_paths>
+                <header_search_path>/usr</header_search_path>
+                <header_search_path>/usr/include</header_search_path>
+                <header_search_path>/include</header_search_path>
+                <header_search_path>/opt/include</header_search_path>
+            </header_search_paths>
+        </cxx>
+        <java>
+            <maven_path>/opt/testpath/mvn</maven_path>
+        </java>
+        <multi_process_indexing>1</multi_process_indexing>
+    </indexing>
+    <user>
+        <recent_projects>
+            <recent_project>./projects/tictactoe_py/tictactoe_py.srctrlprj</recent_project>
+        </recent_projects>
+    </user>
+    <version>8</version>
+</config>

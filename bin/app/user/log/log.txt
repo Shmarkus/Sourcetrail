@@ -1,0 +1,1 @@
+%H:%M:%S | 139828117143104 | LogManager.cpp:40 setLoggingEnabled() | INFO: Enabled logging for Sourcetrail 64 bit, version 2021.1.105

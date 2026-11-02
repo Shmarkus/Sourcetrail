@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/bin">
+        <file>data/color_scheme_template.xml</file>
+        <file>data/gui/icon/sourcetrail.ico</file>
+        <file>data/gui/icon/project.ico</file>
+        <file>data/gui/icon/logo_1024_1024.png</file>
+    </qresource>
+</RCC>

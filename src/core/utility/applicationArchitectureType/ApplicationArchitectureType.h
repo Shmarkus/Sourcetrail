@@ -1,3 +1,3 @@
 #pragma once
 
-enum class ApplicationArchitectureType { Unknown, X86_32, X86_64 };
+enum class ApplicationArchitectureType { Unknown, X86_32, X86_64, ARM };

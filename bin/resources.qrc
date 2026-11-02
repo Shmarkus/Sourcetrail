@@ -1,0 +1,14 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file alias="window/logo.png">app/data/gui/window/logo.png</file>
+    <file alias="window/logo_240.png">app/data/gui/window/logo_240.png</file>
+    <file alias="window/window.css">app/data/gui/window/window.css</file>
+    <file alias="icon/cpp_icon.png">app/data/gui/icon/cpp_icon.png</file>
+    <file alias="icon/c_icon.png">app/data/gui/icon/c_icon.png</file>
+    <file alias="icon/empty_icon.png">app/data/gui/icon/empty_icon.png</file>
+    <file alias="startscreen/github_icon.png">app/data/gui/startscreen/github_icon.png</file>
+    <file alias="startscreen/startscreen.css">app/data/gui/startscreen/startscreen.css</file>
+    <file alias="bookmark_view/bookmark_view.css">app/data/gui/bookmark_view/bookmark_view.css</file>
+    <file alias="indexing_dialog/indexing_dialog.css">app/data/gui/indexing_dialog/indexing_dialog.css</file>
+</qresource>
+</RCC>

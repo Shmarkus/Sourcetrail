@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<config>
+    <application>
+        <graph_controls_visible>1</graph_controls_visible>
+        <window_base_height>500</window_base_height>
+        <window_base_width>500</window_base_width>
+    </application>
+    <code>
+        <view_mode_single>0</view_mode_single>
+    </code>
+    <indexing>
+        <cxx>
+            <has_prefilled_framework_search_paths>1</has_prefilled_framework_search_paths>
+            <has_prefilled_header_search_paths>1</has_prefilled_header_search_paths>
+        </cxx>
+        <indexer_thread_count>0</indexer_thread_count>
+        <java>
+            <has_prefilled_java_path>1</has_prefilled_java_path>
+            <has_prefilled_jre_system_library_paths>1</has_prefilled_jre_system_library_paths>
+            <has_prefilled_maven_path>1</has_prefilled_maven_path>
+        </java>
+    </indexing>
+    <user>
+        <recent_projects>
+            <recent_project>C:/Hard/SourceCode/Sourcetrail/build/x64-Debug/Debug/app/user/./projects/tutorial/tutorial.srctrlprj</recent_project>
+            <recent_project>C:/Hard/SourceCode/Sourcetrail/build/x64-Debug/Debug/app/user/./projects/tictactoe_cpp/tictactoe_cpp.srctrlprj</recent_project>
+            <recent_project>C:/Hard/SourceCode/Sourcetrail/build/x64-Debug/Debug/app/user/./projects/tictactoe_py/tictactoe_py.srctrlprj</recent_project>
+            <recent_project>C:/Hard/SourceCode/Sourcetrail/build/x64-Debug/Debug/app/user/./projects/javaparser/javaparser.srctrlprj</recent_project>
+        </recent_projects>
+    </user>
+    <version>8</version>
+</config>

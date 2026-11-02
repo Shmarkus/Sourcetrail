@@ -1,0 +1,163 @@
+{
+  "project": {
+    "name": "realworld",
+    "repo": "https://github.com/gothinkster/spring-boot-realworld-example-app",
+    "commit": "ee17e31aafe733d98c4853c8b9a74d7f2f6c924a",
+    "notes": "Spring Boot 2.6, Gradle 7.4 wrapper, Java 11, Lombok, MyBatis, Netflix DGS GraphQL (its types are generated during the build and are not indexed). Ground truth was built with grep and by reading the code, before any st run."
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "kind": "structural",
+      "prompt": "Which production methods (under src/main) call the domain repository method `io.spring.core.article.ArticleRepository.findBySlug(String)`? Calls through the interface count. `ArticleQueryService.findBySlug` is a different method and does not count.",
+      "answer_items": "the calling methods as `Class.method`",
+      "expected": {
+        "required": [
+          "ArticleApi.updateArticle", "ArticleApi.deleteArticle",
+          "ArticleFavoriteApi.favoriteArticle", "ArticleFavoriteApi.unfavoriteArticle",
+          "CommentsApi.createComment", "CommentsApi.getComments", "CommentsApi.deleteComment",
+          "ArticleMutation.updateArticle", "ArticleMutation.favoriteArticle",
+          "ArticleMutation.unfavoriteArticle", "ArticleMutation.deleteArticle",
+          "CommentMutation.createComment", "CommentMutation.removeComment"
+        ],
+        "forbidden": ["ArticleApi.article", "ArticleDatafetcher.findArticleBySlug", "DuplicatedArticleValidator.isValid"]
+      },
+      "st_reference": "st callers io.spring.core.article.ArticleRepository.findBySlug",
+      "notes": "Look-alikes: ArticleQueryService.findBySlug(String, User) and ArticleReadService.findBySlug."
+    },
+    {
+      "id": "Q2",
+      "kind": "structural",
+      "prompt": "Which production methods (under src/main) use the Lombok-generated getter `io.spring.application.data.ArticleData.getSlug()`, either by calling it or through a method reference such as `ArticleData::getSlug`? The GraphQL type `io.spring.graphql.types.Article` and the domain class `io.spring.core.article.Article` have their own `getSlug()`, which does not count.",
+      "answer_items": "the methods as `Class.method`; for code inside a lambda or an anonymous class, name the named method that contains it",
+      "expected": {
+        "required": [
+          "ArticleDatafetcher.getFeed", "ArticleDatafetcher.userFeed", "ArticleDatafetcher.userFavorites",
+          "ArticleDatafetcher.userArticles", "ArticleDatafetcher.getArticles", "ArticleDatafetcher.getArticle",
+          "ArticleDatafetcher.getCommentArticle", "ArticleDatafetcher.findArticleBySlug",
+          "ArticleDatafetcher.buildArticleResult"
+        ],
+        "forbidden": ["ProfileDatafetcher.getAuthor", "CommentDatafetcher.articleComments", "ArticleApi.updateArticle"]
+      },
+      "st_reference": "st callers io.spring.application.data.ArticleData.getSlug",
+      "notes": "Five uses are method references inside Collectors.toMap; three are inside anonymous HashMap initializers."
+    },
+    {
+      "id": "Q3",
+      "kind": "structural",
+      "prompt": "Trace the call chain from the REST handler `io.spring.api.ArticlesApi.createArticle` down to the MyBatis mapper method that inserts the article row. List every method on that chain.",
+      "answer_items": "the methods on the chain as `Class.method`, in call order",
+      "expected": {
+        "required": [
+          "ArticlesApi.createArticle", "ArticleCommandService.createArticle", "MyBatisArticleRepository.save",
+          "MyBatisArticleRepository.createNew", "ArticleMapper.insert"
+        ],
+        "optional": ["ArticleRepository.save"],
+        "forbidden": ["ArticleMapper.insertTag", "ArticleMapper.insertArticleTagRelation", "ArticleMutation.createArticle"]
+      },
+      "st_reference": "st path io.spring.api.ArticlesApi.createArticle io.spring.infrastructure.mybatis.mapper.ArticleMapper.insert",
+      "notes": "The hop from ArticleRepository.save to MyBatisArticleRepository.save goes through the interface."
+    },
+    {
+      "id": "Q4",
+      "kind": "stacktrace",
+      "prompt": "A production log shows an exception whose top frame is `at io.spring.infrastructure.repository.MyBatisArticleRepository.save(MyBatisArticleRepository.java:25)`. Which REST controller methods and GraphQL mutation methods can reach that line through some chain of calls?",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": ["ArticlesApi.createArticle", "ArticleApi.updateArticle", "ArticleMutation.createArticle",
+                     "ArticleMutation.updateArticle"],
+        "forbidden": ["ArticleFavoriteApi.favoriteArticle", "ArticleMutation.favoriteArticle", "CommentsApi.createComment",
+                      "CommentMutation.createComment", "UsersApi.createUser", "CurrentUserApi.updateProfile"]
+      },
+      "st_reference": "st at MyBatisArticleRepository.java:25 | st callers --depth 4",
+      "notes": "Line 25 is `articleMapper.update(article)` in save. Look-alikes: the other repositories' save methods."
+    },
+    {
+      "id": "Q5",
+      "kind": "structural",
+      "prompt": "Which types from the package `io.spring.core` (including its sub-packages) does production code in the package `io.spring.api` (including its sub-packages) depend on?",
+      "answer_items": "the types as fully qualified or simple class names",
+      "expected": {
+        "required": ["Article", "ArticleRepository", "Comment", "CommentRepository", "ArticleFavorite",
+                     "ArticleFavoriteRepository", "AuthorizationService", "JwtService", "FollowRelation", "User",
+                     "UserRepository"],
+        "optional": ["Tag"]
+      },
+      "st_reference": "st deps io.spring.api",
+      "notes": "Built from the io.spring.core imports in src/main/java/io/spring/api; Tag is optional because it may be reached through Article.getTags without an import."
+    },
+    {
+      "id": "Q6",
+      "kind": "structural",
+      "prompt": "Which JUnit test methods call `io.spring.application.ArticleQueryService.findRecentArticles` (not `findRecentArticlesWithCursor`), directly or through a helper method? Calls on a mock count.",
+      "answer_items": "the test methods as `TestClass.method`",
+      "expected": {
+        "required": [
+          "ListArticleApiTest.should_get_default_article_list",
+          "ArticleQueryServiceTest.should_get_default_article_list",
+          "ArticleQueryServiceTest.should_query_article_by_author",
+          "ArticleQueryServiceTest.should_query_article_by_favorite",
+          "ArticleQueryServiceTest.should_query_article_by_tag",
+          "ArticleQueryServiceTest.should_show_following_if_user_followed_author"
+        ],
+        "forbidden": ["ArticleQueryServiceTest.should_get_default_article_list_by_cursor",
+                      "ArticleQueryServiceTest.should_get_user_feed"]
+      },
+      "st_reference": "st callers io.spring.application.ArticleQueryService.findRecentArticles --depth 3 | st filter --annotated Test",
+      "notes": "Two test classes have a method named should_get_default_article_list; both count."
+    },
+    {
+      "id": "Q7",
+      "kind": "structural",
+      "prompt": "List the public methods of `io.spring.application.ArticleQueryService`.",
+      "answer_items": "the methods as `ArticleQueryService.method`",
+      "expected": {
+        "required": ["ArticleQueryService.findById", "ArticleQueryService.findBySlug",
+                     "ArticleQueryService.findRecentArticlesWithCursor", "ArticleQueryService.findUserFeedWithCursor",
+                     "ArticleQueryService.findRecentArticles", "ArticleQueryService.findUserFeed"],
+        "optional": ["ArticleQueryService.ArticleQueryService"],
+        "forbidden": ["ArticleQueryService.fillExtraInfo", "ArticleQueryService.setIsFollowingAuthor",
+                      "ArticleQueryService.setFavoriteCount", "ArticleQueryService.setIsFavorite"]
+      },
+      "st_reference": "st outline io.spring.application.ArticleQueryService",
+      "notes": "The Lombok @AllArgsConstructor constructor is optional."
+    },
+    {
+      "id": "Q8",
+      "kind": "structural",
+      "prompt": "If a parameter is added to `io.spring.core.user.UserRepository.findByUsername(String)`, which production methods have to change? List the methods that call it and the methods that implement it. `ProfileQueryService.findByUsername` and the MyBatis mapper and read-service methods of the same name are different methods.",
+      "answer_items": "the methods as `Class.method`",
+      "expected": {
+        "required": ["ProfileApi.follow", "ProfileApi.unfollow", "ArticleDatafetcher.userFeed", "RelationMutation.follow",
+                     "RelationMutation.unfollow", "DuplicatedUsernameValidator.isValid", "UpdateUserValidator.isValid",
+                     "MyBatisUserRepository.findByUsername"],
+        "optional": ["UserRepository.findByUsername"],
+        "forbidden": ["ProfileApi.getProfile", "ProfileQueryService.findByUsername", "RelationMutation.buildProfile",
+                      "ProfileDatafetcher.queryProfile"]
+      },
+      "st_reference": "st callers io.spring.core.user.UserRepository.findByUsername",
+      "notes": "UpdateUserValidator is a package-private class in UserService.java."
+    },
+    {
+      "id": "Q9",
+      "kind": "text",
+      "prompt": "Where is the secret used to sign JWT tokens configured, and which class reads it?",
+      "answer_items": "the configuration file name and the class name, one per line",
+      "expected": {
+        "required": ["application.properties", "DefaultJwtService"]
+      },
+      "notes": "jwt.secret in src/main/resources/application.properties, read with @Value in DefaultJwtService's constructor."
+    },
+    {
+      "id": "Q10",
+      "kind": "text",
+      "prompt": "Which method produces the validation message \"username already exist\"?",
+      "answer_items": "the method as `Class.method`",
+      "expected": {
+        "required": ["UpdateUserValidator.isValid"],
+        "forbidden": ["DuplicatedUsernameValidator.isValid"]
+      },
+      "notes": "UpdateUserValidator is declared in UserService.java. DuplicatedUsernameValidator uses the message \"duplicated username\"."
+    }
+  ]
+}

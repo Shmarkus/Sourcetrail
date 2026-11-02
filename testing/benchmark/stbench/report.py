@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
 from .speed import median
 
 STRUCTURAL_KINDS = {"structural", "stacktrace"}
 TARGETS = {
     "median_tokens": ("Tokens per question (median)", -0.50, "at least 50% fewer"),
+    "median_context_growth": ("Context growth per question (median)", -0.50, "at least 50% fewer"),
     "median_tool_calls": ("Tool calls per question (median)", -0.50, "at least 50% fewer"),
     "median_duration_s": ("Time per question, start to answer (median)", -0.30, "at least 30% faster"),
 }
@@ -16,7 +19,7 @@ def _arm_summary(runs: list[dict]) -> dict:
     ok = [run for run in runs if not run.get("is_error")]
 
     def values(key):
-        return [run[key] for run in ok]
+        return [run[key] for run in ok if run.get(key) is not None]
 
     return {
         "runs": len(ok),
@@ -25,6 +28,7 @@ def _arm_summary(runs: list[dict]) -> dict:
         "partial": sum(run["verdict"] == "partial" for run in ok),
         "wrong": sum(run["verdict"] in ("wrong", "no answer") for run in ok),
         "median_tokens": median(values("total_tokens")),
+        "median_context_growth": median(values("context_growth_tokens")),
         "median_output_tokens": median(values("output_tokens")),
         "median_tool_calls": median(values("tool_calls")),
         "median_duration_s": median(values("duration_s")),
@@ -55,8 +59,34 @@ def summarize(runs: list[dict]) -> dict:
     change = {}
     if "grep" in arms and "st" in arms:
         change = {key: _change(arms["grep"][key], arms["st"][key])
-                  for key in ("median_tokens", "median_tool_calls", "median_duration_s", "total_tool_output_chars")}
+                  for key in ("median_tokens", "median_context_growth", "median_tool_calls", "median_duration_s",
+                              "total_tool_output_chars")}
     return {"arms": arms, "adoption": adoption, "change": change}
+
+
+def _item_key(line: str) -> str:
+    """`io.spring.P.process()  // note` and `P.process` are the same item: the last two dotted names, no parameters."""
+    name = re.split(r"[\s(]", line.strip(), maxsplit=1)[0]
+    return ".".join(name.split(".")[-2:])
+
+
+def suspect_ground_truth(runs: list[dict]) -> list[dict]:
+    """Items every scored run of a question (both arms, at least two runs) missed, or listed against the ground truth.
+
+    Agents that all agree against the ground truth are more often right than the ground truth is.
+    """
+    suspects = []
+    for question in dict.fromkeys(run["question"] for run in runs):
+        scored = [run for run in runs if run["question"] == question and not run.get("is_error")]
+        if len(scored) < 2:
+            continue
+        for what, field, key in (("missed by every run", "missing", str),
+                                 ("listed by every run, not in the ground truth", "extras", _item_key),
+                                 ("listed by every run although it is forbidden", "forbidden_hits", str)):
+            per_run = [{key(item) for item in run.get(field) or []} for run in scored]
+            for item in sorted(set.intersection(*per_run)):
+                suspects.append({"question": question, "what": what, "item": item, "runs": len(scored)})
+    return suspects
 
 
 def _percent(value: float | None) -> str:
@@ -178,6 +208,12 @@ def render_markdown(summary: dict, runs: list[dict], speed: dict | None, title: 
     parts += ["", "## Per question", "", "✓ correct, ½ partial, ✗ wrong, ∅ no answer block, E failed run; "
               "calls and tokens are medians over repeats.", ""]
     parts += _question_table(runs)
+    suspects = suspect_ground_truth(runs)
+    if suspects:
+        parts += ["", "## Check the ground truth", "",
+                  "Every scored run agrees against the question file here. Check the code; if the runs are right, "
+                  "fix the question and run `bench.py rescore`.", ""]
+        parts += [f"- {s['question']}: `{s['item']}` {s['what']} ({s['runs']} runs)" for s in suspects]
     if speed:
         parts += ["", "## st speed", ""] + _speed_lines(speed)
     return "\n".join(parts) + "\n"

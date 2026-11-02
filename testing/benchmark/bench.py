@@ -3,6 +3,7 @@
 
     python3 bench.py run    --project DIR --questions FILE [--repeats 3] [--out DIR]
     python3 bench.py speed  --project DIR --questions FILE [--edit-file REL] [--out DIR]
+    python3 bench.py rescore --out DIR --questions FILE
     python3 bench.py report --out DIR
 
 See README.md next to this file.
@@ -28,7 +29,8 @@ sys.path.insert(0, HERE)
 from stbench.arms import path_with_st, readme_agent_section, st_note  # noqa: E402
 from stbench.questions import QuestionError, load_questions  # noqa: E402
 from stbench.report import render_markdown, summarize  # noqa: E402
-from stbench.runner import RunConfig, read_records, run_benchmark  # noqa: E402
+from stbench.rescore import rescore  # noqa: E402
+from stbench.runner import RECORDS, RunConfig, read_records, run_benchmark  # noqa: E402
 from stbench.speed import measure  # noqa: E402
 
 README = os.path.join(REPO, "README.md")
@@ -196,6 +198,22 @@ def cmd_report(args) -> None:
     print(_write_report(args.out))
 
 
+def cmd_rescore(args) -> None:
+    records = read_records(args.out)
+    if not records:
+        _fail(f"no {RECORDS} in {args.out}")
+    questions = {q["id"]: q for q in _load(args)["questions"]}
+    updated = rescore(records, questions)
+    path = os.path.join(args.out, RECORDS)
+    backup = f"{path}.before-rescore-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copyfile(path, backup)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.writelines(json.dumps(record) + "\n" for record in updated)
+    changed = sum(old["verdict"] != new["verdict"] for old, new in zip(records, updated))
+    print(f"bench: {changed} of {len(records)} verdicts changed; the old records are in {backup}")
+    print(f"bench: report {_write_report(args.out)}")
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -223,6 +241,11 @@ def main(argv=None) -> None:
     speed.add_argument("--edit-file", help="project-relative Java file to append a comment line to (restored after)")
     speed.add_argument("--repeats", type=int, default=5)
     speed.set_defaults(func=cmd_speed)
+
+    again = commands.add_parser("rescore", help="score the stored answers again against a corrected question file")
+    again.add_argument("--out", required=True)
+    again.add_argument("--questions", required=True)
+    again.set_defaults(func=cmd_rescore, only=None)
 
     report = commands.add_parser("report", help="rewrite report.md from runs.jsonl and speed.json")
     report.add_argument("--out", required=True)

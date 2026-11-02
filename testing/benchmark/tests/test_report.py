@@ -1,11 +1,15 @@
 import unittest
 
-from stbench.report import summarize, render_markdown
+from stbench.report import summarize, render_markdown, suspect_ground_truth
 from stbench.speed import parse_refreshed, median, with_no_refresh
 
 
 def run(question, arm, verdict, tokens, calls, seconds, used_st=False, kind="structural"):
     return {
+        "context_growth_tokens": tokens // 4,
+        "missing": [],
+        "extras": [],
+        "forbidden_hits": [],
         "question": question,
         "kind": kind,
         "arm": arm,
@@ -63,6 +67,50 @@ class SummarizeTest(unittest.TestCase):
         self.assertEqual(summary["arms"]["st"]["errors"], 1)
         self.assertEqual(summary["arms"]["st"]["runs"], 0)
         self.assertEqual(summary["arms"]["st"]["correct"], 0)
+
+
+class ContextGrowthTest(unittest.TestCase):
+    def test_median_and_change(self):
+        summary = summarize(RUNS)
+        self.assertEqual(summary["arms"]["grep"]["median_context_growth"], 10000)
+        self.assertEqual(summary["arms"]["st"]["median_context_growth"], 5000)
+        self.assertAlmostEqual(summary["change"]["median_context_growth"], -0.5)
+
+    def test_records_without_it_give_n_a(self):
+        old = [{k: v for k, v in r.items() if k != "context_growth_tokens"} for r in RUNS]
+        summary = summarize(old)
+        self.assertIsNone(summary["arms"]["st"]["median_context_growth"])
+        self.assertIn("| Context growth per question (median) | n/a | n/a |", render_markdown(summary, old, speed=None))
+
+
+class SuspectGroundTruthTest(unittest.TestCase):
+    def runs(self, extras_per_run, missing_per_run):
+        return [dict(run("Q6", arm, "partial", 1000, 2, 1.0), extras=extras, missing=missing)
+                for arm, extras, missing in zip(["grep", "st", "grep", "st"], extras_per_run, missing_per_run)]
+
+    def test_an_extra_every_run_lists_is_flagged_once(self):
+        runs = self.runs([["io.spring.ProcessScheduler.process()"], ["ProcessScheduler.process"],
+                          ["ProcessScheduler.process()  // scheduled"], ["x.ProcessScheduler.process"]], [[]] * 4)
+        self.assertEqual(suspect_ground_truth(runs),
+                         [{"question": "Q6", "what": "listed by every run, not in the ground truth",
+                           "item": "ProcessScheduler.process", "runs": 4}])
+
+    def test_a_required_item_every_run_misses_is_flagged(self):
+        runs = self.runs([[]] * 4, [["Legacy.process"]] * 4)
+        self.assertEqual(suspect_ground_truth(runs)[0]["what"], "missed by every run")
+
+    def test_disagreement_between_runs_is_not_flagged(self):
+        runs = self.runs([["A.x"], [], ["A.x"], ["A.x"]], [[], ["B.y"], [], []])
+        self.assertEqual(suspect_ground_truth(runs), [])
+
+    def test_a_single_run_is_not_enough(self):
+        self.assertEqual(suspect_ground_truth(self.runs([["A.x"]], [[]])), [])
+
+    def test_report_section(self):
+        runs = self.runs([["P.process"]] * 4, [[]] * 4)
+        text = render_markdown(summarize(runs), runs, speed=None)
+        self.assertIn("## Check the ground truth", text)
+        self.assertIn("Q6: `P.process` listed by every run, not in the ground truth (4 runs)", text)
 
 
 class MarkdownTest(unittest.TestCase):

@@ -25,7 +25,23 @@ def _empty_metrics() -> dict:
         "input_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0, "output_tokens": 0,
         "total_tokens": 0, "cost_usd": 0.0, "duration_s": 0.0, "turns": 0,
         "final_text": "", "is_error": True, "error": "no result message (the run was cut off)",
+        "api_calls": 0, "initial_context_tokens": None, "final_context_tokens": None, "context_growth_tokens": None,
     }
+
+
+def _context_size(usage: dict) -> int:
+    return sum(usage.get(key, 0) or 0
+               for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+
+
+def _apply_context(metrics: dict, calls: list) -> None:
+    """Context growth: the last call's context plus its output, minus the first call's context."""
+    if not calls:
+        return
+    metrics["api_calls"] = len(calls)
+    metrics["initial_context_tokens"] = _context_size(calls[0])
+    metrics["final_context_tokens"] = _context_size(calls[-1]) + (calls[-1].get("output_tokens", 0) or 0)
+    metrics["context_growth_tokens"] = metrics["final_context_tokens"] - metrics["initial_context_tokens"]
 
 
 def _count_tool_use(metrics: dict, block: dict) -> None:
@@ -69,6 +85,7 @@ def _apply_result(metrics: dict, message: dict) -> None:
 
 def parse_stream(lines: Iterable[str]) -> dict:
     metrics = _empty_metrics()
+    calls, call_ids = [], set()  # one usage per API call; a call can arrive as several messages with one id
     for raw in lines:
         try:
             message = json.loads(raw)
@@ -77,6 +94,12 @@ def parse_stream(lines: Iterable[str]) -> dict:
         kind = message.get("type")
         content = (message.get("message") or {}).get("content") or []
         if kind == "assistant":
+            body = message.get("message") or {}
+            usage = body.get("usage")
+            call_id = body.get("id") or f"message-{len(calls)}"
+            if usage and _context_size(usage) and call_id not in call_ids:
+                call_ids.add(call_id)
+                calls.append(usage)
             for block in content:
                 if block.get("type") == "tool_use":
                     _count_tool_use(metrics, block)
@@ -88,4 +111,5 @@ def parse_stream(lines: Iterable[str]) -> dict:
                     metrics["tool_output_chars"] += _result_length(block.get("content"))
         elif kind == "result":
             _apply_result(metrics, message)
+    _apply_context(metrics, calls)
     return metrics

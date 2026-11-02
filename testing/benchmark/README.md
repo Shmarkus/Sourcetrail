@@ -13,7 +13,9 @@ differs between them:
 The prompt never mentions `st`, so the st arm also measures whether agents pick it up on their own.
 
 **Measured, not estimated.** Tokens, cost, tool calls and tool output come from Claude Code's `stream-json` log.
-Wall time is measured around each run. Each answer ends in an `answer` block that is scored against the question's
+Wall time is measured around each run. Total tokens add up the full context on every turn, so a large fixed context
+(system prompt, hooks, skills) is paid again on each turn. **Context growth** leaves that floor out: the context after
+the final answer minus the context of the first call, which is what the task itself added. Each answer ends in an `answer` block that is scored against the question's
 ground truth: **correct** (every required item, no look-alike, nothing extra), **partial**, **wrong** or **no answer**.
 
 `bench.py speed` times `st` itself: startup (`st status`), each question's reference query (with `--no-refresh`), and
@@ -43,6 +45,10 @@ python3 bench.py speed --project ~/bench/realworld --questions questions/realwor
 
 `results/<name>/report.md` is the result. `runs.jsonl` holds one record per agent run, and `logs/` the full agent
 logs. `--resume` continues an interrupted run, and `bench.py report --out DIR` rewrites the report.
+
+When every run of a question agrees against the question file (all miss the same item, or all list the same extra),
+the report lists it under "Check the ground truth": the agents are more often right than the question file. Fix the
+question, then `bench.py rescore --out DIR --questions FILE` scores the stored answers again (the old records are kept).
 
 Useful options: `--model` (the same for both arms), `--st /path/to/st`, `--arms st` (one arm only), `--timeout`,
 `--max-turns`, `--bare` (no CLAUDE.md discovery at all; needs `ANTHROPIC_API_KEY`). Without `--bare`, your

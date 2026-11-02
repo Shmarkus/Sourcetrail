@@ -49,6 +49,17 @@ class ParseStreamTest(unittest.TestCase):
         self.assertEqual(metrics["tool_calls"], 0)
         self.assertFalse(metrics["used_st"])
 
+    def test_context_growth_is_what_the_task_added_to_the_first_context(self):
+        metrics = load("run_context.jsonl")
+        self.assertEqual(metrics["api_calls"], 3)  # m1 arrives twice
+        self.assertEqual(metrics["initial_context_tokens"], 50005)
+        self.assertEqual(metrics["final_context_tokens"], 52502 + 120)
+        self.assertEqual(metrics["context_growth_tokens"], 52622 - 50005)
+
+    def test_no_per_call_usage_leaves_context_unknown(self):
+        metrics = load("run_error.jsonl")
+        self.assertIsNone(metrics["context_growth_tokens"])
+
     def test_missing_result_line_is_an_error(self):
         metrics = parse_stream(['{"type":"system","subtype":"init"}', "not json"])
         self.assertTrue(metrics["is_error"])

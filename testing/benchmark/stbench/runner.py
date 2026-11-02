@@ -16,7 +16,8 @@ from .stream import parse_stream
 RECORDS = "runs.jsonl"
 _KEPT_METRICS = ("tool_calls", "st_calls", "st_invocations", "text_tool_calls", "used_st", "tool_output_chars",
                  "input_tokens", "cache_creation_tokens", "cache_read_tokens", "output_tokens", "total_tokens",
-                 "cost_usd", "turns", "is_error", "error", "commands")
+                 "cost_usd", "turns", "is_error", "error", "commands",
+                 "api_calls", "initial_context_tokens", "final_context_tokens", "context_growth_tokens")
 
 
 @dataclass

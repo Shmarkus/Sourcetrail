@@ -904,7 +904,7 @@ int run(QCoreApplication& app)
 		std::cerr << "st: index is empty or incompatible; reindex with --full\n";
 		return st::EXIT_NO_INDEX;
 	}
-	storage.buildCaches();
+	storage.buildQueryCaches();
 	if (command == "status")
 	{
 		return status(storage, freshness);

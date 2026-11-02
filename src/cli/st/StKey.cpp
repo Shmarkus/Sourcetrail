@@ -115,15 +115,31 @@ bool parametersMatch(const std::vector<std::wstring>& wanted, const std::vector<
 	return true;
 }
 
+// The last name element of a query, which every symbol that can resolve from it contains.
+std::wstring lastElement(const std::wstring& query)
+{
+	const std::wstring bare = withoutTypeParameters(query.substr(0, query.find(L'(')));
+	const size_t split = bare.find_last_of(L".:");
+	return split == std::wstring::npos ? bare : bare.substr(split + 1);
+}
+
 // Project symbols only, or with `library` only the symbols without a definition in the project (library types).
-std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& query, NodeKindMask kinds, bool library = false)
+std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& query, const std::vector<SearchMatch>& matches,
+	NodeKindMask kinds, bool library = false)
 {
 	std::vector<Candidate> result;
 	std::set<Id> seen;
-	for (const auto& match: storage.getAutocompletionSymbolMatches(query, NodeTypeSet::all(), 1000, 0))
+	const std::wstring needle = lastElement(query);
+	for (const auto& match: matches)
 	{
-		for (Id id: match.tokenIds)
+		for (size_t i = 0; i < match.tokenIds.size(); i++)
 		{
+			const Id id = match.tokenIds[i];
+			// Resolution is exact, but the search is fuzzy: skip matches not containing the name before any storage call.
+			if (library && i < match.tokenNames.size() && match.tokenNames[i].getQualifiedName().find(needle) == std::wstring::npos)
+			{
+				continue;
+			}
 			if (!seen.insert(id).second || (storage.getDefinitionKindForNodeId(id) == DEFINITION_NONE) != library ||
 				!(storage.getNodeTypeForNodeWithId(id).getKind() & kinds) || isUnsolvedSymbol(storage, id))
 			{
@@ -141,6 +157,11 @@ std::vector<Candidate> collect(PersistentStorage& storage, const std::wstring& q
 		}
 	}
 	return result;
+}
+
+std::vector<SearchMatch> search(PersistentStorage& storage, const std::wstring& query)
+{
+	return storage.getAutocompletionSymbolMatches(query, NodeTypeSet::all(), 1000, 0);
 }
 
 // A type together with its own constructors (methods named like it, directly inside it) stands for the type.
@@ -238,13 +259,20 @@ Resolved resolveSymbol(PersistentStorage& storage, const std::wstring& text, Nod
 {
 	const std::wstring query = searchText(text);
 	Resolved resolved;
+	// Both passes share one fuzzy search.
+	const std::vector<SearchMatch> matches = search(storage, query);
+	std::optional<std::vector<SearchMatch>> textMatches;
 	// A project symbol wins; a library symbol (an annotation such as `Scheduled`) answers only when none has the name.
 	for (const bool library: {false, true})
 	{
-		resolved = pick(collect(storage, query, kinds, library), text);
+		resolved = pick(collect(storage, query, matches, kinds, library), text);
 		if (resolved.status == Resolution::NotFound && query != text)
 		{
-			resolved = pick(collect(storage, text, kinds, library), text);
+			if (!textMatches)
+			{
+				textMatches = search(storage, text);
+			}
+			resolved = pick(collect(storage, text, *textMatches, kinds, library), text);
 		}
 		if (resolved.status != Resolution::NotFound)
 		{
@@ -277,7 +305,7 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
 	const std::wstring bare = withoutTypeParameters(text);
 	const std::wstring needle = lower(bare);
 	std::vector<std::pair<int, Id>> ranked;
-	for (const Candidate& candidate: collect(storage, text, kinds))
+	for (const Candidate& candidate: collect(storage, text, search(storage, text), kinds))
 	{
 		if (lower(candidate.bareQualified).find(needle) == std::wstring::npos)
 		{

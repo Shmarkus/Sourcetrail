@@ -462,6 +462,30 @@ TEST_CASE("st outline of a class lists direct members only")
 	CHECK_FALSE(st::isTypeSymbol(code.storage, run));
 }
 
+TEST_CASE("st outline lists members in line order without the member-edge order cache")
+{
+	Code code;
+	const Id a = code.type(L"A");
+	// Member edges are created in reverse line order.
+	std::vector<Id> ids;
+	for (const auto& [name, line]: {std::pair{L"last", 30}, {L"middle", 20}, {L"first", 10}})
+	{
+		const Id id = add(code.storage, method({L"p", L"A"}, name, L"void", L"()"));
+		addLocation(code.storage, id, code.file(L"A"), line);
+		code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_MEMBER), a, id));
+		ids.push_back(id);
+	}
+	const Id last = ids[0], middle = ids[1], first = ids[2];
+	code.storage.buildQueryCaches();
+
+	const auto members = st::directMembers(code.storage, a);
+	REQUIRE(members == std::vector<Id>{first, middle, last});
+	const auto lines = st::outline(code.storage, members);
+	REQUIRE(lines.size() == 3);
+	CHECK(lines[0].key == L"p.A.first()");
+	CHECK(lines[2].key == L"p.A.last()");
+}
+
 TEST_CASE("st output prints a line range")
 {
 	st::OutputOptions options;

@@ -509,6 +509,17 @@ void PersistentStorage::buildCaches()
 	buildHierarchyCache();
 }
 
+void PersistentStorage::buildQueryCaches()
+{
+	TRACE();
+
+	clearCaches();
+
+	buildFilePathMaps();
+	buildSearchIndex();
+	buildHierarchyCache();
+}
+
 void PersistentStorage::optimizeMemory()
 {
 	TRACE();

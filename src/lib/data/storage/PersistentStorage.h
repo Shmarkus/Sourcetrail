@@ -98,6 +98,8 @@ public:
 	bool getFilePathIndexed(const FilePath& path) const;
 
 	void buildCaches();
+	// buildCaches() without the GUI-only member edge order, for read-only queries (st).
+	void buildQueryCaches();
 
 	void optimizeMemory();
 

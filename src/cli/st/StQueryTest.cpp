@@ -1477,13 +1477,27 @@ TEST_CASE("index cache drops memoized data when the index reloads")
 	st::IndexCache cache;
 	PersistentStorage& storage = cache.storage(settings);
 	CHECK(cache.memoized() == 0);
+	CHECK(cache.gapInputs().size() == 0);
 	CHECK(cache.resolve(storage, L"p.A", ~NodeKindMask(0)).status == st::Resolution::Found);
 	CHECK(cache.memoized() == 1);
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 1);
+	const size_t unresolved = cache.unresolved(storage);
+	st::Walked walked;
+	NameHierarchy name(NAME_DELIMITER_JAVA);
+	name.push(L"p");
+	name.push(L"A");
+	walked.passed.insert(storage.getNodeIdForNameHierarchy(name));
+	st::findGaps(storage, walked, {}, &cache.gapInputs());
+	CHECK(cache.gapInputs().size() > 0);
 
 	// a reused index keeps its memo
 	cache.storage(settings);
 	CHECK(cache.reusedLast());
 	CHECK(cache.memoized() == 1);
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 1);
+	CHECK(cache.gapInputs().size() > 0);
 
 	QFile db(base + "/x.srctrldb");
 	REQUIRE(db.open(QIODevice::ReadWrite));
@@ -1492,6 +1506,37 @@ TEST_CASE("index cache drops memoized data when the index reloads")
 	cache.storage(settings);
 	CHECK_FALSE(cache.reusedLast());
 	CHECK(cache.memoized() == 0);
+	CHECK(cache.gapInputs().size() == 0);
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 2);
+	CHECK(cache.unresolved(cache.storage(settings)) == unresolved);
+}
+
+TEST_CASE("index cache recomputes the lombok roots when the project file changes")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	const QString project = writeProject(base);
+	ProjectSettings settings;
+	REQUIRE(settings.load(FilePath(project.toStdWString()), true));
+
+	st::IndexCache cache;
+	cache.storage(settings);
+	cache.lombok(settings);
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 1);
+
+	QFile file(project);
+	REQUIRE(file.open(QIODevice::ReadWrite));
+	REQUIRE(file.setFileTime(QDateTime::currentDateTime().addSecs(60), QFileDevice::FileModificationTime));
+	file.close();
+	cache.storage(settings);
+	CHECK(cache.reusedLast());
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 2);
+	cache.lombok(settings);
+	CHECK(cache.lombokComputed() == 2);
 }
 
 TEST_CASE("memoized resolution returns the same ids as a fresh one")

@@ -113,6 +113,12 @@ GapInputs::GapInputs()
 
 GapInputs::~GapInputs() = default;
 
+size_t GapInputs::size() const
+{
+	return (m_data->project ? 1 : 0) + (m_data->incomplete ? 1 : 0) + (m_data->errors ? 1 : 0) + m_data->memberOwners.size() +
+		m_data->multiDeclared.size();
+}
+
 GapInputs::Data& GapInputs::data()
 {
 	return *m_data;
@@ -370,11 +376,12 @@ size_t indexErrors(PersistentStorage& storage, GapInputs::Data& inputs, const st
 	}
 	if (!inputs.errors)
 	{
-		inputs.errors.emplace();
+		std::map<FilePath, std::vector<std::pair<size_t, size_t>>> read;
 		for (const ErrorInfo& error: storage.getErrorInfos())
 		{
-			(*inputs.errors)[FilePath(error.filePath)].push_back({error.lineNumber, error.columnNumber});
+			read[FilePath(error.filePath)].push_back({error.lineNumber, error.columnNumber});
 		}
+		inputs.errors = std::move(read);
 	}
 	std::map<FilePath, std::vector<std::pair<size_t, size_t>>> errors;
 	for (const FilePath& file: files)
@@ -456,17 +463,20 @@ size_t multiDeclared(PersistentStorage& storage, GapInputs::Data& inputs, const 
 		}
 		if (!unknown.empty())
 		{
+			// Kept only once the read succeeded, so a throw leaves nothing half-filled behind.
+			std::map<Id, std::vector<Id>> read;
 			for (const Id id: unknown)
 			{
-				inputs.memberOwners[id];
+				read[id];
 			}
 			for (const StorageEdge& edge: storage.getEdgesForTargetIds(unknown))
 			{
 				if (Edge::intToType(edge.type) == Edge::EDGE_MEMBER)
 				{
-					inputs.memberOwners[edge.targetNodeId].push_back(edge.sourceNodeId);
+					read[edge.targetNodeId].push_back(edge.sourceNodeId);
 				}
 			}
+			inputs.memberOwners.insert(read.begin(), read.end());
 		}
 		std::vector<Id> owners;
 		for (const Id id: level)

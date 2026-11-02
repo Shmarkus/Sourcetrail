@@ -1,5 +1,6 @@
 #include "StIndexCache.h"
 
+#include <QDir>
 #include <QFileInfo>
 
 #ifndef _WIN32
@@ -8,6 +9,7 @@
 
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
+#include "SourceGroupSettingsJavaGradle.h"
 
 namespace
 {
@@ -31,6 +33,30 @@ std::string fileState(const std::wstring& path)
 	}
 	return name + '|' + std::to_string(info.size()) + '|' + std::to_string(info.lastModified().toMSecsSinceEpoch());
 #endif
+}
+}
+
+namespace
+{
+// The state of what lombokRoots reads besides the index: the project file and the files next to each Gradle source
+// group's project info (its dependencies directory).
+std::vector<std::string> lombokInputs(const ProjectSettings& settings)
+{
+	std::vector<std::string> inputs = {fileState(settings.getProjectFilePath().wstr())};
+	for (const auto& group: settings.getAllSourceGroupSettings())
+	{
+		const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);
+		if (!gradle)
+		{
+			continue;
+		}
+		const QDir directory(QString::fromStdWString(gradle->getGradleDependenciesDirectoryPath().wstr()));
+		for (const QFileInfo& file: directory.entryInfoList(QDir::Files, QDir::Name))
+		{
+			inputs.push_back(fileState(file.absoluteFilePath().toStdWString()));
+		}
+	}
+	return inputs;
 }
 }
 
@@ -76,9 +102,12 @@ Resolved IndexCache::resolve(PersistentStorage& storage, const std::wstring& tex
 
 LombokRoots IndexCache::lombok(const ProjectSettings& settings)
 {
-	if (!m_lombok)
+	std::vector<std::string> inputs = lombokInputs(settings);
+	if (!m_lombok || inputs != m_lombokInputs)
 	{
 		m_lombok = lombokRoots(settings);
+		m_lombokInputs = std::move(inputs);
+		m_lombokComputed++;
 	}
 	return *m_lombok;
 }
@@ -101,6 +130,11 @@ GapInputs& IndexCache::gapInputs()
 	return *m_gapInputs;
 }
 
+size_t IndexCache::lombokComputed() const
+{
+	return m_lombokComputed;
+}
+
 size_t IndexCache::memoized() const
 {
 	return m_resolved.size();
@@ -110,6 +144,7 @@ void IndexCache::drop()
 {
 	m_resolved.clear();
 	m_lombok.reset();
+	m_lombokInputs.clear();
 	m_unresolved.reset();
 	m_gapInputs.reset();
 }

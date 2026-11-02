@@ -49,6 +49,9 @@ public:
 	struct Data;
 	Data& data();
 
+	// How many things are kept; 0 for a fresh one.
+	size_t size() const;
+
 private:
 	std::unique_ptr<Data> m_data;
 };

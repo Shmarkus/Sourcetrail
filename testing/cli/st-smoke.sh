@@ -422,22 +422,35 @@ run 0 serve --detach
 log="$work/project/.st-serve.log"
 for _ in $(seq 100); do grep -qF 'st: watching ' "$log" && break; sleep 0.1; done
 grep -qF 'st: watching ' "$log" || assert "server does not watch: $(cat "$log")"
+# refreshing <n>: waits up to 60 s until the server has started its n-th background refresh.
+refreshing() {
+    for _ in $(seq 600); do [ "$(grep -c 'st: refreshing ' "$log" || true)" -ge "$1" ] && return; sleep 0.1; done
+    assert "background refresh $1 did not start within 60 s: $(cat "$log")"
+}
+# A stopped server leaves a running refresh to finish: queries and --stop below wait for every refresh to end.
+background_done() { [ "$(grep -c 'st: refreshing ' "$log" || true)" = "$(grep -cE 'st: background refresh (of|failed)' "$log" || true)" ]; }
+settled() {
+    for _ in $(seq 600); do background_done && return; sleep 0.1; done
+    assert "background refresh did not end within 60 s: $(cat "$log")"
+}
+# An edit made while a refresh runs is refreshed by another one.
 sed -i 's/^}$/    public String hum(Person person) { return person.getName().strip(); }\n}/' "$caller"
-for _ in $(seq 600); do grep -qF 'st: background refresh of ' "$log" && break; sleep 0.1; done
-grep -qF 'st: background refresh of ' "$log" || assert "no background refresh within 60 s: $(cat "$log")"
+refreshing 1
+sed -i 's/^}$/    public String chant(Person person) { return person.getName().concat("!"); }\n}/' "$caller"
+refreshing 2
+settled
+grep -qF 'st: background refresh of ' "$log" || assert "background refresh did not succeed: $(cat "$log")"
 run 0 callers 'example.Person.getName()'
-! grep -q refreshed "$work/err" || assert "query after a background refresh refreshed again: $(cat "$work/err")"
+! grep -q refreshed "$work/err" || assert "query after the background refreshes refreshed again: $(cat "$work/err")"
 contains 'example.Caller.hum(example.Person)' out
-# An edit queried at once: the query refreshes itself or waits for the background refresh, and is current.
+contains 'example.Caller.chant(example.Person)' out
+# A query while a refresh runs waits for it and is current.
 sed -i 's/^}$/    public String sing(Person person) { return person.getName().repeat(2); }\n}/' "$caller"
-sleep 0.2
+refreshing 3
 run 0 callers 'example.Person.getName()'
-grep -qE 'refreshed|waited' "$work/err" || assert "query right after an edit neither refreshed nor waited: $(cat "$work/err")"
+contains 'st: waited ' err
 contains 'example.Caller.sing(example.Person)' out
-# A stopped server leaves a running refresh to finish: let it end before the project goes away.
-background_done() { [ "$(grep -c 'st: refreshing ' "$log")" = "$(grep -cE 'st: background refresh (of|failed)' "$log")" ]; }
-for _ in $(seq 600); do background_done && break; sleep 0.1; done
-background_done || assert "background refresh did not end within 60 s: $(cat "$log")"
+settled
 run 0 serve --stop
 
 # SIGTERM removes the socket file and ends the server.

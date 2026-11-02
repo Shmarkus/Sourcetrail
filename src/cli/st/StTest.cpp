@@ -642,6 +642,37 @@ TEST_CASE("scheduler queues another refresh when changes arrive while one runs")
 	REQUIRE(scheduler.due(1500));
 }
 
+TEST_CASE("pending refresh record is written at the next index read unless a later refresh recorded itself")
+{
+	const TimeStamp started(std::string("2026-11-02 10:00:00"));
+	const TimeStamp produced(std::string("2026-11-02 10:00:12"));
+	st::PendingRecord pending;
+	REQUIRE_FALSE(pending.take(produced, std::nullopt).has_value());
+
+	// The read after the refresh failed (project busy): the record waits for the next one.
+	pending.succeeded(started);
+	REQUIRE(pending.pending());
+	const st::RefreshRecord older{TimeStamp(std::string("2026-11-02 09:00:00")), TimeStamp(std::string("2026-11-02 09:00:10"))};
+	const auto record = pending.take(produced, older);
+	REQUIRE(record.has_value());
+	CHECK(record->startedAt.toString() == started.toString());
+	CHECK(record->indexedAt.toString() == produced.toString());
+	CHECK_FALSE(pending.pending());
+	CHECK_FALSE(pending.take(produced, older).has_value());
+
+	// A later index time is still recorded against this start: the earlier baseline can only cause a refresh.
+	pending.succeeded(started);
+	const auto later = pending.take(TimeStamp(std::string("2026-11-02 10:05:00")), std::nullopt);
+	REQUIRE(later.has_value());
+	CHECK(later->startedAt.toString() == started.toString());
+
+	// A refresh that started after this one recorded itself: its record stays.
+	pending.succeeded(started);
+	const st::RefreshRecord newer{TimeStamp(std::string("2026-11-02 10:01:00")), TimeStamp(std::string("2026-11-02 10:01:09"))};
+	CHECK_FALSE(pending.take(produced, newer).has_value());
+	CHECK_FALSE(pending.pending());
+}
+
 namespace
 {
 // A Gradle project at <base>/repo with its project file at <base>/prj/x.srctrlprj and src/main/java cached as its

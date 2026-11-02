@@ -97,7 +97,8 @@ public:
 	{
 		if (m_process)
 		{
-			// Killing the indexer would leave an unfinished index behind: let it finish on its own.
+			// Killing the indexer would leave an unfinished index behind: let it finish on its own. The QProcess is
+			// deliberately never deleted, since its destructor kills the process.
 			m_process->disconnect();
 			m_err << "st: leaving the background refresh (pid " << m_process->processId() << ") to finish" << std::endl;
 			m_process = nullptr;
@@ -118,6 +119,12 @@ public:
 			stop();
 		}
 		return timer.elapsed();
+	}
+
+	// Writes the record of a finished refresh that could not be written yet, before a request checks freshness.
+	void settle()
+	{
+		recordPending(LOCK_MS);
 	}
 
 private:
@@ -167,6 +174,13 @@ private:
 			files->push_back(file.path);
 		}
 		*indexedAt = storage.getStorageStats().timestamp;
+		if (m_pending.pending())
+		{
+			if (const std::optional<st::RefreshRecord> record = m_pending.take(*indexedAt, st::lastRefresh(settings)))
+			{
+				st::recordRefresh(settings, *record, m_err);
+			}
+		}
 		return Index::READ;
 	}
 
@@ -186,12 +200,25 @@ private:
 		m_watching = true;
 	}
 
+	void recordPending(int waitMs)
+	{
+		ProjectSettings settings;
+		TimeStamp indexedAt;
+		std::vector<FilePath> files;
+		if (m_pending.pending() && !m_process && load(&settings))
+		{
+			readIndex(settings, waitMs, &indexedAt, &files);
+		}
+	}
+
 	void poll()
 	{
 		if (m_process && m_running.elapsed() > REFRESH_MS)
 		{
 			stop();
 		}
+		m_watcher.settle();
+		recordPending(0);
 		if (m_scheduler.due(m_clock.elapsed()))
 		{
 			begin();
@@ -225,7 +252,6 @@ private:
 			st::checkFreshness(settings, st::freshnessBaseline(indexedAt, st::lastRefresh(settings)), files);
 		if (!freshness.stale)
 		{
-			m_watcher.rewatch();
 			m_scheduler.finished();
 			return;
 		}
@@ -255,15 +281,16 @@ private:
 		const bool succeeded = m_process->exitStatus() == QProcess::NormalExit && m_process->exitCode() == 0;
 		m_process->deleteLater();
 		m_process = nullptr;
+		if (succeeded)
+		{
+			// Written by the first index read under the lock: this one, or a later one when the project is busy.
+			m_pending.succeeded(m_started);
+		}
 		ProjectSettings settings;
 		TimeStamp indexedAt;
 		std::vector<FilePath> files;
 		// Reloads the cache now, so the next request finds it warm.
 		const bool read = load(&settings) && readIndex(settings, LOCK_MS, &indexedAt, &files) == Index::READ;
-		if (succeeded && read)
-		{
-			st::recordRefresh(settings, {m_started, indexedAt}, m_err);
-		}
 		if (read)
 		{
 			// New files, and files an editor replaced (an atomic save drops the watch).
@@ -272,7 +299,7 @@ private:
 		if (succeeded)
 		{
 			m_err << "st: background refresh of " << m_changed << " files finished in " << seconds(m_running.elapsed())
-				  << (read ? "" : "; cannot read the index afterwards") << std::endl;
+				  << (read ? "" : "; project busy, recording it later") << std::endl;
 		}
 		else
 		{
@@ -310,6 +337,7 @@ private:
 	TimeStamp m_started;
 	size_t m_changed = 0;
 	bool m_watching = false;
+	st::PendingRecord m_pending;
 };
 
 // The reply to one request, or nullopt to close the connection without one.
@@ -356,6 +384,10 @@ std::optional<st::WireReply> answer(const st::WireRequest& wire, const FilePath&
 	if (const std::optional<qint64> waited = background ? background->wait() : std::nullopt)
 	{
 		err << "st: waited " << seconds(*waited) << " for the background refresh\n";
+	}
+	if (background)
+	{
+		background->settle();
 	}
 	const QString previous = QDir::currentPath();
 	QDir::setCurrent(request.cwd);

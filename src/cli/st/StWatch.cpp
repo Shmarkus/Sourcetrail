@@ -144,6 +144,35 @@ bool RefreshScheduler::running() const
 	return m_running;
 }
 
+void PendingRecord::succeeded(const TimeStamp& startedAt)
+{
+	m_startedAt = startedAt;
+}
+
+std::optional<RefreshRecord> PendingRecord::take(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last)
+{
+	const std::optional<TimeStamp> startedAt = m_startedAt;
+	m_startedAt.reset();
+	if (!startedAt)
+	{
+		return std::nullopt;
+	}
+	if (last)
+	{
+		TimeStamp lastStart = last->startedAt;	// TimeStamp compares only non-const
+		if (lastStart > *startedAt)
+		{
+			return std::nullopt;
+		}
+	}
+	return RefreshRecord{*startedAt, indexedAt};
+}
+
+bool PendingRecord::pending() const
+{
+	return m_startedAt.has_value();
+}
+
 std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vector<FilePath>& indexedFiles)
 {
 	Paths paths;
@@ -223,8 +252,9 @@ std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vect
 
 SourceWatcher::SourceWatcher(std::function<void()> onChange): m_onChange(std::move(onChange))
 {
+	// Rewatching walks every wanted path: done once per poll in settle(), not per event.
 	const auto changed = [this](const QString&) {
-		rewatch();
+		m_dirty = true;
 		m_onChange();
 	};
 	QObject::connect(&m_watcher, &QFileSystemWatcher::fileChanged, changed);
@@ -253,8 +283,17 @@ size_t SourceWatcher::watch(const std::vector<QString>& paths)
 	return rewatch();
 }
 
+void SourceWatcher::settle()
+{
+	if (m_dirty)
+	{
+		rewatch();
+	}
+}
+
 size_t SourceWatcher::rewatch()
 {
+	m_dirty = false;
 	std::set<QString> missing = m_wanted;
 	for (const QStringList& watched: {m_watcher.files(), m_watcher.directories()})
 	{

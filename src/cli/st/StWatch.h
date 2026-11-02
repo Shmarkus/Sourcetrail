@@ -5,10 +5,12 @@
 #include <QString>
 
 #include <functional>
+#include <optional>
 #include <set>
 #include <vector>
 
 #include "FilePath.h"
+#include "StFreshness.h"
 
 class ProjectSettings;
 
@@ -33,6 +35,21 @@ private:
 	bool m_running = false;
 };
 
+// The record of a successful background refresh, kept until the index can be read under the project lock. Recorded
+// against the index time read then; if that index is a later one, the baseline is earlier than needed (one extra
+// refresh at worst, never a missed edit). Dropped when a refresh that started later has recorded itself.
+class PendingRecord
+{
+public:
+	void succeeded(const TimeStamp& startedAt);
+	// The record to write now that the index time is known, or nullopt; clears the pending record either way.
+	std::optional<RefreshRecord> take(const TimeStamp& indexedAt, const std::optional<RefreshRecord>& last);
+	bool pending() const;
+
+private:
+	std::optional<TimeStamp> m_startedAt;
+};
+
 // Directories and files to watch: every source root, every directory holding an indexed file, every
 // indexed file, and the Gradle build files; never anything under build/, .gradle/, .git/ or
 // sourcetrail_dependencies/. Above 20000 paths, files are dropped and only directories are watched.
@@ -49,11 +66,14 @@ public:
 	size_t watch(const std::vector<QString>& paths);
 	// Watches again the wanted paths that dropped out and exist again; returns how many are still missing.
 	size_t rewatch();
+	// rewatch(), once, if a change was reported since the last one; cheap otherwise.
+	void settle();
 
 private:
 	QFileSystemWatcher m_watcher;
 	std::set<QString> m_wanted;
 	std::function<void()> m_onChange;
+	bool m_dirty = false;
 };
 }
 

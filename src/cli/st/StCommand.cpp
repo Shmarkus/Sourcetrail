@@ -32,6 +32,7 @@
 #include "StLombok.h"
 #include "StOutput.h"
 #include "StProject.h"
+#include "StServer.h"
 #include "StorageStats.h"
 #include "utilityString.h"
 
@@ -62,16 +63,26 @@ FilePath registryFile()
 	return FilePath((QDir::homePath() + "/.config/sourcetrail/st-projects.tsv").toStdWString());
 }
 
+// The --project file, or an empty path when it is not an existing .srctrlprj.
+FilePath givenProject(const QCommandLineParser& parser, const QString& cwd)
+{
+	const QFileInfo file(QDir(cwd), parser.value("project"));
+	if (!file.isFile() || file.suffix() != "srctrlprj")
+	{
+		return FilePath();
+	}
+	return FilePath(file.canonicalFilePath().toStdWString());
+}
+
 FilePath locateProject(const st::Io& io, const QCommandLineParser& parser, const QString& cwd)
 {
 	if (parser.isSet("project"))
 	{
-		const QFileInfo file(QDir(cwd), parser.value("project"));
-		if (!file.isFile() || file.suffix() != "srctrlprj")
+		const FilePath project = givenProject(parser, cwd);
+		if (project.empty())
 		{
 			throw UsageError("--project must be an existing .srctrlprj file");
 		}
-		const FilePath project(file.canonicalFilePath().toStdWString());
 		st::registerProject(registryFile(), project, io.err);
 		return project;
 	}
@@ -570,7 +581,7 @@ int outlineInputs(const st::Io& io, PersistentStorage& storage, const std::vecto
 	return st::printResults(std::move(lines), options, io.out);
 }
 
-int status(const st::Io& io, PersistentStorage& storage, const st::Freshness& freshness)
+int status(const st::Io& io, PersistentStorage& storage, const st::Freshness& freshness, bool serverRunning)
 {
 	const StorageStats stats = storage.getStorageStats();
 	io.out << "indexed_at\t" << stats.timestamp.toString() << '\n'
@@ -578,7 +589,8 @@ int status(const st::Io& io, PersistentStorage& storage, const st::Freshness& fr
 			  << "errors\t" << storage.getErrorCount().total << '\n'
 			  << "files_with_errors\t" << storage.getIncompleteFiles().size() << '\n'
 			  << "unresolved_symbols\t" << st::countUnresolved(storage) << '\n'
-			  << "stale_files\t" << freshness.changedFiles << '\n';
+			  << "stale_files\t" << freshness.changedFiles << '\n'
+			  << "server\t" << (serverRunning ? "running" : "off") << '\n';
 	return st::EXIT_RESULTS;
 }
 
@@ -686,15 +698,14 @@ int refreshIfStale(const st::Io& io, const ProjectSettings& settings, const QStr
 	return st::EXIT_RESULTS;
 }
 
-int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
+void addOptions(QCommandLineParser& parser)
 {
-	QCommandLineParser parser;
 	parser.setApplicationDescription(
 		"Agent-facing code navigation over a Sourcetrail index. Results on stdout, progress on stderr.\n"
 		"refs prints one line per reference; its kind column is the link kind: call, usage, type usage, "
 		"override, inheritance, annotation usage, ...");
 	parser.addHelpOption();
-	parser.addPositionalArgument("command", "find | status | refs | callers | callees | impls | supers | path | impact | deps | filter | symbols-in | at | outline");
+	parser.addPositionalArgument("command", "find | status | serve | refs | callers | callees | impls | supers | path | impact | deps | filter | symbols-in | at | outline");
 	parser.addPositionalArgument("symbol", "Symbol name or key; read from stdin when omitted. symbols-in takes files "
 		"(stdin: one path per line), at takes <file>:<line> (stdin: path:line[:...]), outline takes files or symbols", "[symbol]");
 	parser.addPositionalArgument("target", "path only: the symbol to reach", "[target]");
@@ -714,6 +725,25 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	parser.addOption({"no-generated", "Drop result lines that stay generated: Lombok-made code without an original line"});
 	parser.addOption({"no-refresh", "Do not refresh a stale index before querying"});
 	parser.addOption({"wait", "Milliseconds to wait for the project lock (default 30000)", "ms"});
+	parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
+}
+
+bool knownCommand(const QString& command)
+{
+	return command == "find" || command == "status" || command == "filter" || GRAPH_COMMANDS.contains(command) ||
+		command == "symbols-in" || command == "at" || command == "outline";
+}
+
+// Whether a command with this many names given reads further names from stdin.
+bool takesStdin(const QString& command, int named)
+{
+	return knownCommand(command) && command != "status" && named == (command == "path" ? 1 : 0);
+}
+
+int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
+{
+	QCommandLineParser parser;
+	addOptions(parser);
 	if (!parser.parse(request.arguments))
 	{
 		throw UsageError(parser.errorText().toStdString());
@@ -725,10 +755,17 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	}
 	const QStringList args = parser.positionalArguments();
 	const QString command = args.isEmpty() ? QString() : args[0];
-	const bool isGraph = GRAPH_COMMANDS.contains(command);
+	if (command == "serve")
+	{
+		if (args.size() != 1)
+		{
+			throw UsageError("Usage: st serve [--project P]");
+		}
+		return st::serve(locateProject(io, parser, request.cwd), st::ServeOptions(), io.err);
+	}
 	const bool isFiles = command == "symbols-in" || command == "at";
 	const bool takesMany = command == "symbols-in" || command == "outline";
-	if ((command != "find" && command != "status" && command != "filter" && !isGraph && !isFiles && command != "outline") ||
+	if (!knownCommand(command) ||
 		(args.size() > (command == "path" ? 3 : 2) && !takesMany) || (command == "status" && args.size() != 1))
 	{
 		throw UsageError(
@@ -831,7 +868,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 		{
 			throw UsageError("path needs a target: st path <from> <to>, or <keys> | st path <to>");
 		}
-		else if (!request.stdinIsTerminal)
+		else if (takesStdin(command, named) && !request.stdinIsTerminal)
 		{
 			size_t truncated = 0;
 			inputLines = st::readLines(io.in, &truncated);
@@ -910,7 +947,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 	}
 	if (command == "status")
 	{
-		return status(io, storage, freshness);
+		return status(io, storage, freshness, request.served || st::serverRunning(projectFile));
 	}
 	if (command == "find")
 	{
@@ -956,6 +993,24 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
 
 namespace st
 {
+Route route(const Request& request)
+{
+	QCommandLineParser parser;
+	addOptions(parser);
+	Route result;
+	if (!parser.parse(request.arguments))
+	{
+		return result;
+	}
+	const QStringList args = parser.positionalArguments();
+	result.command = args.isEmpty() ? QString() : args[0];
+	result.noServer = parser.isSet("no-server");
+	result.readsStdin = !parser.isSet("help") && takesStdin(result.command, args.size() - 1);
+	result.project = parser.isSet("project") ? givenProject(parser, request.cwd)
+											 : st::findProject(FilePath(request.cwd.toStdWString()), registryFile());
+	return result;
+}
+
 int runCommand(const Request& request, Io io, IndexCache& cache)
 {
 	try

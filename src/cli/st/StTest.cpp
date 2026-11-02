@@ -1,13 +1,20 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <future>
+#include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 
@@ -24,12 +31,14 @@
 #include "ProjectSettings.h"
 #include "StFreshness.h"
 #include "StArchitecture.h"
+#include "StClient.h"
 #include "StGraph.h"
 #include "StInput.h"
 #include "StKey.h"
 #include "StLombok.h"
 #include "StOutput.h"
 #include "StProject.h"
+#include "StServer.h"
 #include "StTestSupport.h"
 #include "StorageNode.h"
 #include "StorageFile.h"
@@ -1084,4 +1093,152 @@ TEST_CASE("lombok joined statement columns count a tab and a non-ascii character
 	CHECK(st::toOriginal(go, roots, read).line == 6);
 	go.column = 3;
 	CHECK(st::toOriginal(go, roots, read).line == 5);
+}
+
+TEST_CASE("wire request and reply round-trip")
+{
+	for (const QByteArray& input: {QByteArray(), QByteArray(1024 * 1024, 'k')})
+	{
+		const st::WireRequest sent{st::PROTOCOL_VERSION, "/bin/st|1|2",
+			{{"st", "callers", QString::fromUtf8("Grüße.日本()")}, QString::fromUtf8("/tmp/ä ö"), false}, input};
+		st::WireRequest received;
+		REQUIRE(st::decode(st::encode(sent), &received));
+		CHECK(received.version == sent.version);
+		CHECK(received.buildId == sent.buildId);
+		CHECK(received.request.arguments == sent.request.arguments);
+		CHECK(received.request.cwd == sent.request.cwd);
+		CHECK(received.request.stdinIsTerminal == false);
+		CHECK(received.stdinData == input);
+	}
+	const st::WireReply sent{3, QByteArray("a\tb\n"), QByteArray::fromStdString("st: ü\n"), true, "is from another build"};
+	st::WireReply received;
+	REQUIRE(st::decode(st::encode(sent), &received));
+	CHECK(received.exitCode == 3);
+	CHECK(received.out == sent.out);
+	CHECK(received.err == sent.err);
+	CHECK(received.refused);
+	CHECK(received.refusal == sent.refusal);
+
+	st::WireReply truncated;
+	CHECK_FALSE(st::decode(st::encode(sent).left(5), &truncated));
+}
+
+TEST_CASE("socket name is stable, per project, and short")
+{
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const QString base = QDir(dir.path()).canonicalPath();
+	REQUIRE(QDir(base).mkpath("a/" + QString(150, 'x')));
+	REQUIRE(QDir(base).mkpath("b"));
+	const QString first = base + "/a/" + QString(150, 'x') + "/p.srctrlprj";
+	const QString second = base + "/b/p.srctrlprj";
+	for (const QString& path: {first, second})
+	{
+		QFile file(path);
+		REQUIRE(file.open(QIODevice::WriteOnly));
+	}
+	REQUIRE(QFile::link(base + "/b", base + "/link"));
+
+	const QString name = st::serverSocketName(FilePath(first.toStdWString()));
+	CHECK(name == st::serverSocketName(FilePath(first.toStdWString())));
+	CHECK(name != st::serverSocketName(FilePath(second.toStdWString())));
+	CHECK(name.size() <= 100);
+	CHECK(name.endsWith(".sock"));
+	CHECK(st::serverSocketName(FilePath((base + "/link/p.srctrlprj").toStdWString())) ==
+		st::serverSocketName(FilePath(second.toStdWString())));
+}
+
+namespace
+{
+// Accepts one connection on the project's socket, reads its request and replies with reply, or closes without one.
+class FakeServer
+{
+public:
+	FakeServer(const QString& name, std::optional<st::WireReply> reply)
+		: m_thread(QThread::create([this, name, reply]() {
+			QLocalServer server;
+			QLocalServer::removeServer(name);
+			m_listening.set_value(server.listen(name));
+			if (!server.waitForNewConnection(5000))
+			{
+				return;
+			}
+			QLocalSocket* socket = server.nextPendingConnection();
+			QByteArray payload;
+			m_received = st::readFrame(*socket, &payload, 5000) && st::decode(payload, &m_request);
+			if (reply)
+			{
+				st::writeFrame(*socket, st::encode(*reply), 5000);
+			}
+			socket->disconnectFromServer();
+			delete socket;
+		}))
+	{
+		m_thread->start();
+	}
+
+	~FakeServer()
+	{
+		m_thread->wait();
+	}
+
+	bool listening()
+	{
+		return m_listening.get_future().get();
+	}
+
+	// The request the server read; waits for it to finish.
+	std::optional<st::WireRequest> request()
+	{
+		m_thread->wait();
+		return m_received ? std::optional<st::WireRequest>(m_request) : std::nullopt;
+	}
+
+private:
+	bool m_received = false;
+	st::WireRequest m_request;
+	std::promise<bool> m_listening;
+	std::unique_ptr<QThread> m_thread;
+};
+}
+
+TEST_CASE("client answers cold when the server is from another build")
+{
+	int argc = 1;
+	char name[] = "st";
+	char* argv[] = {name, nullptr};
+	QCoreApplication app(argc, argv);
+	QTemporaryDir dir;
+	REQUIRE(dir.isValid());
+	const FilePath project((QDir(dir.path()).canonicalPath() + "/p.srctrlprj").toStdWString());
+	const st::Request request{{"st", "callers"}, dir.path(), false};
+	const auto ask = [&](std::optional<st::WireReply> reply, std::ostringstream& out, std::ostringstream& err) {
+		FakeServer server(st::serverSocketName(project), reply);
+		REQUIRE(server.listening());
+		const std::optional<int> code = st::tryServer(project, request, "key\n", out, err);
+		return std::make_pair(code, server.request());
+	};
+
+	std::ostringstream out;
+	std::ostringstream err;
+	const auto refused = ask(st::WireReply{0, "ignored\n", {}, true, "is from another build"}, out, err);
+	CHECK_FALSE(refused.first);
+	CHECK(out.str().empty());
+	CHECK(err.str() == "st: server is from another build; answering without it\n");
+	REQUIRE(refused.second);
+	CHECK(refused.second->version == st::PROTOCOL_VERSION);
+	CHECK(refused.second->buildId == st::buildId());
+	CHECK(refused.second->request.arguments == request.arguments);
+	CHECK(refused.second->stdinData == "key\n");
+
+	std::ostringstream out2;
+	std::ostringstream err2;
+	CHECK_FALSE(ask(std::nullopt, out2, err2).first);
+	CHECK(err2.str() == "st: server did not answer; answering without it\n");
+
+	std::ostringstream out3;
+	std::ostringstream err3;
+	CHECK(ask(st::WireReply{2, "a\n", "st: ambiguous\n"}, out3, err3).first == std::optional<int>(2));
+	CHECK(out3.str() == "a\n");
+	CHECK(err3.str() == "st: ambiguous\n");
 }

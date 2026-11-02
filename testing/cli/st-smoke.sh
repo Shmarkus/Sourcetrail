@@ -11,7 +11,8 @@ root="$(realpath "$(dirname "$0")/../..")"
 [ -x "$st" ] || die "st binary not executable: $st"
 [ -x "$cli" ] || die "Sourcetrail_cli not found next to st: $cli"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-st-smoke.XXXXXX")"
-trap 'status=$?; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
+server_pid=
+trap 'status=$?; [ -z "$server_pid" ] || kill -9 "$server_pid" 2> /dev/null || true; rm -f "$(sed -n "s/^st: serving .* on //p" "$work/serve.err" 2> /dev/null)"; if [ "$status" != 0 ]; then echo "--- last stdout" >&2; cat "$work/out" >&2 2>/dev/null || true; echo "--- last stderr" >&2; cat "$work/err" >&2 2>/dev/null || true; fi; rm -rf "$work"; exit "$status"' EXIT
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
 export HOME="$work/home"
 export SOURCETRAIL_VIA_SCRIPT=1
@@ -230,5 +231,132 @@ rm "$project.lock"
 mkdir "$work/empty"
 cp "$project" "$work/empty/project.srctrlprj"
 run 4 --project "$work/empty/project.srctrlprj" find getName
+
+# st serve: answers through the server equal the cold ones, stay fresh, and fall back when it dies.
+# start_server: runs st serve in the background and waits until it listens.
+start_server() {
+    "$st" serve > "$work/serve.out" 2> "$work/serve.err" &
+    server_pid=$!
+    for _ in $(seq 100); do
+        grep -qF 'st: serving ' "$work/serve.err" && return
+        kill -0 "$server_pid" 2> /dev/null || assert "st serve exited: $(cat "$work/serve.err")"
+        sleep 0.1
+    done
+    assert "st serve did not start listening: $(cat "$work/serve.err")"
+}
+# same <stdin file> <args...>: stdout (without the server status line), stderr and exit code through the server
+# equal those of ST_NO_SERVER=1.
+same() {
+    local input="$1" cold=0
+    code=0
+    shift
+    ST_NO_SERVER=1 "$st" "$@" < "$input" > "$work/cold.out" 2> "$work/cold.err" || cold=$?
+    "$st" "$@" < "$input" > "$work/out" 2> "$work/err" || code=$?
+    [ "$code" = "$cold" ] || assert "'st $*' exited $code through the server, $cold without"
+    diff <(grep -v $'^server\t' "$work/cold.out") <(grep -v $'^server\t' "$work/out") > /dev/null \
+        || assert "'st $*' stdout differs through the server: $(diff "$work/cold.out" "$work/out")"
+    diff "$work/cold.err" "$work/err" > /dev/null || assert "'st $*' stderr differs through the server: $(diff "$work/cold.err" "$work/err")"
+}
+# Settle the index first: neither mode may refresh during the comparison.
+ST_NO_SERVER=1 "$st" find getName > /dev/null 2>&1 || true
+sleep 1.1
+start_server
+run 0 serve
+contains 'st: server already running for ' err
+run 0 status
+contains $'server\trunning' out
+none=/dev/null
+same "$none" --project "$project" find getName
+same "$none" find getName
+same "$none" find Options
+same "$none" find example.Options
+same "$none" find greeting
+same "$none" find nameLength
+same "$none" callers 'example.Caller.greeting(example.Person)'
+same "$none" callers 'example.Person.getName()'
+same "$none" callers 'example.Person.getName()' --depth 2
+same "$none" callers 'example.Options.isEnabled()'
+same "$none" callers 'example.Welcome.welcome(example.Person)'
+same "$none" filter --file 'sub/*' example.Options
+same "$none" filter --not --file 'sub/*' example.Options
+same "$none" filter --annotated Endpoint 'example.web.GreetingController.greet(example.Person)'
+same "$none" filter --annotated Endpoint 'example.Caller.shout(example.Person)'
+same "$work/in" filter --annotated Endpoint
+same "$none" at sub/src/test/java/example/Options.java:6
+same "$none" at "$caller:$shout_line"
+same "$none" symbols-in sub/src/test/java/example/Options.java
+same "$none" symbols-in src/main/java/example/Person.java
+same "$none" path example.web.GreetingController 'example.Person.getName()'
+same "$none" outline example.Caller
+same "$none" outline example.web.GreetingController
+same "$none" outline GreetingController
+same "$none" impact 'example.Person.getName()'
+same "$none" deps example.web.GreetingController
+same "$none" path --edges calls example.web.GreetingController 'example.Person.getName()'
+same "$none" impact --edges calls 'example.Person.getName()'
+for command in outline symbols-in at; do
+    same "$none" "$command" --kind field src/main/java/example/Caller.java:5
+done
+same "$none" status
+same "$none" bogus
+same "$none" callers
+printf '%s:%s\n%s:%s\n' "$person" "$getter_line" "$person" "$field_line" > "$work/at.in"
+same "$work/at.in" at
+"$st" find GreetingController 2> /dev/null > "$work/keys.in"
+same "$work/keys.in" callees
+printf '%s\nbash\n%s\n' "$$" "$(hostname)" > "$project.lock"
+same "$none" --wait 500 callers 'example.Person.getName()'
+rm "$project.lock"
+# The four inputs the server must forward faithfully: piped stdin, a cwd-relative path, ambiguity, an unknown name.
+echo 'example.Person.getName()' > "$work/key.in"
+same "$work/key.in" callers
+contains 'example.Caller.shout(example.Person)' out
+pushd src/main/java/example > /dev/null
+same "$none" at "Caller.java:$shout_line"
+contains 'example.Caller.shout(example.Person)' out
+popd > /dev/null
+same "$none" callers greeting
+[ "$code" = 2 ] || assert "ambiguous name through the server exited $code"
+same "$none" callers nope
+[ "$code" = 3 ] || assert "unknown name through the server exited $code"
+# A binary of another build is refused and answers cold.
+mkdir "$work/bin"
+cp "$st" "$work/bin/st"
+"$work/bin/st" find getName > "$work/out" 2> "$work/err" || assert "st of another build failed"
+contains 'st: server is from another build; answering without it' err
+contains 'example.Person.getName()' out
+
+# Freshness: an edit is refreshed by the server before it answers.
+sed -i 's/^}$/    public String whisper(Person person) { return person.getName().toLowerCase(); }\n}/' "$caller"
+sleep 0.2
+run 0 callers 'example.Person.getName()'
+contains 'refreshed' err
+contains 'example.Caller.whisper(example.Person)' out
+# Rewritten index: a cold refresh replaces the index under the server, which then reloads it.
+sed -i 's/^}$/    public String murmur(Person person) { return person.getName().trim(); }\n}/' "$caller"
+sleep 0.2
+ST_NO_SERVER=1 "$st" callers 'example.Person.getName()' > "$work/out" 2> "$work/err" || assert "cold refresh failed"
+contains 'refreshed' err
+run 0 callers 'example.Person.getName()'
+contains 'example.Caller.murmur(example.Person)' out
+! grep -q refreshed "$work/err" || assert "the server refreshed an index a cold st had refreshed"
+
+# Stale socket: a killed server leaves its socket file; st answers cold within 1 s and a new server starts.
+kill -9 "$server_pid"
+wait "$server_pid" 2> /dev/null || true
+server_pid=
+started="$(date +%s%N)"
+run 0 find getName
+elapsed=$(( ($(date +%s%N) - started) / 1000000 ))
+[ "$elapsed" -lt 1000 ] || assert "query after a killed server took $elapsed ms"
+! grep -qF 'st: server' "$work/err" || assert "query after a killed server printed a server note: $(cat "$work/err")"
+run 0 status
+contains $'server\toff' out
+start_server
+run 0 status
+contains $'server\trunning' out
+kill "$server_pid"
+wait "$server_pid" 2> /dev/null || true
+server_pid=
 
 echo "st smoke passed"

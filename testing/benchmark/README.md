@@ -19,7 +19,8 @@ the final answer minus the context of the first call, which is what the task its
 ground truth: **correct** (every required item, no look-alike, nothing extra), **partial**, **wrong** or **no answer**.
 
 `bench.py speed` times `st` itself: startup (`st status`), each question's reference query (with `--no-refresh`), and
-the first query after a one-line edit (the edit is undone afterwards).
+the first query after a one-line edit, three times by default (`--refresh-repeats`; the edit is undone each time). A
+refresh attempt counts only when `st` reports `refreshed N files`; otherwise the report says the refresh failed.
 
 The report puts both against the success criteria in `docs/superpowers/specs/2026-10-30-sourcetrail-cli-requirements.md`.
 
@@ -49,6 +50,10 @@ logs. `--resume` continues an interrupted run, and `bench.py report --out DIR` r
 When every run of a question agrees against the question file (all miss the same item, or all list the same extra),
 the report lists it under "Check the ground truth": the agents are more often right than the question file. Fix the
 question, then `bench.py rescore --out DIR --questions FILE` scores the stored answers again (the old records are kept).
+
+**Freeze the build** you benchmark (copy `st` with `Sourcetrail`, `sourcetrail_indexer` and the data payload next to
+it). `run` stops when `st` or a binary beside it changes during the run, keeping the finished runs for `--resume`;
+`speed` refuses to time a refresh when `Sourcetrail` or `sourcetrail_indexer` is missing beside `st`.
 
 Useful options: `--model` (the same for both arms), `--st /path/to/st`, `--arms st` (one arm only), `--timeout`,
 `--max-turns`, `--bare` (no CLAUDE.md discovery at all; needs `ANTHROPIC_API_KEY`). Without `--bare`, your

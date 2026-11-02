@@ -182,9 +182,12 @@ def _speed_lines(speed: dict) -> list[str]:
         lines.append(f"| Query, slowest ({slowest['question']}) | {slowest['median_s']:.2f} s | under 1 s (path under 2 s) |")
     refresh = speed.get("refresh")
     if refresh:
-        reported = refresh.get("after_edit_st")
-        detail = f" (st: {reported[0]} files, {reported[1]:.1f} s)" if reported else ""
-        lines.append(f"| First query after a one-line edit | {refresh['after_edit_s']:.1f} s{detail} | under 5 s |")
+        if refresh.get("valid"):
+            shown = (f"{refresh['median_s']:.1f} s ({refresh['min_s']:.1f}–{refresh['max_s']:.1f} s, "
+                     f"{refresh['valid']} of {len(refresh['attempts'])} refreshed)")
+        else:
+            shown = f"no refresh in {len(refresh.get('attempts', []))} attempts: check the build"
+        lines.append(f"| First query after a one-line edit | {shown} | under 5 s |")
     return lines
 
 

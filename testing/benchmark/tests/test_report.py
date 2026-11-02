@@ -132,6 +132,22 @@ class MarkdownTest(unittest.TestCase):
         self.assertIn("abc1234", text)
 
 
+class SpeedReportTest(unittest.TestCase):
+    def refresh(self, valid, median_s=None):
+        return {"startup": None, "queries": [], "refresh": {
+            "attempts": [{}] * 3, "valid": valid, "median_s": median_s, "min_s": 2.0 if valid else None,
+            "max_s": 4.5 if valid else None}}
+
+    def test_refresh_row_shows_median_range_and_valid_count(self):
+        text = render_markdown(summarize(RUNS), RUNS, speed=self.refresh(2, 3.0))
+        self.assertIn("| First query after a one-line edit | 3.0 s (2.0–4.5 s, 2 of 3 refreshed) | under 5 s |", text)
+
+    def test_failed_refreshes_are_not_shown_as_a_time(self):
+        text = render_markdown(summarize(RUNS), RUNS, speed=self.refresh(0))
+        self.assertIn("| First query after a one-line edit | no refresh in 3 attempts: check the build | under 5 s |",
+                      text)
+
+
 class SpeedHelpersTest(unittest.TestCase):
     def test_parse_refreshed_line(self):
         self.assertEqual(parse_refreshed("x\nrefreshed 3 files in 1.2s\n"), (3, 1.2))

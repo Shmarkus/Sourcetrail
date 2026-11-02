@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 import unittest
 
-from stbench.runner import RunConfig, run_benchmark, read_records
+from stbench.runner import BuildChanged, RunConfig, run_benchmark, read_records
 
 FAKE_CLAUDE = textwrap.dedent("""\
     #!{python}
@@ -128,6 +128,14 @@ class RunBenchmarkTest(unittest.TestCase):
         run_benchmark(self.config, resume=True, progress=lambda _: None)
         self.assertFalse(os.path.exists(self.seen))
         self.assertEqual(len(read_records(self.out)), 4)
+
+    def test_a_rebuild_during_the_run_stops_it(self):
+        def rebuild_after_first(_line):
+            with open(self.config.st_binary, "a") as handle:
+                handle.write("# rebuilt\n")
+        with self.assertRaisesRegex(BuildChanged, "st"):
+            run_benchmark(self.config, progress=rebuild_after_first)
+        self.assertEqual(len(read_records(self.out)), 1)
 
     def test_failed_claude_is_recorded_as_an_error(self):
         executable(os.path.join(self.bin, "claude"), "#!/bin/sh\necho boom >&2\nexit 3\n")

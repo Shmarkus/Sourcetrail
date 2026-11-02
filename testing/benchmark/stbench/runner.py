@@ -9,6 +9,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 
+from .build import build_fingerprint, changed_files
 from .arms import build_prompt, claude_args, copy_without_sourcetrail, path_hiding_st, path_with_st
 from .scoring import extract_answer, score
 from .stream import parse_stream
@@ -18,6 +19,10 @@ _KEPT_METRICS = ("tool_calls", "st_calls", "st_invocations", "text_tool_calls", 
                  "input_tokens", "cache_creation_tokens", "cache_read_tokens", "output_tokens", "total_tokens",
                  "cost_usd", "turns", "is_error", "error", "commands",
                  "api_calls", "initial_context_tokens", "final_context_tokens", "context_growth_tokens")
+
+
+class BuildChanged(RuntimeError):
+    """The st build was replaced during a run, so later runs would measure a different build."""
 
 
 @dataclass
@@ -117,6 +122,7 @@ def run_benchmark(config: RunConfig, resume: bool = False, progress=print) -> li
         os.remove(os.path.join(config.out_dir, RECORDS))
     done = {(r["question"], r["arm"], r["repeat"]) for r in read_records(config.out_dir)} if resume else set()
     arms = _prepare_arms(config)
+    fingerprint = build_fingerprint(config.st_binary) if config.st_binary else {}
     total = len(config.questions) * len(config.arms) * config.repeats
     count = len(done)
     for repeat in range(1, config.repeats + 1):
@@ -124,6 +130,11 @@ def run_benchmark(config: RunConfig, resume: bool = False, progress=print) -> li
             for name in _arm_order(config.arms, position + repeat):
                 if (question["id"], name, repeat) in done:
                     continue
+                if fingerprint:
+                    changed = changed_files(fingerprint, build_fingerprint(config.st_binary))
+                    if changed:
+                        raise BuildChanged(f"the st build changed during the run ({', '.join(changed)}); "
+                                           "finished runs are kept: freeze the build and continue with --resume")
                 record = run_one(config, arms[name], question, repeat)
                 _append_record(config.out_dir, record)
                 count += 1

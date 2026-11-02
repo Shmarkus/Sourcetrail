@@ -27,10 +27,11 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
 from stbench.arms import path_with_st, readme_agent_section, st_note  # noqa: E402
+from stbench.build import missing_neighbours  # noqa: E402
 from stbench.questions import QuestionError, load_questions  # noqa: E402
 from stbench.report import render_markdown, summarize  # noqa: E402
 from stbench.rescore import rescore  # noqa: E402
-from stbench.runner import RECORDS, RunConfig, read_records, run_benchmark  # noqa: E402
+from stbench.runner import RECORDS, BuildChanged, RunConfig, read_records, run_benchmark  # noqa: E402
 from stbench.speed import measure  # noqa: E402
 
 README = os.path.join(REPO, "README.md")
@@ -57,6 +58,10 @@ def _preflight(args, data: dict, st_binary: str | None) -> None:
     if not shutil.which("claude"):
         _fail("claude (Claude Code CLI) is not on PATH")
     if st_binary:
+        missing = missing_neighbours(st_binary)
+        if missing:
+            print(f"bench: warning: {', '.join(missing)} not found next to {os.path.realpath(st_binary)}; "
+                  "st can't refresh the index, so any stale file makes queries fail")
         status = _st(st_binary, "status", args.project)
         if status.returncode != 0:
             _fail(f"`st status` failed in {args.project} (exit {status.returncode}): {status.stderr.strip()}\n"
@@ -168,6 +173,10 @@ def cmd_run(args) -> None:
     print(f"bench: {runs} agent runs into {out_dir}")
     try:
         run_benchmark(config, resume=args.resume)
+    except BuildChanged as error:
+        print(f"bench: {error}", file=sys.stderr)
+        print(f"bench: partial report {_write_report(out_dir)}", file=sys.stderr)
+        sys.exit(3)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print(f"bench: report {_write_report(out_dir)}")
@@ -176,12 +185,17 @@ def cmd_run(args) -> None:
 def cmd_speed(args) -> None:
     data = _load(args)
     st_binary = _st_binary(args.st)
+    missing = missing_neighbours(st_binary)
+    if args.edit_file and missing:
+        _fail(f"{', '.join(missing)} not found next to {os.path.realpath(st_binary)}; st can't refresh without them, "
+              "so the refresh time would measure a failure")
     out_dir = args.out or _default_out(data.get("project", {}).get("name", "project"))
     os.makedirs(out_dir, exist_ok=True)
     link_dir = tempfile.mkdtemp(prefix="st-bench-")
     env = dict(os.environ, PATH=path_with_st(os.environ.get("PATH", ""), st_binary, link_dir))
     try:
-        result = measure(os.path.abspath(args.project), data["questions"], args.edit_file, args.repeats, env)
+        result = measure(os.path.abspath(args.project), data["questions"], args.edit_file, args.repeats, env,
+                         refresh_repeats=args.refresh_repeats)
     finally:
         shutil.rmtree(link_dir, ignore_errors=True)
     failed = [timing for timing in [result["startup"]] + result["queries"]
@@ -240,6 +254,7 @@ def main(argv=None) -> None:
     common(speed)
     speed.add_argument("--edit-file", help="project-relative Java file to append a comment line to (restored after)")
     speed.add_argument("--repeats", type=int, default=5)
+    speed.add_argument("--refresh-repeats", type=int, default=3, help="edit-and-query attempts (default 3)")
     speed.set_defaults(func=cmd_speed)
 
     again = commands.add_parser("rescore", help="score the stored answers again against a corrected question file")

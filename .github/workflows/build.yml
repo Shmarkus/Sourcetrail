@@ -61,10 +61,16 @@ jobs:
       - name: Refresh the latest prerelease
         if: github.ref == 'refs/heads/master'
         run: |
-          gh release delete latest --cleanup-tag --yes || true
-          gh release create latest Sourcetrail_Linux_64bit.tar.gz --target "$GITHUB_SHA" --prerelease \
-            --title "Latest master build" \
-            --notes "Built from master at $GITHUB_SHA. Includes the GUI, Sourcetrail_cli and st."
+          NOTES="Built from master at $GITHUB_SHA. Includes the GUI, Sourcetrail_cli and st."
+          if gh release view latest > /dev/null 2>&1; then
+            # Update in place: move the tag, replace the package, rewrite the notes.
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release upload latest Sourcetrail_Linux_64bit.tar.gz --clobber
+            gh release edit latest --notes "$NOTES"
+          else
+            gh release create latest Sourcetrail_Linux_64bit.tar.gz --target "$GITHUB_SHA" --prerelease \
+              --title "Latest master build" --notes "$NOTES"
+          fi
 
       - name: Publish the tagged release
         if: startsWith(github.ref, 'refs/tags/v')

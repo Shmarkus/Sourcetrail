@@ -1,5 +1,9 @@
+#include <chrono>
+#include <cstdlib>
+
 #include <gtest/gtest.h>
 
+#include "FilePath.h"
 #include "utilityApp.h"
 
 TEST(utilityAppTestSuite, searchPath) {
@@ -40,4 +44,21 @@ TEST(utilityAppTestSuite, getApplicationArchitectureType) {
 #elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64)
   EXPECT_EQ(utility::getApplicationArchitectureType(), ApplicationArchitectureType::ARM);
 #endif
+}
+TEST(utilityAppTestSuite, executeProcessReturnsWhenAShortProcessExitsInsteadOfWaitingOutTheTimeout) {
+  // A JVM closes its output a moment before it exits, which is when the exit signal used to get lost.
+  const char* javaHome = std::getenv("JAVA_HOME");
+  const FilePath java = javaHome != nullptr ? FilePath(std::string(javaHome)).getConcatenated(L"bin/java") :
+                                              FilePath(utility::searchPath("java").wstring());
+  if(!java.exists()) {
+    GTEST_SKIP() << "no Java found";
+  }
+  size_t slow = 0;
+  for(int i = 0; i < 40; i++) {
+    const auto start = std::chrono::steady_clock::now();
+    const utility::ProcessOutput output = utility::executeProcess(java.wstr(), {L"-version"}, FilePath(), true, 3000);
+    ASSERT_EQ(0, output.exitCode);
+    slow += std::chrono::steady_clock::now() - start > std::chrono::milliseconds(2000) ? 1 : 0;
+  }
+  EXPECT_EQ(0U, slow);
 }

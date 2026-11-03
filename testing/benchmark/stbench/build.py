@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 NEEDED_FOR_REFRESH = ["Sourcetrail", "sourcetrail_indexer"]
-_FINGERPRINTED = ["st", "Sourcetrail", "sourcetrail_indexer", "Sourcetrail_cli"]
+_FINGERPRINTED = ["st", "Sourcetrail", "sourcetrail_indexer"]
 
 
 def _directory(st_binary: str) -> str:

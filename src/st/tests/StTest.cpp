@@ -14,6 +14,8 @@
 #include <QFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QtEndian>
 #include <QThread>
@@ -1598,4 +1600,148 @@ TEST(St, frameReadGivesUpOnASlowClientAfterOneDeadline) {
   second->disconnectFromServer();
   quick->wait();
   slow->wait();
+}
+
+TEST(StProject, findsProjectInDotFolder) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  write(base + "/repo/.sourcetrail/repo.srctrlprj");
+  QDir().mkpath(base + "/repo/src/main");
+  const FilePath registryFile((base + "/reg/st-projects.tsv").toStdWString());
+  EXPECT_TRUE(st::findProject(FilePath((base + "/repo/src/main").toStdWString()), registryFile).wstr() ==
+              (base + "/repo/.sourcetrail/repo.srctrlprj").toStdWString());
+}
+
+// Review Focus 4: a project file in the folder itself comes before one in its .sourcetrail/.
+TEST(StProject, rootFileWinsOverDotFolder) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  write(base + "/repo/x.srctrlprj");
+  write(base + "/repo/.sourcetrail/y.srctrlprj");
+  QDir().mkpath(base + "/repo/src");
+  const FilePath registryFile((base + "/reg/st-projects.tsv").toStdWString());
+  EXPECT_TRUE(st::findProject(FilePath((base + "/repo/src").toStdWString()), registryFile).wstr() ==
+              (base + "/repo/x.srctrlprj").toStdWString());
+  EXPECT_TRUE(st::findProject(FilePath((base + "/repo").toStdWString()), registryFile).wstr() ==
+              (base + "/repo/x.srctrlprj").toStdWString());
+}
+
+// Review Focus 4: a symlinked path resolves the same project, and so does a cwd inside .sourcetrail/.
+TEST(StProject, symlinkedCwdAndInsideDotFolder) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString project = base + "/repo/.sourcetrail/repo.srctrlprj";
+  write(project);
+  QDir().mkpath(base + "/repo/src");
+  QDir().mkpath(base + "/elsewhere");
+  ASSERT_TRUE(QFile::link(base + "/repo/src", base + "/elsewhere/link"));
+  const FilePath registryFile((base + "/reg/st-projects.tsv").toStdWString());
+  EXPECT_TRUE(st::findProject(FilePath((base + "/elsewhere/link").toStdWString()), registryFile).wstr() == project.toStdWString());
+  EXPECT_TRUE(st::findProject(FilePath((base + "/repo/.sourcetrail").toStdWString()), registryFile).wstr() ==
+              project.toStdWString());
+}
+
+// Review Focus 5: the indexer writes its database inside the project (.sourcetrail/); a Gradle project whose source
+// root is the checkout itself has the watcher walk into that folder. Those writes are no source change.
+TEST(StWatch, ignoresWritesInsideDotFolder) {
+  int argc = 1;
+  char name[] = "st";
+  char* argv[] = {name, nullptr};
+  QCoreApplication app(argc, argv);
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString repo = QDir(dir.path()).canonicalPath() + "/repo";
+  const QString dot = repo + "/.sourcetrail";
+  write(repo + "/build.gradle", "plugins {}");
+  write(repo + "/A.java", "class A {}");
+  write(dot + "/.gitignore", "*\n");
+  write(dot + "/repo.srctrldb", "index");
+  write(dot + "/repo.srctrlprj",
+        QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_g1>"
+                "<gradle><project_file_path>" +
+                repo +
+                "/build.gradle</project_file_path><should_index_tests>0</should_index_tests></gradle>"
+                "<source_extensions><source_extension>.java</source_extension></source_extensions>"
+                "<status>enabled</status><type>Java Source Group from Gradle</type>"
+                "</source_group_g1></source_groups><version>8</version></config>\n")
+            .toUtf8());
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.load(FilePath((dot + "/repo.srctrlprj").toStdWString()), true));
+  const FilePath checkout(repo.toStdWString());
+  utility::GradleProjectInfo info;
+  info.fingerprint = utility::gradleBuildFingerprint(checkout);
+  info.sourceDirectories[L"main"] = {checkout};    // sourceSets.main.java.srcDirs = ['.']
+  utility::saveGradleProjectInfo(FilePath((dot + "/sourcetrail_dependencies/g1/gradle").toStdWString()), info);
+
+  const std::vector<QString> paths = st::watchPaths(settings, {FilePath((repo + "/A.java").toStdWString())});
+  for(const QString& path : paths) {
+    SCOPED_TRACE(path.toStdString());
+    EXPECT_FALSE(path.contains("/.sourcetrail"));
+  }
+  QElapsedTimer clock;
+  clock.start();
+  st::RefreshScheduler scheduler(500);
+  st::SourceWatcher watcher([&]() { scheduler.changed(clock.elapsed()); });
+  EXPECT_EQ(0u, watcher.watch(paths));
+
+  // What SQLite does while the indexer writes: the database rewritten, a journal created and removed.
+  QElapsedTimer writing;
+  writing.start();
+  for(int i = 0; writing.elapsed() < 2000; i++) {
+    write(dot + "/repo.srctrldb", QByteArray("index ") + QByteArray::number(i));
+    write(dot + "/repo.srctrldb-journal", "journal");
+    QFile::remove(dot + "/repo.srctrldb-journal");
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    watcher.settle();
+  }
+  QCoreApplication::processEvents(QEventLoop::AllEvents, 200);
+  EXPECT_FALSE(scheduler.pending());
+
+  write(repo + "/A.java", "class A { int a; }");
+  QElapsedTimer waiting;
+  waiting.start();
+  while(!scheduler.pending() && waiting.elapsed() < 5000) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+  }
+  EXPECT_TRUE(scheduler.pending());
+}
+
+TEST(StIndex, fullIndexReportsFileCount) {
+  const QByteArray javaHome = qgetenv("JAVA_HOME");
+  ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const std::filesystem::path project = (base + "/lombok").toStdString();
+  std::filesystem::copy(ST_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  write(base + "/home/.config/sourcetrail/ApplicationSettings.xml",
+        "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
+        "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
+            javaHome + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
+
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  if(!environment.contains("GRADLE_USER_HOME")) {
+    environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
+  }
+  environment.insert("HOME", base + "/home");
+  environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
+  environment.remove("DISPLAY");
+  QProcess st;
+  st.setProcessEnvironment(environment);
+  st.setWorkingDirectory(QString::fromStdString((project / "src").string()));
+  st.start(ST_APP_PATH, {"index", "--full"});
+  const bool finished = st.waitForFinished(300000);
+  if(!finished) {
+    st.kill();
+    st.waitForFinished();
+  }
+  const QByteArray out = st.readAllStandardOutput();
+  const QByteArray err = st.readAllStandardError();
+  ASSERT_TRUE(finished) << err.toStdString();
+  EXPECT_EQ(QProcess::NormalExit, st.exitStatus()) << err.toStdString();
+  EXPECT_EQ(0, st.exitCode()) << err.toStdString();
+  EXPECT_EQ("indexed 9 files, 0 errors\n", out.toStdString()) << err.toStdString();
 }

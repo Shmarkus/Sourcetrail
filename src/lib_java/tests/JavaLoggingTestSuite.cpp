@@ -84,3 +84,25 @@ TEST(JavaIndexing, bracesInPathsAndOutputAreLoggedNotThrown) {
   EXPECT_TRUE(result.output.contains(QStringLiteral("; 0 errors"))) << log;
   EXPECT_FALSE(result.errors.contains(QStringLiteral("LOG ERROR"))) << log;
 }
+
+// Headless indexing reports each file it indexes on the console with the default settings, as before the port: st's
+// refresh output and the smoke and comparison scripts read these lines.
+TEST(JavaIndexing, headlessIndexLogsEachSourceFileByDefault) {
+  ASSERT_FALSE(IApplicationSettings::getInstance()->getJavaPath().empty()) << "no JVM configured for the Java tests";
+
+  QTemporaryDir scratch;
+  ASSERT_TRUE(scratch.isValid());
+  const std::filesystem::path root = scratch.path().toStdString();
+  const std::filesystem::path project = root / "lombok";
+  std::filesystem::copy(SOURCETRAIL_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  writeApplicationSettings(root / "home");
+
+  const RunResult result = runSourcetrail(
+      QString::fromStdString((root / "home").string()),
+      {QStringLiteral("index"), QStringLiteral("--full"), QString::fromStdString((project / "project.srctrlprj").string())});
+
+  const std::string log = result.output.toStdString() + result.errors.toStdString();
+  ASSERT_TRUE(result.finished) << log;
+  EXPECT_EQ(0, result.exitCode) << log;
+  EXPECT_EQ(9, result.output.count(QStringLiteral("indexing source file: "))) << log;
+}

@@ -8,8 +8,9 @@
 #include "FilePath.h"
 
 namespace st {
-// Nearest .srctrlprj in cwd or a parent directory, else the registry entry whose
-// source root contains cwd. Empty FilePath if none.
+// Nearest project from cwd upwards. At each directory: a .srctrlprj in it, then one in its .sourcetrail/, then the
+// registry entry whose source root is that directory. A symlinked cwd is walked as given, then resolved. Empty
+// FilePath if none.
 FilePath findProject(const FilePath& cwd, const FilePath& registryFile);
 
 // The lock file Sourcetrail's Project::load takes: canonical project path plus ".lock".

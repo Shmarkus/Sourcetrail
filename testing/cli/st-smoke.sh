@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Requires a JDK 21 JAVA_HOME. Usage: st-smoke.sh path/to/st (Sourcetrail_cli must sit next to it).
+# Requires a JDK 21 JAVA_HOME. Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
 die() { echo "st-smoke.sh: $*" >&2; exit 2; }
 [ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"
 st="$(realpath "$1")"
-cli="$(dirname "$st")/Sourcetrail_cli"
 root="$(realpath "$(dirname "$0")/../..")"
 [ -x "${JAVA_HOME:-}/bin/java" ] || die "JAVA_HOME must point to a JDK 21 (no bin/java at '${JAVA_HOME:-}')"
 [ -x "$st" ] || die "st binary not executable: $st"
-[ -x "$cli" ] || die "Sourcetrail_cli not found next to st: $cli"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-st-smoke.XXXXXX")"
 # Copies of st made below live in $work/<dir>/; a packaged st finds its libraries in ../lib.
 [ ! -d "$(dirname "$st")/../lib" ] || ln -s "$(realpath "$(dirname "$st")/../lib")" "$work/lib"
@@ -54,7 +52,11 @@ run 4 --project "$project" find getName
 start_server "$st" --project "$project"
 # Past the server's first look (500 ms after it starts), which finds no index.
 sleep 1
-"$cli" index "$project" --full > "$work/index.json" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
+# st index goes through the running server.
+"$st" index --full --project "$project" > "$work/index.out" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
+[ "$(cat "$work/index.out")" = "indexed 9 files, 0 errors" ] || assert "st index --full printed: $(cat "$work/index.out")"
+grep -qF 'indexing source file:' "$work/index.err" || assert "st index did not pass on the indexer's output: $(cat "$work/index.err")"
+! grep -qF 'answering without it' "$work/index.err" || assert "st index did not go through the server: $(cat "$work/index.err")"
 for _ in $(seq 100); do grep -qF 'st: watching ' "$work/serve.err" && break; sleep 0.1; done
 grep -qF 'st: watching ' "$work/serve.err" || assert "a server started without an index never watched: $(cat "$work/serve.err")"
 ! grep -qF 'st: refreshing ' "$work/serve.err" || assert "a server refreshed a fresh index: $(cat "$work/serve.err")"
@@ -214,18 +216,19 @@ manifest="$(find "$work/project/sourcetrail_dependencies" -path '*/gradle/delomb
 delombok_main="${manifest%.manifest}/src_main_java"
 welcome=src/main/java/example/Welcome.java
 sed -i 's/return greeter.greeting(p);/return "Hi " + greeter.greeting(p);/' "$welcome"
-"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
+"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
+contains 'indexed 1 files, 0 errors' out
 indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
 [ "$indexed" = "$delombok_main/example/Welcome.java" ] || assert "expected only Welcome.java re-indexed, got: $indexed"
 # Files referencing an edited file are re-indexed only when what it declares changes: not for a body edit,
 # but for a signature change, after which their calls are still found.
 caller=src/main/java/example/Caller.java
 sed -i 's/return salutation + person.getName().length();/return salutation + person.getName();/' "$caller"
-"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a body edit failed"
+"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a body edit failed"
 indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
 [ "$indexed" = "$delombok_main/example/Caller.java" ] || assert "expected only Caller.java re-indexed, got: $indexed"
 sed -i 's/String greeting(Person person, String salutation)/String greeting(Person person, CharSequence salutation)/' "$caller"
-"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a signature change failed"
+"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a signature change failed"
 grep -F 'indexing source file:' "$work/err" | grep -qF "$delombok_main/example/web/GreetingController.java" \
     || assert "GreetingController.java not re-indexed after a signature change in Caller.java"
 run 0 callers 'example.Caller.greeting(example.Person)'
@@ -233,13 +236,13 @@ contains 'example.web.GreetingController.greet(example.Person)' out
 run 0 find greeting
 contains 'example.Caller.greeting(example.Person, java.lang.CharSequence)' out
 sed -i 's/^}$/    public int nameLength() { return name.length(); }\n}/' "$person"
-"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a Lombok file edit failed"
+"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a Lombok file edit failed"
 grep -qF 'nameLength' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java not updated"
 grep -qF 'getName()' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java lacks the Lombok getter"
 run 0 find nameLength
 contains 'example.Person.nameLength()' out
 rm "$welcome"
-"$cli" index "$project" > "$work/out" 2> "$work/err" || assert "incremental index after a deletion failed"
+"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a deletion failed"
 [ ! -e "$delombok_main/example/Welcome.java" ] || assert "delombok copy of a deleted original kept"
 run 3 callers 'example.Welcome.welcome(example.Person)'
 

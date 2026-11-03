@@ -61,9 +61,12 @@ FilePath findProject(const FilePath& cwd, const FilePath& registryFile) {
   }
   for(const QString& start : starts) {
     for(QDir dir(start);;) {
-      const QStringList projects = dir.entryList({"*.srctrlprj"}, QDir::Files, QDir::Name);
-      if(!projects.isEmpty()) {
-        return fromQt(dir.absoluteFilePath(projects.first()));
+      for(const QString& folder : {QStringLiteral("."), QStringLiteral(".sourcetrail")}) {
+        const QDir projectDir(dir.filePath(folder));
+        const QStringList projects = projectDir.entryList({"*.srctrlprj"}, QDir::Files, QDir::Name);
+        if(!projects.isEmpty()) {
+          return fromQt(QDir::cleanPath(projectDir.absoluteFilePath(projects.first())));
+        }
       }
       const QString here = canonical(dir.path());
       for(const auto& [root, project] : registered) {

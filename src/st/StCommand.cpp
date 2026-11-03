@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -13,6 +14,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QLockFile>
+#include <QRegularExpression>
 
 #include "CppSQLite3.h"
 #include "FileInfo.h"
@@ -619,7 +621,9 @@ int refreshIfStale(const st::Io& io,
   std::string log;
   std::string failure;
   try {
-    cli::reindex(project, false, 600000, &log);
+    cli::reindex(project, false, 600000, [&log](const QByteArray& text) {
+      log.append(text.constData(), static_cast<size_t>(text.size()));
+    });
   } catch(const std::exception& error) {
     failure = error.what();
   }
@@ -641,6 +645,48 @@ int refreshIfStale(const st::Io& io,
   return st::EXIT_RESULTS;
 }
 
+// st index: re-indexes the project as a refresh does (--full: every file), the indexer's output on stderr, then
+// `indexed <n> files, <m> errors` on stdout; n counts the files this run indexed, m the errors in the index.
+int index(const st::Io& io, const FilePath& projectFile, bool full, size_t wait) {
+  constexpr int INDEX_FAILED = 1;
+  ProjectSettings settings;
+  if(!settings.load(projectFile, true)) {
+    throw UsageError("Unable to load project settings");
+  }
+  const TimeStamp started = st::refreshStart();
+  st::recordRefreshStart(settings, started, io.err);
+  QByteArray output;
+  try {
+    cli::reindex(QString::fromStdWString(projectFile.wstr()), full, std::numeric_limits<int>::max(), [&](const QByteArray& text) {
+      output += text;
+      io.err.write(text.constData(), text.size());
+      io.err.flush();
+    });
+  } catch(const std::exception& error) {
+    io.err << "st: " << error.what() << '\n';
+    return INDEX_FAILED;
+  }
+  const auto lock = lockProject(io, st::projectLockFile(projectFile), wait);
+  if(!lock) {
+    return INDEX_FAILED;
+  }
+  if(checkIndex(io, settings)) {
+    return INDEX_FAILED;
+  }
+  PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
+  if(storage.isEmpty() || storage.isIncompatible()) {
+    io.err << "st: index is empty or incompatible after indexing\n";
+    return INDEX_FAILED;
+  }
+  st::recordRefresh(settings, {started, storage.getStorageStats().timestamp}, io.err);
+  // "Finished indexing: <n>/<total> source files indexed; ..."; an index with nothing to refresh prints none.
+  const QRegularExpressionMatch finished =
+      QRegularExpression(QStringLiteral("Finished indexing: (\\d+)/\\d+ source files indexed")).match(QString::fromUtf8(output));
+  io.out << "indexed " << (finished.hasMatch() ? finished.captured(1).toStdString() : "0") << " files, "
+         << storage.getErrorCount().total << " errors\n";
+  return st::EXIT_RESULTS;
+}
+
 void addOptions(QCommandLineParser& parser) {
   parser.setApplicationDescription(
       "Agent-facing code navigation over a Sourcetrail index. Results on stdout, progress on stderr.\n"
@@ -648,8 +694,8 @@ void addOptions(QCommandLineParser& parser) {
       "override, inheritance, annotation usage, ...");
   parser.addHelpOption();
   parser.addPositionalArgument("command",
-                               "find | status | serve | refs | callers | callees | impls | supers | path | impact | deps | "
-                               "filter | symbols-in | at | outline");
+                               "find | status | serve | index | refs | callers | callees | impls | supers | path | impact | "
+                               "deps | filter | symbols-in | at | outline");
   parser.addPositionalArgument(
       "symbol",
       "Symbol name or key; read from stdin when omitted. symbols-in takes files "
@@ -683,6 +729,7 @@ void addOptions(QCommandLineParser& parser) {
   parser.addOption({"detach", "serve only: start the server in the background"});
   parser.addOption({"stop", "serve only: stop the running server"});
   parser.addOption({"no-watch", "serve only: do not watch the sources and refresh in the background"});
+  parser.addOption({"full", "index only: index every file again, not only the changed ones"});
   parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
 }
 
@@ -708,6 +755,15 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
   }
   const QStringList args = parser.positionalArguments();
   const QString command = args.isEmpty() ? QString() : args[0];
+  if(command == "index") {
+    if(args.size() != 1) {
+      throw UsageError("Usage: st index [--full] [--project P] [--wait MS]");
+    }
+    return index(io, locateProject(io, parser, request.cwd), parser.isSet("full"), number(parser, "wait", 30000));
+  }
+  if(parser.isSet("full")) {
+    throw UsageError("--full applies to index only");
+  }
   if(command == "serve") {
     const char* usage = "Usage: st serve [--detach|--stop] [--no-watch] [--project P]";
     if(args.size() != 1 || (parser.isSet("stop") && (parser.isSet("detach") || parser.isSet("no-watch")))) {
@@ -728,7 +784,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
   if(!knownCommand(command) || (args.size() > (command == "path" ? 3 : 2) && !takesMany) ||
      (command == "status" && args.size() != 1)) {
     throw UsageError(
-        "Usage: st <find|status|refs|callers|callees|impls|supers|path|impact|deps|filter|symbols-in|at|outline> "
+        "Usage: st <find|status|index|refs|callers|callees|impls|supers|path|impact|deps|filter|symbols-in|at|outline> "
         "[symbol|file[:line]] [target] "
         "[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--in] [--package P] [--annotated "
         "A] "

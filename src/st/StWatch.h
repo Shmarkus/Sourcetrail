@@ -48,7 +48,7 @@ private:
 };
 
 // Directories and files to watch: every source root, every directory holding an indexed file, every
-// indexed file, and the Gradle build files; never anything under build/, .gradle/, .git/ or
+// indexed file, and the Gradle build files; never anything under build/, .gradle/, .git/, .sourcetrail/ or
 // sourcetrail_dependencies/. Above 20000 paths, files are dropped and only directories are watched.
 std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vector<FilePath>& indexedFiles);
 

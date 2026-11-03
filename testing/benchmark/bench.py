@@ -65,7 +65,7 @@ def _preflight(args, data: dict, st_binary: str | None) -> None:
         status = _st(st_binary, "status", args.project)
         if status.returncode != 0:
             _fail(f"`st status` failed in {args.project} (exit {status.returncode}): {status.stderr.strip()}\n"
-                  "Index the project first: Sourcetrail_cli index /abs/project.srctrlprj --full")
+                  "Index the project first: st index --full --project /abs/project.srctrlprj")
         stale = re.search(r"stale_files\t(\d+)", status.stdout)
         if stale and int(stale.group(1)):
             print(f"bench: index has {stale.group(1)} stale files; refreshing once before the runs")

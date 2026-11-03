@@ -36,7 +36,7 @@ public:
       }
     }
     for(const QString& part : relative.split('/', Qt::SkipEmptyParts)) {
-      if(part == "build" || part == ".gradle" || part == ".git" || part == "sourcetrail_dependencies") {
+      if(part == "build" || part == ".gradle" || part == ".git" || part == ".sourcetrail" || part == "sourcetrail_dependencies") {
         return true;
       }
     }
@@ -141,7 +141,9 @@ bool PendingRecord::pending() const {
 
 std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vector<FilePath>& indexedFiles) {
   Paths paths;
-  paths.base(toQString(settings.getProjectDirectoryPath()));
+  // A project in <checkout>/.sourcetrail/ counts from the checkout, so its own folder (database, logs) is excluded.
+  const QString projectDirectory = toQString(settings.getProjectDirectoryPath());
+  paths.base(QFileInfo(projectDirectory).fileName() == ".sourcetrail" ? QFileInfo(projectDirectory).path() : projectDirectory);
   for(const auto& group : settings.getAllSourceGroupSettings()) {
     if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED) {
       continue;

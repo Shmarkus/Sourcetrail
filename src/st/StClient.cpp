@@ -8,8 +8,9 @@
 namespace {
 constexpr int CONNECT_MS = 50;
 constexpr int ACK_MS = 2000;
-// A request may refresh the index first.
+// A request may refresh the index first; st index waits for its indexer however long it runs.
 constexpr int REPLY_MS = 15 * 60 * 1000;
+constexpr int INDEX_REPLY_MS = -1;
 }    // namespace
 
 namespace st {
@@ -36,7 +37,7 @@ std::optional<int> tryServer(
   QByteArray payload;
   WireReply reply;
   if(!writeFrame(socket, encode({PROTOCOL_VERSION, buildId(), request, stdinData}), ACK_MS) || !readAck(socket, ACK_MS) ||
-     !readFrame(socket, &payload, REPLY_MS) || !decode(payload, &reply)) {
+     !readFrame(socket, &payload, route(request).command == "index" ? INDEX_REPLY_MS : REPLY_MS) || !decode(payload, &reply)) {
     err << "st: server did not answer; answering without it\n";
     return std::nullopt;
   }

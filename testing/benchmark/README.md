@@ -26,14 +26,14 @@ The report puts both against the success criteria in `docs/superpowers/specs/202
 
 ## Run it on the public project
 
-Needs: `claude` logged in, Python 3.8+, `st` and `Sourcetrail_cli` built, a JDK 17 for this project's Gradle 7.4
-wrapper. Agents run with `--dangerously-skip-permissions`, so use a throwaway clone.
+Needs: `claude` logged in, Python 3.8+, `st` built (with `Sourcetrail` and `sourcetrail_indexer` beside it), a JDK 17
+for this project's Gradle 7.4 wrapper. Agents run with `--dangerously-skip-permissions`, so use a throwaway clone.
 
 ```bash
 git clone https://github.com/gothinkster/spring-boot-realworld-example-app ~/bench/realworld
 git -C ~/bench/realworld checkout ee17e31aafe733d98c4853c8b9a74d7f2f6c924a
 cp testing/benchmark/projects/realworld.srctrlprj ~/bench/realworld/
-JAVA_HOME=/path/to/jdk-17 Sourcetrail_cli index ~/bench/realworld/realworld.srctrlprj --full
+JAVA_HOME=/path/to/jdk-17 st index --full --project ~/bench/realworld/realworld.srctrlprj
 
 cd testing/benchmark
 # A cheap first check: two questions, one run each (4 agent runs).

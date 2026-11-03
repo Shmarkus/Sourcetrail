@@ -1,6 +1,5 @@
 #include "StQueries.h"
 
-#include <iostream>
 #include <stdexcept>
 
 #include <QCoreApplication>
@@ -30,14 +29,7 @@ void prepareIndexer(QProcess& process, const QString& project, bool full) {
   process.setArguments(args);
 }
 
-void reindex(const QString& project, bool full, int timeoutMs, std::string* log) {
-  const auto output = [&](const QByteArray& text) {
-    if(log) {
-      log->append(text.constData(), static_cast<size_t>(text.size()));
-    } else {
-      std::cerr << text.constData() << std::flush;
-    }
-  };
+void reindex(const QString& project, bool full, int timeoutMs, const std::function<void(const QByteArray&)>& output) {
   QProcess process;
   prepareIndexer(process, project, full);
   process.start();

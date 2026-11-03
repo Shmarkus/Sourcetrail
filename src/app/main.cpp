@@ -7,7 +7,9 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/sink.h>
+#include <spdlog/spdlog.h>
 #include <system_error>
 
 #include "Application.h"
@@ -66,6 +68,21 @@ void addLanguagePackages() {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 }
 
+// A headless run reports on the console at INFO or below, as before the port (the indexer's "indexing source file:"
+// lines), while logging is enabled; the configured level, off by default, stays for the log file.
+void logInfoToConsole() {
+  if(!IApplicationSettings::getInstanceRaw()->getLoggingEnabled()) {
+    return;
+  }
+  if(auto* logger = spdlog::default_logger_raw(); nullptr != logger) {
+    for(auto& sink : logger->sinks()) {
+      if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr && sink->level() > spdlog::level::info) {
+        sink->set_level(spdlog::level::info);
+      }
+    }
+  }
+}
+
 void checkRunFromScript() {
 #ifndef D_WINDOWS
   std::error_code errorCode;
@@ -87,6 +104,7 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
   auto factory = std::make_shared<lib::Factory>();
   Application::createInstance(version, factory, nullptr, nullptr);
   [[maybe_unused]] const ScopedFunctor scopedFunctor([]() { Application::destroyInstance(); });
+  logInfoToConsole();
   // The listeners register with the IMessageQueue, which createInstance has just created.
   qtApp.startListening();
 

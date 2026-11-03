@@ -1,0 +1,325 @@
+{
+  "project": {
+    "name": "realworld",
+    "repo": "https://github.com/gothinkster/spring-boot-realworld-example-app",
+    "commit": "ee17e31aafe733d98c4853c8b9a74d7f2f6c924a",
+    "notes": "Trace-heavy set: 9 multi-hop questions (entry points reaching a method through interfaces, tests reaching a line several calls down, the impact of a signature change across layers, paths through Spring beans, stack traces), 2 one-hop controls and 2 text controls. Ground truth was built with grep and by reading the code, before any tool run."
+  },
+  "questions": [
+    {
+      "id": "T1",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Which entry points reach the MyBatis mapper method `io.spring.infrastructure.mybatis.mapper.CommentMapper.insert` through some chain of calls? Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": [
+          "CommentsApi.createComment",
+          "CommentMutation.createComment"
+        ],
+        "forbidden": [
+          "CommentsApi.deleteComment",
+          "CommentMutation.removeComment",
+          "ArticleFavoriteApi.favoriteArticle",
+          "ArticleMutation.favoriteArticle",
+          "ArticlesApi.createArticle",
+          "UsersApi.createUser"
+        ]
+      },
+      "notes": "CommentMapper.insert <- MyBatisCommentRepository.save <- CommentRepository.save (interface) <- the two createComment methods."
+    },
+    {
+      "id": "T2",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Which entry points reach the domain method `io.spring.core.user.User.update(String, String, String, String, String)` through some chain of calls? `io.spring.core.article.Article.update` is a different method. Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": [
+          "CurrentUserApi.updateProfile",
+          "UserMutation.updateUser"
+        ],
+        "forbidden": [
+          "ArticleApi.updateArticle",
+          "ArticleMutation.updateArticle",
+          "UsersApi.createUser",
+          "UserMutation.createUser"
+        ]
+      },
+      "notes": "User.update <- UserService.updateUser <- the two entry points. Look-alike: Article.update under the article update entry points."
+    },
+    {
+      "id": "T3",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Which entry points reach `io.spring.infrastructure.mybatis.readservice.UserRelationshipQueryService.isUserFollowing` through some chain of calls? `UserRelationshipQueryService.followingAuthors` is a different method. Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": [
+          "ArticlesApi.createArticle",
+          "ArticleApi.article",
+          "ArticleApi.updateArticle",
+          "ArticleFavoriteApi.favoriteArticle",
+          "ArticleFavoriteApi.unfavoriteArticle",
+          "ArticleDatafetcher.getArticle",
+          "ArticleDatafetcher.getCommentArticle",
+          "ArticleDatafetcher.findArticleBySlug",
+          "ProfileApi.getProfile",
+          "ProfileApi.follow",
+          "ProfileApi.unfollow",
+          "RelationMutation.follow",
+          "RelationMutation.unfollow",
+          "ProfileDatafetcher.getUserProfile",
+          "ProfileDatafetcher.getAuthor",
+          "ProfileDatafetcher.getCommentAuthor",
+          "ProfileDatafetcher.queryProfile",
+          "CommentsApi.createComment",
+          "CommentMutation.createComment"
+        ],
+        "optional": [
+          "RelationMutation.buildProfile"
+        ],
+        "forbidden": [
+          "ArticlesApi.getFeed",
+          "ArticlesApi.getArticles",
+          "ArticleDatafetcher.getFeed",
+          "ArticleDatafetcher.userFeed",
+          "ArticleDatafetcher.getArticles",
+          "CommentsApi.getComments",
+          "CommentDatafetcher.articleComments",
+          "ArticleApi.deleteArticle"
+        ]
+      },
+      "notes": "isUserFollowing <- ArticleQueryService.fillExtraInfo(String, User, ArticleData) <- findById/findBySlug; <- ProfileQueryService.findByUsername; <- CommentQueryService.findById. The list queries go through the other fillExtraInfo overload to followingAuthors (forbidden). ProfileDatafetcher has a public and a private queryProfile; DuplicatedArticleValidator.isValid reaches findBySlug but is no entry point."
+    },
+    {
+      "id": "T4",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Trace the call chain from the GraphQL mutation `io.spring.graphql.UserMutation.updateUser` down to the MyBatis mapper method that writes the changed user row. List every method on that chain.",
+      "answer_items": "the methods on the chain as `Class.method`, in call order",
+      "expected": {
+        "required": [
+          "UserMutation.updateUser",
+          "UserService.updateUser",
+          "MyBatisUserRepository.save",
+          "UserMapper.update"
+        ],
+        "optional": [
+          "UserRepository.save"
+        ],
+        "forbidden": [
+          "UserMapper.insert",
+          "UserService.createUser",
+          "ArticleMapper.update"
+        ]
+      },
+      "notes": "Spring wiring: UserService gets the UserRepository bean, implemented by MyBatisUserRepository."
+    },
+    {
+      "id": "T5",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Trace the call chain from the GraphQL query resolver `io.spring.graphql.ArticleDatafetcher.getFeed` to the MyBatis query `io.spring.infrastructure.mybatis.readservice.UserRelationshipQueryService.followingAuthors`. List every method on that chain.",
+      "answer_items": "the methods on the chain as `Class.method`, in call order",
+      "expected": {
+        "required": [
+          "ArticleDatafetcher.getFeed",
+          "ArticleQueryService.findUserFeedWithCursor",
+          "ArticleQueryService.fillExtraInfo",
+          "ArticleQueryService.setIsFollowingAuthor",
+          "UserRelationshipQueryService.followingAuthors"
+        ],
+        "forbidden": [
+          "ArticleQueryService.findUserFeed",
+          "UserRelationshipQueryService.isUserFollowing",
+          "ArticleQueryService.setIsFavorite",
+          "ArticleQueryService.setFavoriteCount"
+        ]
+      },
+      "notes": "fillExtraInfo(List<ArticleData>, User) is the overload on the chain; the other overload calls isUserFollowing."
+    },
+    {
+      "id": "T6",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "Which JUnit test methods reach the line `articleMapper.insert(article)` in `io.spring.infrastructure.repository.MyBatisArticleRepository.createNew` (MyBatisArticleRepository.java:40) through some chain of calls? Count only calls in the test method's own body and what they call, not setup methods (`@BeforeEach`). Calls on a mock count, calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the test methods as `TestClass.method`",
+      "expected": {
+        "required": [
+          "ArticleQueryServiceTest.should_get_default_article_list",
+          "ArticleQueryServiceTest.should_get_default_article_list_by_cursor",
+          "ArticleQueryServiceTest.should_query_article_by_author",
+          "ArticleQueryServiceTest.should_query_article_by_favorite",
+          "ArticleQueryServiceTest.should_query_article_by_tag",
+          "CommentQueryServiceTest.should_read_comments_of_article",
+          "TagsQueryServiceTest.should_get_all_tags",
+          "ArticleRepositoryTransactionTest.transactional_test",
+          "MyBatisArticleRepositoryTest.should_create_and_fetch_article_success",
+          "MyBatisArticleRepositoryTest.should_update_and_fetch_article_success",
+          "MyBatisArticleRepositoryTest.should_delete_article",
+          "ArticlesApiTest.should_create_article_success",
+          "ArticleApiTest.should_update_article_content_success"
+        ],
+        "forbidden": [
+          "ArticleQueryServiceTest.should_fetch_article_success",
+          "ArticleQueryServiceTest.should_get_user_feed",
+          "MyBatisUserRepositoryTest.should_save_and_fetch_user_success",
+          "MyBatisCommentRepositoryTest.should_create_and_fetch_comment_success",
+          "ArticleApiTest.should_read_article_success"
+        ]
+      },
+      "notes": "insert <- createNew <- MyBatisArticleRepository.save <- ArticleRepository.save (interface) <- tests; and <- ArticleCommandService.createArticle/updateArticle <- calls on the mock in ArticlesApiTest and ArticleApiTest. ArticleQueryServiceTest.setUp saves an article, but setup methods don't count."
+    },
+    {
+      "id": "T7",
+      "kind": "structural",
+      "hops": "multi",
+      "prompt": "If a parameter is added to the MyBatis read method `io.spring.infrastructure.mybatis.readservice.UserReadService.findByUsername(String)`, which Java methods under src/main call it directly and have to change, and which entry points are affected through any chain of calls? List both. `io.spring.core.user.UserRepository.findByUsername` and `UserMapper.findByUsername` are different methods. Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the methods as `Class.method`",
+      "expected": {
+        "required": [
+          "ProfileQueryService.findByUsername",
+          "ProfileApi.getProfile",
+          "ProfileApi.follow",
+          "ProfileApi.unfollow",
+          "RelationMutation.follow",
+          "RelationMutation.unfollow",
+          "ProfileDatafetcher.getUserProfile",
+          "ProfileDatafetcher.getAuthor",
+          "ProfileDatafetcher.getCommentAuthor",
+          "ProfileDatafetcher.queryProfile"
+        ],
+        "optional": [
+          "RelationMutation.buildProfile",
+          "UserReadService.findByUsername",
+          "UserReadService.xml"
+        ],
+        "forbidden": [
+          "DuplicatedUsernameValidator.isValid",
+          "UpdateUserValidator.isValid",
+          "ArticleDatafetcher.userFeed",
+          "MyBatisUserRepository.findByUsername",
+          "UserQueryService.findById"
+        ]
+      },
+      "notes": "The only Java caller is ProfileQueryService.findByUsername; the entry points sit one or two levels above it (RelationMutation through buildProfile, ProfileDatafetcher through its private queryProfile)."
+    },
+    {
+      "id": "T8",
+      "kind": "stacktrace",
+      "hops": "multi",
+      "prompt": "A production log shows an exception whose top frame is `at io.spring.application.CommentQueryService.findById(CommentQueryService.java:31)`. Which entry points call into the method of that frame through some chain of calls? Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": [
+          "CommentsApi.createComment",
+          "CommentMutation.createComment"
+        ],
+        "forbidden": [
+          "CommentsApi.getComments",
+          "CommentDatafetcher.articleComments",
+          "CommentsApi.deleteComment",
+          "CommentMutation.removeComment"
+        ]
+      },
+      "notes": "Line 31 is the isUserFollowing call inside findById. Look-alikes: findByArticleId and findByArticleIdWithCursor."
+    },
+    {
+      "id": "T9",
+      "kind": "stacktrace",
+      "hops": "multi",
+      "prompt": "A production log shows an exception whose top frame is `at io.spring.application.ArticleQueryService.setIsFollowingAuthor(ArticleQueryService.java:135)`. Which entry points call into the method of that frame through some chain of calls? Count REST controller methods (in `io.spring.api`) and GraphQL resolver methods (in `io.spring.graphql`) that carry a request mapping or a DGS annotation. Count static call chains: calls through interfaces count, and a call counts whichever branch would run.",
+      "answer_items": "the entry-point methods as `Class.method`",
+      "expected": {
+        "required": [
+          "ArticlesApi.getFeed",
+          "ArticlesApi.getArticles",
+          "ArticleDatafetcher.getFeed",
+          "ArticleDatafetcher.userFeed",
+          "ArticleDatafetcher.userFavorites",
+          "ArticleDatafetcher.userArticles",
+          "ArticleDatafetcher.getArticles"
+        ],
+        "forbidden": [
+          "ArticleApi.article",
+          "ArticleDatafetcher.findArticleBySlug",
+          "ArticleDatafetcher.getArticle",
+          "ArticlesApi.createArticle",
+          "CommentsApi.getComments"
+        ]
+      },
+      "notes": "setIsFollowingAuthor <- fillExtraInfo(List<ArticleData>, User) <- findRecentArticles, findUserFeed and their WithCursor variants. The single-article queries use the other fillExtraInfo overload."
+    },
+    {
+      "id": "T10",
+      "kind": "structural",
+      "hops": "one",
+      "prompt": "Which production methods (under src/main) call `io.spring.core.service.AuthorizationService.canWriteArticle` directly? `canWriteComment` is a different method.",
+      "answer_items": "the calling methods as `Class.method`",
+      "expected": {
+        "required": [
+          "ArticleApi.updateArticle",
+          "ArticleApi.deleteArticle",
+          "ArticleMutation.updateArticle",
+          "ArticleMutation.deleteArticle"
+        ],
+        "forbidden": [
+          "CommentsApi.deleteComment",
+          "CommentMutation.removeComment"
+        ]
+      },
+      "notes": "One-hop control. In ArticleApi the calls sit in lambdas; the enclosing methods count."
+    },
+    {
+      "id": "T11",
+      "kind": "structural",
+      "hops": "one",
+      "prompt": "Which production methods (under src/main) call the interface method `io.spring.core.service.JwtService.toToken(User)` directly?",
+      "answer_items": "the calling methods as `Class.method`",
+      "expected": {
+        "required": [
+          "UsersApi.createUser",
+          "UsersApi.userLogin",
+          "MeDatafetcher.getUserPayloadUser"
+        ],
+        "forbidden": [
+          "JwtTokenFilter.doFilterInternal",
+          "CurrentUserApi.currentUser",
+          "CurrentUserApi.updateProfile",
+          "MeDatafetcher.getMe"
+        ]
+      },
+      "notes": "One-hop control. DefaultJwtService.toToken implements it and does not call it."
+    },
+    {
+      "id": "T12",
+      "kind": "text",
+      "hops": "text",
+      "prompt": "Where is the default profile image for new users configured, and which class reads that setting?",
+      "answer_items": "the configuration file name and the class name",
+      "expected": {
+        "required": [
+          "application.properties",
+          "UserService"
+        ]
+      },
+      "notes": "Text control: image.default in src/main/resources/application.properties, read with @Value in UserService."
+    },
+    {
+      "id": "T13",
+      "kind": "text",
+      "hops": "text",
+      "prompt": "The API answers \"article name exists\" when an article is created. Which annotation type declares that message, which validator class enforces it, and which field is it applied to?",
+      "answer_items": "the annotation type and the validator class as class names, and the field as `Class.field`",
+      "expected": {
+        "required": [
+          "DuplicatedArticleConstraint",
+          "DuplicatedArticleValidator",
+          "NewArticleParam.title"
+        ]
+      },
+      "notes": "Text control."
+    }
+  ]
+}

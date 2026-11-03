@@ -24,7 +24,9 @@ Use `st` (Sourcetrail CLI) for Java structure. Use grep for text, config, string
   3 means not found: check the name, the parameters and the project (`st find <name>` names the project on stderr).
 - **A field and a method with the same name** (Lombok fluent getters, for example) resolve to the field. For the method,
   pass its full key as `st find <name>` prints it.
-- **When you grep,** skip Sourcetrail's delombok copies: `grep -r --exclude-dir=sourcetrail_dependencies ...`, or
-  `rg -g '!sourcetrail_dependencies' ...`.
+- **When you grep,** skip Sourcetrail's delombok copies: `grep -r --exclude-dir=sourcetrail_dependencies
+  --exclude-dir=.sourcetrail ...`, or `rg -g '!sourcetrail_dependencies' ...`.
+- **No index, or one from an older version** (exit 4): run `st index --full` once in the project folder. Later
+  queries refresh changed files on their own; `st index` does the same on demand.
 - **Faster:** `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).
 - More detail is in "For agents" in `<path to Sourcetrail README.md>`. You don't need it to start.

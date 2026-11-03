@@ -1,0 +1,21 @@
+#!/bin/sh
+# jdtls for the benchmark's jdtls arm. Claude Code's jdtls-lsp plugin starts `jdtls` from PATH with no arguments; the
+# arm puts this folder first on PATH, so jdtls gets the Lombok agent (without it Lombok-generated members don't
+# resolve) and a workspace of its own per arm copy (by default jdtls keys it by the folder's base name, in ~/.cache).
+#   BENCH_JDTLS_DATA       required: folder for the workspace and wrapper.log (one start line per session)
+#   BENCH_JDTLS_HOME       jdtls installation (default ~/.local/share/jdtls)
+#   BENCH_JDTLS_JAVA_HOME  JDK 21+ to run jdtls with (default: JAVA_HOME)
+#   BENCH_LOMBOK_JAR       lombok.jar (default: the newest one in the Gradle cache)
+: "${BENCH_JDTLS_DATA:?set by the jdtls arm}"
+home="${BENCH_JDTLS_HOME:-$HOME/.local/share/jdtls}"
+lombok="${BENCH_LOMBOK_JAR:-}"
+if [ -z "$lombok" ]; then
+    lombok=$(ls -1 "$HOME"/.gradle/caches/modules-2/files-2.1/org.projectlombok/lombok/*/*/lombok-[0-9]*.jar 2>/dev/null \
+        | grep -v -e sources -e javadoc | sort -V | tail -1)
+fi
+mkdir -p "$BENCH_JDTLS_DATA"
+echo "$(date +%s.%N) start cwd=$(pwd) lombok=$lombok" >> "$BENCH_JDTLS_DATA/wrapper.log"
+if [ -n "${BENCH_JDTLS_JAVA_HOME:-}" ]; then
+    export JAVA_HOME="$BENCH_JDTLS_JAVA_HOME"
+fi
+exec "$home/bin/jdtls" ${lombok:+"--jvm-arg=-javaagent:$lombok"} -data "$BENCH_JDTLS_DATA/workspace" "$@"

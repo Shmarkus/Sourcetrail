@@ -1,4 +1,4 @@
-"""What differs between the arms: the PATH, the project copy and the project note. The prompt is shared."""
+"""Building blocks of an arm: the PATH, the project copy, the project note and the command line. The prompt is shared."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import shutil
 
 ST_SECTION_HEADING = "## `st`: code navigation for agents"
 _IGNORED_DIRS = {"sourcetrail_dependencies", "build", ".gradle", "target", ".idea", "out"}
-_IGNORED_SUFFIXES = (".srctrlprj", ".srctrldb", ".srctrlbm", ".srctrlst", ".srctrldb_tmp")
+_IGNORED_SUFFIXES = (".srctrlprj", ".srctrldb", ".srctrlbm", ".srctrlst", ".srctrldb_tmp", ".srctrlprj.lock")
+_IGNORED_PREFIXES = (".st-serve.log", ".st-refresh.log")
 
 PROMPT = """You are working in a Java codebase in the current directory. Answer the question below.
 Do not modify any files.
@@ -62,7 +63,7 @@ def readme_agent_section(readme: str) -> str:
 
 def _ignore(directory: str, names: list[str]) -> set[str]:
     return {name for name in names
-            if name in _IGNORED_DIRS or name.endswith(_IGNORED_SUFFIXES)}
+            if name in _IGNORED_DIRS or name.endswith(_IGNORED_SUFFIXES) or name.startswith(_IGNORED_PREFIXES)}
 
 
 def copy_without_sourcetrail(source: str, target: str) -> None:
@@ -75,10 +76,22 @@ def st_note(snippet: str, readme_copy: str) -> str:
     return snippet.replace("<path to Sourcetrail README.md>", readme_copy)
 
 
-def claude_args(prompt: str, model: str | None, note: str | None, bare: bool, max_turns: int) -> list[str]:
+BASE_TOOLS = ["Bash", "Read", "Grep", "Glob"]
+
+
+def claude_args(prompt: str, model: str | None, note: str | None, bare: bool, max_turns: int,
+                tools: list[str] | None = None, allowed_tools: list[str] | None = None,
+                mcp_config: str | None = None, settings: str | None = None) -> list[str]:
+    """The agent's command line. Only the arm's tools exist, and they are allowed up front instead of skipping every
+    permission check; MCP servers come only from the arm's --mcp-config."""
+    tools = tools or BASE_TOOLS
     args = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-            "--tools", "Bash,Read,Grep,Glob", "--dangerously-skip-permissions",
+            "--tools", ",".join(tools), "--allowedTools", ",".join(allowed_tools or tools),
             "--no-session-persistence", "--strict-mcp-config", "--max-turns", str(max_turns)]
+    if mcp_config:
+        args += ["--mcp-config", mcp_config]
+    if settings:
+        args += ["--settings", settings]
     if model:
         args += ["--model", model]
     if bare:

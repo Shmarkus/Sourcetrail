@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""st agent benchmark: the same questions answered by fresh Claude Code agents with grep only and with st.
+"""st agent benchmark: the same questions answered by fresh Claude Code agents in several arms (grep only, st,
+other code-navigation tools; one file per arm in arms/).
 
-    python3 bench.py run    --project DIR --questions FILE [--repeats 3] [--out DIR]
+    python3 bench.py run    --project DIR --questions FILE [--arms grep,st] [--repeats 3] [--out DIR]
     python3 bench.py speed  --project DIR --questions FILE [--edit-file REL] [--out DIR]
     python3 bench.py rescore --out DIR --questions FILE
     python3 bench.py report --out DIR
@@ -26,16 +27,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
+from stbench.armconfig import ArmError, load_arm, resolve  # noqa: E402
 from stbench.arms import path_with_st, readme_agent_section, st_note  # noqa: E402
 from stbench.build import missing_neighbours  # noqa: E402
 from stbench.questions import QuestionError, load_questions  # noqa: E402
 from stbench.report import render_markdown, summarize  # noqa: E402
 from stbench.rescore import rescore  # noqa: E402
-from stbench.runner import RECORDS, BuildChanged, RunConfig, read_records, run_benchmark  # noqa: E402
+from stbench.runner import (RECORDS, BuildChanged, RunConfig, WarmUpFailed, read_records, read_warm_up,  # noqa: E402
+                            run_benchmark, work_problems)
 from stbench.speed import measure  # noqa: E402
 
 README = os.path.join(REPO, "README.md")
-SNIPPET = os.path.join(REPO, "docs", "agents", "st-claude-md-snippet.md")
 
 
 def _fail(message: str) -> None:
@@ -81,7 +83,7 @@ def _preflight(args, data: dict, st_binary: str | None) -> None:
               "clone it elsewhere")
     for name in ("CLAUDE.md", "AGENTS.md"):
         if os.path.exists(os.path.join(args.project, name)):
-            print(f"bench: warning: the project has {name}; both arms will read it")
+            print(f"bench: warning: the project has {name}; every arm will read it")
     user_memory = os.path.expanduser("~/.claude/CLAUDE.md")
     if not args.bare and os.path.isfile(user_memory):
         with open(user_memory, encoding="utf-8") as handle:
@@ -90,14 +92,32 @@ def _preflight(args, data: dict, st_binary: str | None) -> None:
                       "use --bare (needs ANTHROPIC_API_KEY) or move that note while benchmarking")
 
 
-def _note(work: str) -> str:
+def _note(spec, work: str) -> str:
+    """The arm's project note; the st snippet points at a copy of the README's `st` section."""
+    with open(spec.note, encoding="utf-8") as handle:
+        note = handle.read()
+    if not spec.note_readme_section:
+        return note
     with open(README, encoding="utf-8") as handle:
         section = readme_agent_section(handle.read())
     readme_copy = os.path.join(work, "st-README.md")
     with open(readme_copy, "w", encoding="utf-8") as handle:
         handle.write(section)
-    with open(SNIPPET, encoding="utf-8") as handle:
-        return st_note(handle.read(), readme_copy)
+    return st_note(note, readme_copy)
+
+
+def _tool_versions(specs: dict, st_binary: str | None, work: str) -> dict:
+    """Each arm's `version` command, run once: the tool versions the results belong to."""
+    versions = {}
+    st_dir = os.path.dirname(os.path.realpath(st_binary)) if st_binary else ""
+    for name, spec in specs.items():
+        if not spec.version:
+            continue
+        command = resolve(spec, {"work": work, "workdir": work, "project": "", "st": st_binary or "",
+                                 "st_dir": st_dir, "python": sys.executable}).version
+        done = subprocess.run(command, shell=True, capture_output=True, text=True)
+        versions[name] = " ".join((done.stdout or done.stderr).split()) or f"exit {done.returncode}"
+    return versions
 
 
 def _output(command: list[str]) -> str:
@@ -108,7 +128,7 @@ def _output(command: list[str]) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-def _write_meta(out_dir: str, args, arms: list[str], project_name: str) -> None:
+def _write_meta(out_dir: str, args, arms: list[str], project_name: str, versions: dict) -> None:
     meta = {
         "project": project_name,
         "date": time.strftime("%Y-%m-%d %H:%M"),
@@ -119,6 +139,7 @@ def _write_meta(out_dir: str, args, arms: list[str], project_name: str) -> None:
         "model": args.model or "Claude Code default",
         "repeats": args.repeats,
         "arms": ", ".join(arms),
+        "tool_versions": versions,
     }
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
@@ -136,7 +157,11 @@ def _write_report(out_dir: str) -> str:
     speed = _read_json(os.path.join(out_dir, "speed.json"))
     meta = _read_json(os.path.join(out_dir, "meta.json")) or {}
     title = f"st benchmark: {meta['project']}" if meta.get("project") else "st benchmark"
-    report = render_markdown(summarize(runs), runs, speed, title=title, meta=meta)
+    meta = dict(meta)
+    models = sorted({run["model"] for run in runs if run.get("model")})
+    if models:
+        meta["models_seen"] = ", ".join(models)
+    report = render_markdown(summarize(runs), runs, speed, title=title, meta=meta, warm_up=read_warm_up(out_dir))
     path = os.path.join(out_dir, "report.md")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(report)
@@ -154,31 +179,51 @@ def _load(args) -> dict:
         _fail(str(error))
 
 
+def _positions(path: str) -> dict:
+    """Question id to its place in the full file, so --only batches keep a full run's arm order."""
+    with open(path, encoding="utf-8") as handle:
+        return {question["id"]: index for index, question in enumerate(json.load(handle).get("questions", []))}
+
+
 def cmd_run(args) -> None:
     data = _load(args)
-    arms = args.arms.split(",")
-    st_binary = _st_binary(args.st) if "st" in arms else None
+    try:
+        specs = {spec.name: spec for spec in (load_arm(arm) for arm in args.arms.split(","))}
+    except (ArmError, json.JSONDecodeError) as error:
+        _fail(str(error))
+    arms = list(specs)
+    st_binary = _st_binary(args.st) if any(spec.st == "on_path" for spec in specs.values()) else None
     _preflight(args, data, st_binary)
     out_dir = args.out or _default_out(data.get("project", {}).get("name", "project"))
     os.makedirs(out_dir, exist_ok=True)
-    work = tempfile.mkdtemp(prefix="st-bench-")
+    work = os.path.abspath(args.work) if args.work else tempfile.mkdtemp(prefix="st-bench-")
+    problems = work_problems(work, out_dir, os.path.abspath(args.questions), REPO)
+    if problems:
+        _fail("; ".join(problems))
+    os.makedirs(work, exist_ok=True)
     config = RunConfig(
         project=os.path.abspath(args.project), questions=data["questions"], arms=arms, repeats=args.repeats,
-        out_dir=out_dir, st_binary=st_binary or "", note=_note(work) if st_binary else "",
+        out_dir=out_dir, st_binary=st_binary or "", note="",
         model=args.model, bare=args.bare, max_turns=args.max_turns, timeout_s=args.timeout, work_dir=work,
+        specs=specs, notes={name: _note(spec, work) for name, spec in specs.items() if spec.note},
+        skip_warm_up=args.no_warm_up, startup_repeats=args.startup_repeats,
+        leak_markers=[os.path.basename(args.questions), os.path.dirname(os.path.abspath(args.questions))],
+        skip_shut_down=args.no_shut_down, positions=_positions(args.questions),
     )
     if not args.resume or not os.path.isfile(os.path.join(out_dir, "meta.json")):
-        _write_meta(out_dir, args, arms, data.get("project", {}).get("name", ""))
+        _write_meta(out_dir, args, arms, data.get("project", {}).get("name", ""),
+                    _tool_versions(specs, st_binary, work))
     runs = len(config.questions) * len(arms) * args.repeats
     print(f"bench: {runs} agent runs into {out_dir}")
     try:
         run_benchmark(config, resume=args.resume)
-    except BuildChanged as error:
+    except (BuildChanged, WarmUpFailed) as error:
         print(f"bench: {error}", file=sys.stderr)
         print(f"bench: partial report {_write_report(out_dir)}", file=sys.stderr)
         sys.exit(3)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if not args.work:
+            shutil.rmtree(work, ignore_errors=True)
     print(f"bench: report {_write_report(out_dir)}")
 
 
@@ -239,11 +284,21 @@ def main(argv=None) -> None:
         sub.add_argument("--st", help="st binary (default: st on PATH)")
         sub.add_argument("--out", help="result directory (default: results/<project>-<time>)")
 
-    run = commands.add_parser("run", help="agent runs, grep arm against st arm")
+    run = commands.add_parser("run", help="agent runs, one set per arm")
     common(run)
-    run.add_argument("--arms", default="grep,st")
+    run.add_argument("--arms", default="grep,st",
+                     help="comma-separated arm names (arms/<name>.json) or arm files (default grep,st)")
+    run.add_argument("--work", help="folder for the arms' project copies and tool state, kept after the run "
+                                    "(default: a temporary folder, deleted after); it must hold no question files "
+                                    "or results, the agents can reach it")
+    run.add_argument("--no-warm-up", action="store_true",
+                     help="skip the arms' warm-up, startup and shut-down commands (the tools are already warm)")
+    run.add_argument("--no-shut-down", action="store_true",
+                     help="leave the arms' tools running after the questions, for later --resume --no-warm-up "
+                          "batches into the same --out and --work")
+    run.add_argument("--startup-repeats", type=int, help="per-session startup probes per arm (default: the arm's)")
     run.add_argument("--repeats", type=int, default=3, help="runs per question and arm (default 3)")
-    run.add_argument("--model", help="model for both arms (default: the CLI's default)")
+    run.add_argument("--model", help="model for every arm (default: the CLI's default)")
     run.add_argument("--bare", action="store_true", help="claude --bare: no CLAUDE.md discovery (needs ANTHROPIC_API_KEY)")
     run.add_argument("--max-turns", type=int, default=40)
     run.add_argument("--timeout", type=int, default=900, help="seconds per agent run")

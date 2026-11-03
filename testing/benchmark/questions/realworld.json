@@ -61,7 +61,7 @@
     {
       "id": "Q4",
       "kind": "stacktrace",
-      "prompt": "A production log shows an exception whose top frame is `at io.spring.infrastructure.repository.MyBatisArticleRepository.save(MyBatisArticleRepository.java:25)`. Which REST controller methods and GraphQL mutation methods can reach that line through some chain of calls?",
+      "prompt": "A production log shows an exception whose top frame is `at io.spring.infrastructure.repository.MyBatisArticleRepository.save(MyBatisArticleRepository.java:25)`. Which REST controller methods and GraphQL mutation methods call into the method of that frame through some chain of calls? Count static call chains: a call counts whichever branch of `save` would run.",
       "answer_items": "the entry-point methods as `Class.method`",
       "expected": {
         "required": ["ArticlesApi.createArticle", "ArticleApi.updateArticle", "ArticleMutation.createArticle",
@@ -70,7 +70,7 @@
                       "CommentMutation.createComment", "UsersApi.createUser", "CurrentUserApi.updateProfile"]
       },
       "st_reference": "st at MyBatisArticleRepository.java:25 | st callers --depth 4",
-      "notes": "Line 25 is `articleMapper.update(article)` in save. Look-alikes: the other repositories' save methods."
+      "notes": "Line 25 is `articleMapper.update(article)` in save. Look-alikes: the other repositories' save methods. The prompt asks for the callers of the frame's method: asking who can reach line 25 itself, which sits in the update branch, made agents leave out the create paths."
     },
     {
       "id": "Q5",

@@ -373,6 +373,13 @@ public:
   std::vector<StorageEdge> getEdgesBySourceOrTargetId(Id targetId) const;
 
   /**
+   * @brief Returns the files holding references to symbols that the given files declare
+   * @param fileIds The IDs of the declaring files
+   * @return The IDs of the referencing files
+   */
+  std::vector<Id> getFileIdsReferencingSymbolsDeclaredInFiles(const std::vector<Id>& fileIds) const;
+
+  /**
    * @brief Returns edges by their type
    * @param type The type of the edges
    * @return The edges

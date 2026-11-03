@@ -1,4 +1,7 @@
+#include <chrono>
+#include <future>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include <gmock/gmock.h>
@@ -6,6 +9,7 @@
 
 #include "AccessKind.h"
 #include "DefinitionKind.h"
+#include "Graph.h"
 #include "IntermediateStorage.h"
 #include "LocationType.h"
 #include "MockedMessageQueue.hpp"
@@ -163,6 +167,56 @@ TEST(Storage, answersThePerIdQueriesOfSt) {
   EXPECT_EQ(DEFINITION_NONE, storage.getDefinitionKindForNodeId(list));
   EXPECT_EQ(ACCESS_PRIVATE, storage.getAccessKindForNodeId(method));
   EXPECT_EQ(ACCESS_NONE, storage.getAccessKindForNodeId(classA));
+}
+
+TEST(Storage, trailWithUnlimitedDepthTerminatesWhenItReachesAPackage) {
+  auto storage = std::make_shared<PersistentStorage>(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage->setup();
+  const Id package = addJavaSymbol(*storage, NODE_PACKAGE, L"example");
+  const Id type = addJavaSymbol(*storage, NODE_CLASS, L"example.Person");
+  storage->addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, type));
+  storage->buildCaches();
+
+  // Run detached so a regression fails this test instead of hanging the suite.
+  auto task = std::make_shared<std::packaged_task<size_t()>>([storage, type]() {
+    return storage->getGraphForTrail(0, type, ~NodeKindMask(0), Edge::EDGE_MEMBER | Edge::EDGE_INHERITANCE, false, 0, true)
+        ->getNodeCount();
+  });
+  std::future<size_t> nodeCount = task->get_future();
+  std::thread([task]() { (*task)(); }).detach();
+
+  ASSERT_EQ(std::future_status::ready, nodeCount.wait_for(std::chrono::seconds(10)));
+  EXPECT_GE(nodeCount.get(), 1U);
+}
+
+TEST(Storage, findsFilesReferencingSymbolsDeclaredInChangedFilesWithoutImports) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id declaring = addJavaFile(storage, L"/project/example/Service.java");
+  const Id samePackageCaller = addJavaFile(storage, L"/project/example/ServiceTest.java");
+  const Id unrelated = addJavaFile(storage, L"/project/other/Other.java");
+  const Id library = addJavaFile(storage, L"/project/lib/Clock.java");
+
+  const Id method = addJavaSymbol(storage, NODE_METHOD, L"example.Service.markFailed");
+  const Id test = addJavaSymbol(storage, NODE_METHOD, L"example.ServiceTest.marks");
+  const Id now = addJavaSymbol(storage, NODE_METHOD, L"lib.Clock.now");
+  const Id other = addJavaSymbol(storage, NODE_METHOD, L"other.Other.run");
+  addTokenLocation(storage, method, declaring, 3);
+  addTokenLocation(storage, test, samePackageCaller, 3);
+  addTokenLocation(storage, now, library, 3);
+  addTokenLocation(storage, other, unrelated, 3);
+
+  // ServiceTest calls the changed method; Service and Other only call a method declared elsewhere.
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, test, method)), samePackageCaller, 4);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, method, now)), declaring, 4);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, other, now)), unrelated, 4);
+  storage.buildCaches();
+
+  const std::set<FilePath> referencing = storage.getReferencing({FilePath(L"/project/example/Service.java")});
+
+  EXPECT_EQ(1U, referencing.count(FilePath(L"/project/example/ServiceTest.java")));
+  EXPECT_EQ(0U, referencing.count(FilePath(L"/project/other/Other.java")));
+  EXPECT_EQ(0U, referencing.count(FilePath(L"/project/lib/Clock.java")));
 }
 
 TEST(Storage, findsImportersByTheFileDeclaringTheImportedSymbol) {

@@ -44,6 +44,10 @@ set(test_lib_names
     TreeTestSuite
     UserPathsTestSuite)
 
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  list(APPEND test_lib_names JavaProjectSetupTestSuite)
+endif()
+
 foreach(test_name IN LISTS test_lib_names)
   add_sourcetrail_test(
     NAME

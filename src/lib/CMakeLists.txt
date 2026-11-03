@@ -376,6 +376,8 @@ add_files(
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
   add_files(
     LIB
+    project/JavaProjectSetup.cpp
+    project/JavaProjectSetup.h
     settings/source_group/component/java/SourceGroupSettingsWithClasspath.cpp
     settings/source_group/component/java/SourceGroupSettingsWithJavaGradle.cpp
     settings/source_group/component/java/SourceGroupSettingsWithJavaMaven.cpp

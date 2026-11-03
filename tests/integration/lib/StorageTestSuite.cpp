@@ -1,4 +1,5 @@
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -603,5 +604,30 @@ TEST(Storage, keepsAnUndeclaredSymbolAClearedFileReferencedIfItHasMembers) {
   const std::vector<StorageEdge> members = storage.getEdgesForSourceIds({stdNamespace});
   ASSERT_EQ(1U, members.size());
   EXPECT_EQ(member, members.front().id);
+}
+TEST(Storage, optimizesMemoryWithoutCompactingWhenAsked) {
+  const FilePath indexDbPath(L"data/StorageTestSuite/compact.srctrldb");
+  const FilePath bookmarkDbPath(L"data/StorageTestSuite/compact.srctrlbm");
+  FileSystem::createDirectory(indexDbPath.getParentDirectory());
+  FileSystem::remove(indexDbPath);
+  FileSystem::remove(bookmarkDbPath);
+  {
+    PersistentStorage storage(indexDbPath, bookmarkDbPath);
+    storage.setup();
+    for(int i = 0; i < 2000; i++) {
+      addJavaSymbol(storage, NODE_CLASS, L"p.Class" + std::to_wstring(i) + std::wstring(200, L'x'));
+    }
+    // Leaves the pages the nodes took as free pages in the file.
+    storage.clear();
+    const auto sizeWithFreePages = std::filesystem::file_size(indexDbPath.str());
+
+    storage.optimizeMemory(false);
+    EXPECT_EQ(sizeWithFreePages, std::filesystem::file_size(indexDbPath.str()));
+
+    storage.optimizeMemory(true);
+    EXPECT_LT(std::filesystem::file_size(indexDbPath.str()), sizeWithFreePages);
+  }
+  FileSystem::remove(indexDbPath);
+  FileSystem::remove(bookmarkDbPath);
 }
 }    // namespace

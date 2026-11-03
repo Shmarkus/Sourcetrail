@@ -85,9 +85,9 @@ TEST(JavaIndexing, bracesInPathsAndOutputAreLoggedNotThrown) {
   EXPECT_FALSE(result.errors.contains(QStringLiteral("LOG ERROR"))) << log;
 }
 
-// Headless indexing reports each file it indexes on the console with the default settings, as before the port: st's
-// refresh output and the smoke and comparison scripts read these lines.
-TEST(JavaIndexing, headlessIndexLogsEachSourceFileByDefault) {
+// Headless indexing prints only its status lines by default: no INFO log line, such as each file it indexes, reaches
+// the console unless --verbose asks for them.
+TEST(JavaIndexing, headlessIndexLogsEachSourceFileOnlyWhenVerbose) {
   ASSERT_FALSE(IApplicationSettings::getInstance()->getJavaPath().empty()) << "no JVM configured for the Java tests";
 
   QTemporaryDir scratch;
@@ -96,13 +96,23 @@ TEST(JavaIndexing, headlessIndexLogsEachSourceFileByDefault) {
   const std::filesystem::path project = root / "lombok";
   std::filesystem::copy(SOURCETRAIL_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
   writeApplicationSettings(root / "home");
+  const QString home = QString::fromStdString((root / "home").string());
+  const QString projectFile = QString::fromStdString((project / "project.srctrlprj").string());
 
-  const RunResult result = runSourcetrail(
-      QString::fromStdString((root / "home").string()),
-      {QStringLiteral("index"), QStringLiteral("--full"), QString::fromStdString((project / "project.srctrlprj").string())});
+  const RunResult quiet = runSourcetrail(home, {QStringLiteral("index"), QStringLiteral("--full"), projectFile});
 
-  const std::string log = result.output.toStdString() + result.errors.toStdString();
-  ASSERT_TRUE(result.finished) << log;
-  EXPECT_EQ(0, result.exitCode) << log;
-  EXPECT_EQ(9, result.output.count(QStringLiteral("indexing source file: "))) << log;
+  std::string log = quiet.output.toStdString() + quiet.errors.toStdString();
+  ASSERT_TRUE(quiet.finished) << log;
+  EXPECT_EQ(0, quiet.exitCode) << log;
+  EXPECT_TRUE(quiet.output.contains(QStringLiteral("9/9 source files indexed"))) << log;
+  EXPECT_FALSE((quiet.output + quiet.errors).contains(QStringLiteral("indexing source file: "))) << log;
+
+  const RunResult verbose = runSourcetrail(
+      home, {QStringLiteral("index"), QStringLiteral("--full"), QStringLiteral("--verbose"), projectFile});
+
+  log = verbose.output.toStdString() + verbose.errors.toStdString();
+  ASSERT_TRUE(verbose.finished) << log;
+  EXPECT_EQ(0, verbose.exitCode) << log;
+  EXPECT_TRUE(verbose.output.contains(QStringLiteral("9/9 source files indexed"))) << log;
+  EXPECT_EQ(9, verbose.output.count(QStringLiteral("indexing source file: "))) << log;
 }

@@ -1744,4 +1744,14 @@ TEST(StIndex, fullIndexReportsFileCount) {
   EXPECT_EQ(QProcess::NormalExit, st.exitStatus()) << err.toStdString();
   EXPECT_EQ(0, st.exitCode()) << err.toStdString();
   EXPECT_EQ("indexed 9 files, 0 errors\n", out.toStdString()) << err.toStdString();
+  EXPECT_FALSE(err.contains("indexing source file: ")) << err.toStdString();
+
+  // --verbose passes the indexer's progress lines on.
+  st.start(ST_APP_PATH, {"index", "--full", "--verbose"});
+  ASSERT_TRUE(st.waitForFinished(300000));
+  const QByteArray verboseOut = st.readAllStandardOutput();
+  const QByteArray verboseErr = st.readAllStandardError();
+  EXPECT_EQ(0, st.exitCode()) << verboseErr.toStdString();
+  EXPECT_EQ("indexed 9 files, 0 errors\n", verboseOut.toStdString()) << verboseErr.toStdString();
+  EXPECT_EQ(9, verboseErr.count("indexing source file: ")) << verboseErr.toStdString();
 }

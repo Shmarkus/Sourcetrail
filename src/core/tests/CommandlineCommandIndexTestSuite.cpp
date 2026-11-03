@@ -31,7 +31,9 @@ TEST_F(CommandlineCommandIndexFix, emptyArgs) {
       "Usage:\n\n  Sourcetrail index [option...]\n\nIndex a certain project.\n\n\nConfig Options:\n  -h [ --help ]          "
       "Print this help message\n  -i [ --incomplete ]    Also reindex incomplete files (files with errors)\n  -f [ --full ]      "
       "    Index full project (omit to only index new/changed \n                         files)\n  -s [ --shallow ]       Build "
-      "a shallow index is supported by the project\n  --project-file arg     Project file to index (.srctrlprj)\n\nPositional "
+      "a shallow index is supported by the project\n  -v [ --verbose ]       Also print progress and INFO log lines on the "
+      "console\n  "
+      "--project-file arg     Project file to index (.srctrlprj)\n\nPositional "
       "Arguments: \n  1: project-file\n";
 
   CollectOutStream oStream(std::cout);
@@ -48,7 +50,9 @@ TEST_F(CommandlineCommandIndexFix, helpArgs) {
       "Usage:\n\n  Sourcetrail index [option...]\n\nIndex a certain project.\n\n\nConfig Options:\n  -h [ --help ]          "
       "Print this help message\n  -i [ --incomplete ]    Also reindex incomplete files (files with errors)\n  -f [ --full ]      "
       "    Index full project (omit to only index new/changed \n                         files)\n  -s [ --shallow ]       Build "
-      "a shallow index is supported by the project\n  --project-file arg     Project file to index (.srctrlprj)\n\nPositional "
+      "a shallow index is supported by the project\n  -v [ --verbose ]       Also print progress and INFO log lines on the "
+      "console\n  "
+      "--project-file arg     Project file to index (.srctrlprj)\n\nPositional "
       "Arguments: \n  1: project-file\n";
 
   CollectOutStream oStream(std::cout);
@@ -66,6 +70,16 @@ TEST_F(CommandlineCommandIndexFix, goodCaseArgs) {
   ASSERT_EQ(CommandlineCommand::ReturnStatus::CMD_OK, ret);
   EXPECT_EQ(RefreshMode::AllFiles, mParser->getRefreshMode());
   EXPECT_TRUE(mParser->getShallowIndexingRequested());
+  EXPECT_FALSE(mParser->getVerbose());
+}
+
+TEST_F(CommandlineCommandIndexFix, verboseArg) {
+  std::vector<std::string> args = {"--verbose"};
+
+  auto ret = mConfig->parse(args);
+
+  ASSERT_EQ(CommandlineCommand::ReturnStatus::CMD_OK, ret);
+  EXPECT_TRUE(mParser->getVerbose());
 }
 
 TEST_F(CommandlineCommandIndexFix, projectIsAbsent) {

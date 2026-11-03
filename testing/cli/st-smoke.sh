@@ -53,7 +53,7 @@ start_server "$st" --project "$project"
 # Past the server's first look (500 ms after it starts), which finds no index.
 sleep 1
 # st index goes through the running server.
-"$st" index --full --project "$project" > "$work/index.out" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
+"$st" index --full --verbose --project "$project" > "$work/index.out" 2> "$work/index.err" || { cat "$work/index.err" >&2; assert "indexing failed"; }
 [ "$(cat "$work/index.out")" = "indexed 9 files, 0 errors" ] || assert "st index --full printed: $(cat "$work/index.out")"
 grep -qF 'indexing source file:' "$work/index.err" || assert "st index did not pass on the indexer's output: $(cat "$work/index.err")"
 ! grep -qF 'answering without it' "$work/index.err" || assert "st index did not go through the server: $(cat "$work/index.err")"
@@ -216,7 +216,7 @@ manifest="$(find "$work/project/sourcetrail_dependencies" -path '*/gradle/delomb
 delombok_main="${manifest%.manifest}/src_main_java"
 welcome=src/main/java/example/Welcome.java
 sed -i 's/return greeter.greeting(p);/return "Hi " + greeter.greeting(p);/' "$welcome"
-"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
+"$st" index --verbose > "$work/out" 2> "$work/err" || assert "incremental index after an edit failed"
 contains 'indexed 1 files, 0 errors' out
 indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
 [ "$indexed" = "$delombok_main/example/Welcome.java" ] || assert "expected only Welcome.java re-indexed, got: $indexed"
@@ -224,11 +224,11 @@ indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing sourc
 # but for a signature change, after which their calls are still found.
 caller=src/main/java/example/Caller.java
 sed -i 's/return salutation + person.getName().length();/return salutation + person.getName();/' "$caller"
-"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a body edit failed"
+"$st" index --verbose > "$work/out" 2> "$work/err" || assert "incremental index after a body edit failed"
 indexed="$(grep -F 'indexing source file:' "$work/err" | sed 's/.*indexing source file: //' | sort -u)"
 [ "$indexed" = "$delombok_main/example/Caller.java" ] || assert "expected only Caller.java re-indexed, got: $indexed"
 sed -i 's/String greeting(Person person, String salutation)/String greeting(Person person, CharSequence salutation)/' "$caller"
-"$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a signature change failed"
+"$st" index --verbose > "$work/out" 2> "$work/err" || assert "incremental index after a signature change failed"
 grep -F 'indexing source file:' "$work/err" | grep -qF "$delombok_main/example/web/GreetingController.java" \
     || assert "GreetingController.java not re-indexed after a signature change in Caller.java"
 run 0 callers 'example.Caller.greeting(example.Person)'
@@ -237,6 +237,8 @@ run 0 find greeting
 contains 'example.Caller.greeting(example.Person, java.lang.CharSequence)' out
 sed -i 's/^}$/    public int nameLength() { return name.length(); }\n}/' "$person"
 "$st" index > "$work/out" 2> "$work/err" || assert "incremental index after a Lombok file edit failed"
+# Without --verbose the indexer prints its status lines only.
+! grep -qF 'indexing source file:' "$work/err" || assert "st index printed the indexer's INFO lines without --verbose"
 grep -qF 'nameLength' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java not updated"
 grep -qF 'getName()' "$delombok_main/example/Person.java" || assert "delombok copy of Person.java lacks the Lombok getter"
 run 0 find nameLength

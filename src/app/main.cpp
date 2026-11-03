@@ -68,12 +68,10 @@ void addLanguagePackages() {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 }
 
-// A headless run reports on the console at INFO or below, as before the port (the indexer's "indexing source file:"
-// lines), while logging is enabled; the configured level, off by default, stays for the log file.
+// `index --verbose`: the console shows INFO log lines too (such as the indexer's "indexing source file:" lines), whatever
+// the logging settings say; the configured level stays for the log file. Without it a headless run prints only its
+// status lines.
 void logInfoToConsole() {
-  if(!IApplicationSettings::getInstanceRaw()->getLoggingEnabled()) {
-    return;
-  }
   if(auto* logger = spdlog::default_logger_raw(); nullptr != logger) {
     for(auto& sink : logger->sinks()) {
       if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr && sink->level() > spdlog::level::info) {
@@ -104,7 +102,6 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
   auto factory = std::make_shared<lib::Factory>();
   Application::createInstance(version, factory, nullptr, nullptr);
   [[maybe_unused]] const ScopedFunctor scopedFunctor([]() { Application::destroyInstance(); });
-  logInfoToConsole();
   // The listeners register with the IMessageQueue, which createInstance has just created.
   qtApp.startListening();
 
@@ -120,6 +117,9 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
 
   if(commandLineParser.exitApplication()) {
     return EXIT_SUCCESS;
+  }
+  if(commandLineParser.getVerbose()) {
+    logInfoToConsole();
   }
 
   if(commandLineParser.hasError()) {

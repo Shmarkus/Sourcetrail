@@ -645,9 +645,10 @@ int refreshIfStale(const st::Io& io,
   return st::EXIT_RESULTS;
 }
 
-// st index: re-indexes the project as a refresh does (--full: every file), the indexer's output on stderr, then
-// `indexed <n> files, <m> errors` on stdout; n counts the files this run indexed, m the errors in the index.
-int index(const st::Io& io, const FilePath& projectFile, bool full, size_t wait) {
+// st index: re-indexes the project as a refresh does (--full: every file), the indexer's output on stderr (--verbose:
+// with each file it indexes), then `indexed <n> files, <m> errors` on stdout; n counts the files this run indexed, m
+// the errors in the index.
+int index(const st::Io& io, const FilePath& projectFile, bool full, bool verbose, size_t wait) {
   constexpr int INDEX_FAILED = 1;
   ProjectSettings settings;
   if(!settings.load(projectFile, true)) {
@@ -657,11 +658,16 @@ int index(const st::Io& io, const FilePath& projectFile, bool full, size_t wait)
   st::recordRefreshStart(settings, started, io.err);
   QByteArray output;
   try {
-    cli::reindex(QString::fromStdWString(projectFile.wstr()), full, std::numeric_limits<int>::max(), [&](const QByteArray& text) {
-      output += text;
-      io.err.write(text.constData(), text.size());
-      io.err.flush();
-    });
+    cli::reindex(
+        QString::fromStdWString(projectFile.wstr()),
+        full,
+        std::numeric_limits<int>::max(),
+        [&](const QByteArray& text) {
+          output += text;
+          io.err.write(text.constData(), text.size());
+          io.err.flush();
+        },
+        verbose);
   } catch(const std::exception& error) {
     io.err << "st: " << error.what() << '\n';
     return INDEX_FAILED;
@@ -730,6 +736,7 @@ void addOptions(QCommandLineParser& parser) {
   parser.addOption({"stop", "serve only: stop the running server"});
   parser.addOption({"no-watch", "serve only: do not watch the sources and refresh in the background"});
   parser.addOption({"full", "index only: index every file again, not only the changed ones"});
+  parser.addOption({"verbose", "index only: also print the indexer's log lines, such as each file it indexes"});
   parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
 }
 
@@ -757,12 +764,16 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
   const QString command = args.isEmpty() ? QString() : args[0];
   if(command == "index") {
     if(args.size() != 1) {
-      throw UsageError("Usage: st index [--full] [--project P] [--wait MS]");
+      throw UsageError("Usage: st index [--full] [--verbose] [--project P] [--wait MS]");
     }
-    return index(io, locateProject(io, parser, request.cwd), parser.isSet("full"), number(parser, "wait", 30000));
+    return index(
+        io, locateProject(io, parser, request.cwd), parser.isSet("full"), parser.isSet("verbose"), number(parser, "wait", 30000));
   }
   if(parser.isSet("full")) {
     throw UsageError("--full applies to index only");
+  }
+  if(parser.isSet("verbose")) {
+    throw UsageError("--verbose applies to index only");
   }
   if(command == "serve") {
     const char* usage = "Usage: st serve [--detach|--stop] [--no-watch] [--project P]";

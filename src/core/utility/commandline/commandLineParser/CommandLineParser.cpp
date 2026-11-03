@@ -187,6 +187,10 @@ void CommandLineParser::setShallowIndexingRequested(bool enabled) {
   m_shallowIndexingRequested = enabled;
 }
 
+void CommandLineParser::setVerbose(bool enabled) {
+  m_verbose = enabled;
+}
+
 const FilePath& CommandLineParser::getProjectFilePath() const {
   return m_projectFile;
 }
@@ -197,6 +201,10 @@ RefreshMode CommandLineParser::getRefreshMode() const {
 
 bool CommandLineParser::getShallowIndexingRequested() const {
   return m_shallowIndexingRequested;
+}
+
+bool CommandLineParser::getVerbose() const {
+  return m_verbose;
 }
 
 }    // namespace commandline

@@ -8,7 +8,7 @@
 #include <QProcess>
 
 namespace cli {
-void prepareIndexer(QProcess& process, const QString& project, bool full) {
+void prepareIndexer(QProcess& process, const QString& project, bool full, bool verbose) {
   QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
 #ifdef _WIN32
   executable += ".exe";
@@ -25,13 +25,16 @@ void prepareIndexer(QProcess& process, const QString& project, bool full) {
   if(full) {
     args << "--full";
   }
+  if(verbose) {
+    args << "--verbose";
+  }
   args << project;
   process.setArguments(args);
 }
 
-void reindex(const QString& project, bool full, int timeoutMs, const std::function<void(const QByteArray&)>& output) {
+void reindex(const QString& project, bool full, int timeoutMs, const std::function<void(const QByteArray&)>& output, bool verbose) {
   QProcess process;
-  prepareIndexer(process, project, full);
+  prepareIndexer(process, project, full, verbose);
   process.start();
   if(!process.waitForStarted()) {
     throw std::runtime_error("Cannot start adjacent Sourcetrail executable: " + process.errorString().toStdString());

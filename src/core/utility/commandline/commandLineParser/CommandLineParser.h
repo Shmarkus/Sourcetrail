@@ -41,6 +41,8 @@ public:
 
   void setShallowIndexingRequested(bool enabled = true);
 
+  void setVerbose(bool enabled = true);
+
   [[nodiscard]] const FilePath& getProjectFilePath() const;
 
   void setProjectFile(const FilePath& filepath);
@@ -48,6 +50,9 @@ public:
   [[nodiscard]] RefreshMode getRefreshMode() const;
 
   [[nodiscard]] bool getShallowIndexingRequested() const;
+
+  // Whether INFO log lines go to the console (`index --verbose`); off by default.
+  [[nodiscard]] bool getVerbose() const;
 
 private:
   void processProjectfile();
@@ -64,6 +69,7 @@ private:
   FilePath m_projectFile;
   RefreshMode m_refreshMode = RefreshMode::UpdatedFiles;
   bool m_shallowIndexingRequested = false;
+  bool m_verbose = false;
 
   bool m_quit = false;
   bool m_withoutGUI = false;

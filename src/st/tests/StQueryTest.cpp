@@ -152,6 +152,35 @@ TEST(StQuery, filterMatchesFilePatternsAgainstTheNameOrTheDisplayedPath) {
   ASSERT_FALSE(passes(code, a, options, L""));
 }
 
+// Expected values are what Qt 5's QRegExp WildcardUnix, which master used, gives for the same pattern and name.
+TEST(StQuery, filterFilePatternsMatchAsQt5UnixWildcardsDid) {
+  Code code;
+  const Id a = code.type(L"A");
+  code.storage.buildCaches();
+
+  st::FilterOptions options;
+  options.filePattern = L"?.java";
+  EXPECT_TRUE(passes(code, a, options, L"src/A.java"));
+  EXPECT_FALSE(passes(code, a, options, L"src/AB.java"));
+  options.filePattern = L"src/*";
+  EXPECT_TRUE(passes(code, a, options, L"src/a/B.java"));
+  // a backslash escapes a wildcard character
+  options.filePattern = L"A\\*.java";
+  EXPECT_TRUE(passes(code, a, options, L"src/A*.java"));
+  EXPECT_FALSE(passes(code, a, options, L"src/AB.java"));
+  // '!' is a member of a bracket expression, '^' negates it
+  options.filePattern = L"[!x].java";
+  EXPECT_TRUE(passes(code, a, options, L"src/!.java"));
+  EXPECT_TRUE(passes(code, a, options, L"src/x.java"));
+  EXPECT_FALSE(passes(code, a, options, L"src/y.java"));
+  options.filePattern = L"[^x].java";
+  EXPECT_TRUE(passes(code, a, options, L"src/y.java"));
+  EXPECT_FALSE(passes(code, a, options, L"src/x.java"));
+  // QRegExp rejected a ']' closing no bracket expression, so the pattern matches nothing
+  options.filePattern = L"a]b";
+  EXPECT_FALSE(passes(code, a, options, L"src/a]b"));
+}
+
 TEST(StQuery, filterOfASymbolDeclaredInTwoFilesNegatesTheMatchOfAnyFileOnce) {
   Code code;
   const Id a = code.type(L"A");

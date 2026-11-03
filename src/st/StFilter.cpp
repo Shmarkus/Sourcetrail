@@ -1,6 +1,7 @@
 #include "StFilter.h"
 
 #include <algorithm>
+#include <optional>
 
 #include <QRegularExpression>
 #include <QString>
@@ -22,12 +23,115 @@ bool endsWithName(const std::wstring& key, const std::wstring& name) {
        key[key.size() - name.size() - 1] == L'.');
 }
 
+// Qt 5's QRegExp::WildcardUnix pattern as a QRegularExpression pattern: wc2rx() of Qt 5.15's qregexp.cpp with escaping
+// on. '*' and '?' cross '/', a backslash escapes the next character, and a bracket expression is copied with only
+// backslashes (and here '[') escaped, so "[!x]" holds a literal '!' while "[^x]" negates. Characters wc2rx() passed
+// through are escaped here, as they were literal in QRegExp's syntax. QRegExp rejected an unescaped ']' that closes no
+// bracket expression, so such a pattern gives nothing and matches no file, as before.
+std::optional<QString> unixWildcardToRegularExpression(const QString& pattern) {
+  const qsizetype length = pattern.size();
+  QString rx;
+  qsizetype i = 0;
+  bool isEscaping = false;    // the previous character is a backslash
+  bool inBracket = false;     // the next ']' closes a bracket expression
+  while(i < length) {
+    const QChar c = pattern[i++];
+    switch(c.unicode()) {
+    case '\\':
+      if(isEscaping) {
+        rx += QStringLiteral("\\\\");
+      }
+      if(i == length) {
+        rx += QStringLiteral("\\\\");
+      }
+      isEscaping = true;
+      break;
+    case '*':
+      if(isEscaping) {
+        rx += QStringLiteral("\\*");
+        isEscaping = false;
+      } else {
+        rx += QStringLiteral(".*");
+      }
+      break;
+    case '?':
+      if(isEscaping) {
+        rx += QStringLiteral("\\?");
+        isEscaping = false;
+      } else {
+        rx += QLatin1Char('.');
+      }
+      break;
+    case '$':
+    case '(':
+    case ')':
+    case '+':
+    case '.':
+    case '^':
+    case '{':
+    case '|':
+    case '}':
+      if(isEscaping) {
+        isEscaping = false;
+        rx += QStringLiteral("\\\\");
+      }
+      rx += QLatin1Char('\\');
+      rx += c;
+      break;
+    case '[':
+      if(isEscaping) {
+        isEscaping = false;
+        rx += QStringLiteral("\\[");
+      } else {
+        rx += c;
+        if(i < length && pattern[i] == QLatin1Char('^')) {
+          rx += pattern[i++];
+        }
+        if(i < length) {
+          if(pattern[i] == QLatin1Char(']')) {
+            rx += pattern[i++];
+          }
+          while(i < length && pattern[i] != QLatin1Char(']')) {
+            if(pattern[i] == QLatin1Char('\\') || pattern[i] == QLatin1Char('[')) {
+              rx += QLatin1Char('\\');
+            }
+            rx += pattern[i++];
+          }
+        }
+        inBracket = true;
+      }
+      break;
+    case ']':
+      if(isEscaping) {
+        isEscaping = false;
+        rx += QLatin1Char('\\');
+      } else if(inBracket) {
+        inBracket = false;
+      } else {
+        return std::nullopt;
+      }
+      rx += c;
+      break;
+    default:
+      if(isEscaping) {
+        isEscaping = false;
+        rx += QStringLiteral("\\\\");
+      }
+      rx += QRegularExpression::escape(QString(c));
+    }
+  }
+  return rx;
+}
+
+// QRegExp(pattern, Qt::CaseSensitive, QRegExp::WildcardUnix).exactMatch(text), as master did.
 bool wildcard(const std::wstring& pattern, const std::wstring& text) {
-  // '*' crosses '/', as QRegExp::WildcardUnix's did.
-  return QRegularExpression(QRegularExpression::wildcardToRegularExpression(
-                                QString::fromStdWString(pattern), QRegularExpression::NonPathWildcardConversion))
-      .match(QString::fromStdWString(text))
-      .hasMatch();
+  const std::optional<QString> rx = unixWildcardToRegularExpression(QString::fromStdWString(pattern));
+  if(!rx) {
+    return false;
+  }
+  const QRegularExpression expression(QRegularExpression::anchoredPattern(*rx), QRegularExpression::DotMatchesEverythingOption);
+  // An unclosed '[' is invalid in both; matching an invalid expression would print a warning.
+  return expression.isValid() && expression.match(QString::fromStdWString(text)).hasMatch();
 }
 
 bool carriesAnnotation(PersistentStorage& storage, Id candidate, const std::wstring& annotation) {

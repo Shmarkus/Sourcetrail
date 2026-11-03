@@ -3,6 +3,7 @@
 
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -185,7 +186,10 @@ inline const st::ResultLine* lineFor(const std::vector<st::ResultLine>& lines, c
 inline void write(const QString& path, const QByteArray& content = "") {
   QDir().mkpath(QFileInfo(path).absolutePath());
   QFile file(path);
-  ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+  // REQUIRE(file.open(...)): an ASSERT here would only leave this helper; the throw ends the calling test.
+  if(!file.open(QIODevice::WriteOnly)) {
+    throw std::runtime_error("cannot write " + path.toStdString());
+  }
   file.write(content);
 }
 }    // namespace st::test

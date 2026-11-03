@@ -1,13 +1,18 @@
 // STL
+#include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/dist_sink.h>
 #include <spdlog/sinks/sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -69,18 +74,50 @@ void addLanguagePackages() {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 }
 
-// `index --verbose`: INFO log lines (such as the indexer's "indexing source file:" lines) go to stderr, whatever the
-// logging settings say, apart from the status lines on stdout; the configured level stays for the log file. Without
-// it a headless run prints only its status lines.
-void logInfoToStderr() {
-  if(auto* logger = spdlog::default_logger_raw(); nullptr != logger) {
-    for(auto& sink : logger->sinks()) {
-      if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr) {
-        sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-        sink->set_level(spdlog::level::info);
-      }
+// The console sinks of a headless run, behind one sink whose sub-sinks can be swapped under its lock while other
+// threads log. The logger's own sink list is not thread-safe to change once the message loop runs.
+class ConsoleSink final : public spdlog::sinks::dist_sink_mt {
+public:
+  using spdlog::sinks::dist_sink_mt::dist_sink_mt;
+
+  // `index --verbose`: INFO log lines (such as the indexer's "indexing source file:" lines) go to stderr, whatever the
+  // logging settings say, apart from the status lines on stdout; the configured level stays for the log file. Without
+  // it a headless run prints only its status lines.
+  void logInfoToStderr() {
+    {
+      const std::lock_guard<std::mutex> lock(mutex_);
+      auto stderrSink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+      stderrSink->set_formatter(formatter_->clone());
+      sinks_ = {std::move(stderrSink)};
+    }
+    set_level(spdlog::level::info);
+  }
+};
+
+// Must run before Application::createInstance starts the message loop and scheduler threads, which log. Moves the
+// logger's console sinks into a ConsoleSink, which keeps their level (loadSettings sets it on the logger's sinks).
+std::shared_ptr<ConsoleSink> wrapConsoleSinks() {
+  auto* logger = spdlog::default_logger_raw();
+  if(nullptr == logger) {
+    return nullptr;
+  }
+  std::vector<spdlog::sink_ptr> consoleSinks;
+  std::vector<spdlog::sink_ptr> otherSinks;
+  spdlog::level::level_enum level = spdlog::level::off;
+  for(auto& sink : logger->sinks()) {
+    if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr) {
+      level = std::min(level, sink->level());
+      sink->set_level(spdlog::level::trace);
+      consoleSinks.push_back(sink);
+    } else {
+      otherSinks.push_back(sink);
     }
   }
+  auto consoleSink = std::make_shared<ConsoleSink>(std::move(consoleSinks));
+  consoleSink->set_level(level);
+  otherSinks.insert(otherSinks.begin(), consoleSink);
+  logger->sinks() = std::move(otherSinks);
+  return consoleSink;
 }
 
 void checkRunFromScript() {
@@ -101,6 +138,7 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
 
   setupApp(argc, argv);
 
+  const auto consoleSink = wrapConsoleSinks();
   auto factory = std::make_shared<lib::Factory>();
   Application::createInstance(version, factory, nullptr, nullptr);
   [[maybe_unused]] const ScopedFunctor scopedFunctor([]() { Application::destroyInstance(); });
@@ -120,8 +158,8 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
   if(commandLineParser.exitApplication()) {
     return EXIT_SUCCESS;
   }
-  if(commandLineParser.getVerbose()) {
-    logInfoToStderr();
+  if(commandLineParser.getVerbose() && consoleSink) {
+    consoleSink->logInfoToStderr();
   }
 
   if(commandLineParser.hasError()) {

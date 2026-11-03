@@ -1,0 +1,26 @@
+{
+  "name": "jdtls",
+  "description": "Claude Code's LSP tool through the jdtls-lsp plugin, with Lombok and a workspace per arm copy (jdtls-bin/jdtls).",
+  "workdir": "copy",
+  "st": "hidden",
+  "vars": {
+    "BENCH_JDTLS_HOME": "~/.local/share/jdtls",
+    "BENCH_JDTLS_JAVA_HOME": "~/.jdks/temurin-21.0.7",
+    "BENCH_LOMBOK_JAR": "",
+    "BENCH_JDTLS_PROBE_SYMBOL": "ArticleApi"
+  },
+  "path_prepend": ["{arms}/jdtls-bin"],
+  "env": {
+    "BENCH_JDTLS_DATA": "{work}/jdtls/data",
+    "BENCH_JDTLS_HOME": "{BENCH_JDTLS_HOME}",
+    "BENCH_JDTLS_JAVA_HOME": "{BENCH_JDTLS_JAVA_HOME}",
+    "BENCH_LOMBOK_JAR": "{BENCH_LOMBOK_JAR}"
+  },
+  "tools": ["Bash", "Read", "Grep", "Glob", "LSP"],
+  "note": "jdtls-note.md",
+  "adoption": {"tools": ["LSP"]},
+  "warm_up": "'{python}' '{arms}/jdtls-probe.py' --build --symbol '{BENCH_JDTLS_PROBE_SYMBOL}'",
+  "startup": "'{python}' '{arms}/jdtls-probe.py' --symbol '{BENCH_JDTLS_PROBE_SYMBOL}'",
+  "startup_repeats": 3,
+  "version": "ls '{BENCH_JDTLS_HOME}/plugins' | sed -n 's/^org\\.eclipse\\.jdt\\.ls\\.core_\\(.*\\)\\.jar$/jdtls \\1/p'; claude plugin list 2>/dev/null | grep -A1 jdtls-lsp | tr -s ' \\n' ' '"
+}

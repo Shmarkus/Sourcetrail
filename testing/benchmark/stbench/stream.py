@@ -21,7 +21,7 @@ def _result_length(content) -> int:
 def _empty_metrics() -> dict:
     return {
         "tool_calls": 0, "st_calls": 0, "st_invocations": 0, "text_tool_calls": 0, "used_st": False,
-        "tool_output_chars": 0, "commands": [],
+        "tool_output_chars": 0, "commands": [], "tool_names": {}, "model": None,
         "input_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0, "output_tokens": 0,
         "total_tokens": 0, "cost_usd": 0.0, "duration_s": 0.0, "turns": 0,
         "final_text": "", "is_error": True, "error": "no result message (the run was cut off)",
@@ -47,6 +47,7 @@ def _apply_context(metrics: dict, calls: list) -> None:
 def _count_tool_use(metrics: dict, block: dict) -> None:
     metrics["tool_calls"] += 1
     name = block.get("name", "")
+    metrics["tool_names"][name] = metrics["tool_names"].get(name, 0) + 1
     if name in _TEXT_TOOL_NAMES:
         metrics["text_tool_calls"] += 1
         return
@@ -93,7 +94,9 @@ def parse_stream(lines: Iterable[str]) -> dict:
             continue
         kind = message.get("type")
         content = (message.get("message") or {}).get("content") or []
-        if kind == "assistant":
+        if kind == "system" and message.get("subtype") == "init":
+            metrics["model"] = message.get("model")
+        elif kind == "assistant":
             body = message.get("message") or {}
             usage = body.get("usage")
             call_id = body.get("id") or f"message-{len(calls)}"

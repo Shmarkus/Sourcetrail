@@ -66,5 +66,22 @@ class ParseStreamTest(unittest.TestCase):
         self.assertEqual(metrics["error"], "no result message (the run was cut off)")
 
 
+    def test_tool_calls_are_counted_by_name(self):
+        metrics = load("run_mixed.jsonl")
+        self.assertEqual(metrics["tool_names"], {"Bash": 2, "Read": 1})
+
+    def test_model_and_version_come_from_the_init_message(self):
+        metrics = load("run_mixed.jsonl")
+        self.assertEqual(metrics["model"], "claude-x")
+        self.assertIsNone(parse_stream([])["model"])
+
+    def test_mcp_tool_calls_are_neither_text_nor_st(self):
+        lines = ['{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t", '
+                 '"name": "mcp__intellij__analyze_calls", "input": {}}]}}']
+        metrics = parse_stream(lines)
+        self.assertEqual(metrics["tool_names"], {"mcp__intellij__analyze_calls": 1})
+        self.assertEqual(metrics["text_tool_calls"], 0)
+        self.assertFalse(metrics["used_st"])
+
 if __name__ == "__main__":
     unittest.main()

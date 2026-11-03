@@ -5,7 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
-from stbench.arms import path_hiding_st, path_with_st, readme_agent_section, copy_without_sourcetrail, build_prompt
+from stbench.arms import (path_hiding_st, path_with_st, readme_agent_section, copy_without_sourcetrail, build_prompt,
+                          claude_args)
 
 
 def make_executable(path):
@@ -111,6 +112,36 @@ class BuildPromptTest(unittest.TestCase):
         self.assertIn("methods as `Class.method`", prompt)
         self.assertNotIn(" st ", prompt)
 
+
+class ClaudeArgsTest(unittest.TestCase):
+    def test_default_tools_are_allowed_explicitly_instead_of_skipping_permissions(self):
+        args = claude_args("Q", None, None, False, 40)
+        self.assertEqual(args[args.index("--tools") + 1], "Bash,Read,Grep,Glob")
+        self.assertEqual(args[args.index("--allowedTools") + 1], "Bash,Read,Grep,Glob")
+        self.assertNotIn("--dangerously-skip-permissions", args)
+        self.assertIn("--strict-mcp-config", args)
+        self.assertNotIn("--mcp-config", args)
+
+    def test_an_arm_adds_tools_permissions_mcp_servers_and_settings(self):
+        args = claude_args("Q", "m", "note", False, 40, tools=["Bash", "LSP"], allowed_tools=["Bash", "mcp__x"],
+                           mcp_config="/w/mcp.json", settings="/w/settings.json")
+        self.assertEqual(args[args.index("--tools") + 1], "Bash,LSP")
+        self.assertEqual(args[args.index("--allowedTools") + 1], "Bash,mcp__x")
+        self.assertEqual(args[args.index("--mcp-config") + 1], "/w/mcp.json")
+        self.assertEqual(args[args.index("--settings") + 1], "/w/settings.json")
+        self.assertEqual(args[args.index("--append-system-prompt") + 1], "note")
+
+class CopyLeavesOutStStateTest(unittest.TestCase):
+    def test_lock_and_server_logs_stay_behind(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "src")
+            os.makedirs(source)
+            for name in ["A.java", "app.srctrlprj.lock", ".st-serve.log", ".st-refresh.log", ".st-refresh.log.verbose"]:
+                with open(os.path.join(source, name), "w") as handle:
+                    handle.write("x")
+            target = os.path.join(root, "copy")
+            copy_without_sourcetrail(source, target)
+            self.assertEqual(os.listdir(target), ["A.java"])
 
 if __name__ == "__main__":
     unittest.main()

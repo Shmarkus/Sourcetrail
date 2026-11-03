@@ -1,0 +1,13 @@
+{
+  "name": "st",
+  "description": "The indexed project with the frozen st on PATH, a warm st serve and the CLAUDE.md snippet.",
+  "workdir": "project",
+  "st": "on_path",
+  "tools": ["Bash", "Read", "Grep", "Glob"],
+  "note": "../../../docs/agents/st-claude-md-snippet.md",
+  "note_readme_section": true,
+  "adoption": {"programs": ["st"]},
+  "warm_up": "st serve --stop >/dev/null 2>&1; st serve --detach",
+  "shut_down": "st serve --stop",
+  "version": "cat '{st_dir}/COMMIT' 2>/dev/null || echo 'no COMMIT file beside st'"
+}

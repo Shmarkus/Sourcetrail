@@ -1,0 +1,8 @@
+{
+  "name": "grep",
+  "description": "Claude Code's own tools on a copy of the project without Sourcetrail files; st is hidden.",
+  "workdir": "copy",
+  "copy_name": "project-without-sourcetrail",
+  "st": "hidden",
+  "tools": ["Bash", "Read", "Grep", "Glob"]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "intellij",
+  "description": "IntelliJ IDEA's MCP server (headless, its own config) with navigation and search tools only, on a clean copy.",
+  "workdir": "copy",
+  "st": "hidden",
+  "vars": {
+    "BENCH_IDEA": "~/.local/share/JetBrains/Toolbox/apps/intellij-idea-ultimate-2/bin/idea.sh",
+    "BENCH_INTELLIJ_PORT": "64901",
+    "BENCH_GRADLE_JAVA_HOME": "~/.jdks/corretto-17.0.11",
+    "BENCH_INTELLIJ_TOOLS": "analyze_calls,get_symbol_info,search_symbol,search_text,search_regex,search_file,read_file,list_directory_tree,get_project_modules,get_project_dependencies"
+  },
+  "tools": ["Bash", "Read", "Grep", "Glob"],
+  "allowed_tools": ["Bash", "Read", "Grep", "Glob", "mcp__intellij"],
+  "mcp_servers": {"intellij": {"type": "sse", "url": "http://127.0.0.1:{BENCH_INTELLIJ_PORT}/sse"}},
+  "note": "intellij-note.md",
+  "adoption": {"tool_prefixes": ["mcp__intellij__"]},
+  "warm_up": "'{python}' '{arms}/intellij-mcp.py' start --idea '{BENCH_IDEA}' --home '{work}/intellij/ide' --project '{workdir}' --port {BENCH_INTELLIJ_PORT} --tools '{BENCH_INTELLIJ_TOOLS}' --java-home '{BENCH_GRADLE_JAVA_HOME}'",
+  "shut_down": "'{python}' '{arms}/intellij-mcp.py' stop --home '{work}/intellij/ide'",
+  "version": "'{python}' '{arms}/intellij-mcp.py' version --idea '{BENCH_IDEA}'"
+}

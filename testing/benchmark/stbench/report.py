@@ -45,9 +45,18 @@ def _change(base: float | None, new: float | None) -> float | None:
     return (new - base) / base
 
 
-def summarize(runs: list[dict]) -> dict:
+def arm_order(runs: list[dict], given: str | None = None) -> list[str]:
+    """The arms in the order the run was given (meta.json), else grep first and the rest as they first ran."""
+    seen = list(dict.fromkeys(run["arm"] for run in runs))
+    order = [arm.strip() for arm in (given or "").split(",") if arm.strip() in seen]
+    if not order:
+        order = sorted(seen, key=lambda arm: arm != "grep")
+    return order + [arm for arm in seen if arm not in order]
+
+
+def summarize(runs: list[dict], order: list[str] | None = None) -> dict:
     arms = {}
-    for arm in dict.fromkeys(run["arm"] for run in runs):
+    for arm in order or arm_order(runs):
         arms[arm] = _arm_summary([run for run in runs if run["arm"] == arm])
     st_runs = [run for run in runs if run["arm"] == "st" and not run.get("is_error")]
     adoption = {
@@ -56,12 +65,44 @@ def summarize(runs: list[dict]) -> dict:
         "text_runs": sum(run["kind"] == "text" for run in st_runs),
         "text_with_st": sum(run["kind"] == "text" and run["used_st"] for run in st_runs),
     }
-    change = {}
-    if "grep" in arms and "st" in arms:
-        change = {key: _change(arms["grep"][key], arms["st"][key])
-                  for key in ("median_tokens", "median_context_growth", "median_tool_calls", "median_duration_s",
-                              "total_tool_output_chars")}
-    return {"arms": arms, "adoption": adoption, "change": change}
+    change_by_arm = {}
+    if "grep" in arms:
+        change_by_arm = {arm: {key: _change(arms["grep"][key], arms[arm][key]) for key in _CHANGED}
+                         for arm in arms if arm != "grep"}
+    return {"arms": arms, "adoption": adoption, "change": change_by_arm.get("st", {}) if "st" in arms else {},
+            "change_by_arm": change_by_arm,
+            "adoption_by_arm": {arm: counts for arm, counts in sorted(_adoption_by_arm(runs).items(),
+                                                                       key=lambda item: list(arms).index(item[0]))}}
+
+
+_CHANGED = ("median_tokens", "median_context_growth", "median_tool_calls", "median_duration_s", "total_tool_output_chars")
+
+
+def _used_tool(run: dict):
+    """Whether the run used its arm's own tool; None for an arm without one. Old records only know `used_st`."""
+    if "used_arm_tool" in run:
+        return run["used_arm_tool"]
+    return run.get("used_st") if run["arm"] == "st" else None
+
+
+def _adoption_by_arm(runs: list[dict]) -> dict:
+    adoption = {}
+    for arm in dict.fromkeys(run["arm"] for run in runs):
+        mine = [run for run in runs if run["arm"] == arm and not run.get("is_error")]
+        if not any(_used_tool(run) is not None for run in mine):
+            continue
+        calls: dict = {}
+        for run in mine:
+            for name, count in (run.get("tool_names") or {}).items():
+                calls[name] = calls.get(name, 0) + count
+        adoption[arm] = {
+            "structural_runs": sum(run["kind"] in STRUCTURAL_KINDS for run in mine),
+            "structural_with_tool": sum(run["kind"] in STRUCTURAL_KINDS and bool(_used_tool(run)) for run in mine),
+            "text_runs": sum(run["kind"] == "text" for run in mine),
+            "text_with_tool": sum(run["kind"] == "text" and bool(_used_tool(run)) for run in mine),
+            "calls_by_tool": dict(sorted(calls.items(), key=lambda item: (-item[1], item[0]))),
+        }
+    return adoption
 
 
 def _item_key(line: str) -> str:
@@ -145,6 +186,83 @@ def _adoption_lines(adoption: dict) -> list[str]:
     ]
 
 
+def _with_change(shown: str, change: float | None) -> str:
+    return shown if change is None else f"{shown} ({_percent(change)})"
+
+
+def _multi_criteria_table(summary: dict) -> list[str]:
+    """One column per arm; every arm but grep shows its change against grep next to the value."""
+    arms, changes = summary["arms"], summary["change_by_arm"]
+    names = list(arms)
+    lines = ["| Metric | " + " | ".join(names) + " | Target |", "|---|" + "---|" * (len(names) + 1)]
+
+    def row(label, cells, target=""):
+        lines.append(f"| {label} | " + " | ".join(cells) + f" | {target} |")
+
+    row("Correct runs", [f"{arms[a]['correct']} / {arms[a]['runs']}" for a in names], "no worse than grep")
+    row("Partial / wrong runs", [f"{arms[a]['partial']} / {arms[a]['wrong']}" for a in names])
+    for key, (label, _target, wording) in TARGETS.items():
+        shown = _seconds if key.endswith("_s") else _number
+        row(label, [_with_change(shown(arms[a].get(key)), changes.get(a, {}).get(key)) for a in names], wording)
+    row("Tool output characters (total)",
+        [_with_change(_number(arms[a]["total_tool_output_chars"]), changes.get(a, {}).get("total_tool_output_chars"))
+         for a in names])
+    row("Cost, USD (total, as the CLI reports it)", [f"{arms[a]['total_cost_usd']:.2f}" for a in names])
+    row("Failed runs (left out above)", [str(arms[a]["errors"]) for a in names], "0")
+    return lines
+
+
+def _multi_adoption_lines(adoption: dict) -> list[str]:
+    lines = []
+    for arm, counts in adoption.items():
+        structural, used = counts["structural_runs"], counts["structural_with_tool"]
+        share = f"{used / structural * 100:.0f}%" if structural else "n/a"
+        met = "n/a" if not structural else ("yes" if used / structural >= 0.8 else "no")
+        calls = ", ".join(f"{name} {count}" for name, count in counts["calls_by_tool"].items())
+        lines.append(f"- `{arm}`: its tool used on {used} of {structural} structural and stack-trace runs ({share}; "
+                     f"target at least 80%: {met}), on {counts['text_with_tool']} of {counts['text_runs']} text runs. "
+                     f"Calls by tool: {calls or 'none'}.")
+    return lines
+
+
+def _multi_question_table(runs: list[dict], names: list[str]) -> list[str]:
+    lines = ["| Question | Kind | " + " | ".join(names) + " |", "|---|---|" + "---|" * len(names)]
+    for question in dict.fromkeys(run["question"] for run in runs):
+        mine = [run for run in runs if run["question"] == question]
+        cells = []
+        for arm in names:
+            marks, calls, tokens = _cells([run for run in mine if run["arm"] == arm])
+            cells.append(f"{marks} {calls} / {tokens}" if marks else "")
+        lines.append(f"| {question} | {mine[0]['kind']} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _warm_up_lines(entries: list[dict]) -> list[str]:
+    lines = ["| Arm | Warm-up (once per run) | Tool's own measure | Per-session startup (paid inside every run) |",
+             "|---|---|---|---|"]
+    for arm in dict.fromkeys(entry["arm"] for entry in entries):
+        mine = [entry for entry in entries if entry["arm"] == arm]
+        warm = [entry for entry in mine if entry["phase"] == "warm_up"]
+        startup = [entry for entry in mine if entry["phase"] == "startup"]
+        if not warm and not startup:
+            continue
+        if warm:
+            last = warm[-1]
+            shown = f"{last['seconds']:.1f} s" if not last["exit"] else f"failed (exit {last['exit']})"
+            own = ", ".join(f"{key} {value}" for key, value in last.get("details", {}).items()
+                            if key.endswith("_s") and isinstance(value, (int, float)))
+        else:
+            shown, own = "none", ""
+        # A probe that also waits for its tool to exit reports the startup itself as startup_s.
+        good = [entry.get("details", {}).get("startup_s", entry["seconds"]) for entry in startup if not entry["exit"]]
+        if good:
+            start = f"{median(good):.1f} s ({min(good):.1f}–{max(good):.1f} s, {len(good)} runs)"
+        else:
+            start = "none" if not startup else "failed"
+        lines.append(f"| {arm} | {shown} | {own} | {start} |")
+    return lines
+
+
 _MARKS = {"correct": "✓", "partial": "½", "wrong": "✗", "no answer": "∅"}
 
 
@@ -193,24 +311,41 @@ def _speed_lines(speed: dict) -> list[str]:
 
 _SETUP_LABELS = [("date", "Date"), ("questions", "Questions"), ("project_commit", "Project commit"),
                  ("sourcetrail_commit", "Sourcetrail commit"), ("claude_version", "Claude Code"), ("model", "Model"),
-                 ("repeats", "Repeats per question and arm"), ("arms", "Arms")]
+                 ("models_seen", "Models seen in the runs"), ("repeats", "Repeats per question and arm"),
+                 ("arms", "Arms")]
 
 
 def _setup_lines(meta: dict) -> list[str]:
-    return [f"- {label}: {meta[key]}" for key, label in _SETUP_LABELS if meta.get(key) not in (None, "")]
+    lines = [f"- {label}: {meta[key]}" for key, label in _SETUP_LABELS if meta.get(key) not in (None, "")]
+    lines += [f"- Version, {arm}: {version}" for arm, version in (meta.get("tool_versions") or {}).items()]
+    return lines
 
 
 def render_markdown(summary: dict, runs: list[dict], speed: dict | None, title: str = "st benchmark",
-                    meta: dict | None = None) -> str:
+                    meta: dict | None = None, warm_up: list[dict] | None = None) -> str:
     parts = [f"# {title}", ""]
     if meta:
         parts += _setup_lines(meta) + [""]
+    if meta and meta.get("arms"):
+        order = arm_order(runs, meta["arms"])
+        if order != list(summary["arms"]):
+            summary = summarize(runs, order)
+    multi = bool(set(summary["arms"]) - {"grep", "st"}) or len(summary["arms"]) > 2
     parts += ["## Against the success criteria", ""]
-    parts += _criteria_table(summary)
-    parts += ["", "## Adoption", ""] + _adoption_lines(summary["adoption"])
+    parts += _multi_criteria_table(summary) if multi else _criteria_table(summary)
+    if multi:
+        parts += ["", "## Adoption", ""] + _multi_adoption_lines(summary["adoption_by_arm"])
+    else:
+        parts += ["", "## Adoption", ""] + _adoption_lines(summary["adoption"])
+    if warm_up:
+        parts += ["", "## Warm-up and per-session startup", "",
+                  "Not part of any time above. Warm-up runs once before the questions (IDE import and indexing, "
+                  "jdtls import and build, starting the st server); per-session startup is measured apart, and an "
+                  "arm whose tool starts with every agent session pays it inside each question's time.", ""]
+        parts += _warm_up_lines(warm_up)
     parts += ["", "## Per question", "", "✓ correct, ½ partial, ✗ wrong, ∅ no answer block, E failed run; "
               "calls and tokens are medians over repeats.", ""]
-    parts += _question_table(runs)
+    parts += _multi_question_table(runs, list(summary["arms"])) if multi else _question_table(runs)
     suspects = suspect_ground_truth(runs)
     if suspects:
         parts += ["", "## Check the ground truth", "",

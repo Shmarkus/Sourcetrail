@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include "FilePath.h"
 #include "FileSystem.h"
 #include "utilityDirectorySync.h"
@@ -87,4 +89,23 @@ TEST_F(DirectorySync, removesFilesMissingFromTheSource) {
   EXPECT_FALSE(exists(target, "old"));
   EXPECT_TRUE(exists(target, "a/A.java"));
   EXPECT_EQ(1U, result.removed);
+}
+
+TEST_F(DirectorySync, reportsFilesItCannotWrite) {
+  if(geteuid() == 0) {
+    GTEST_SKIP() << "running as root, read-only directories are still writable";
+  }
+  write(source, "a/A.java", "class A { int x; }");
+  write(target, "a/A.java", "class A {}");
+
+  const std::filesystem::path targetDirectory = std::filesystem::path(target.str()) / "a";
+  std::filesystem::permissions(targetDirectory, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+
+  utility::DirectorySyncResult result;
+  EXPECT_NO_THROW(result = utility::syncDirectoryContents(source, target));
+  std::filesystem::permissions(targetDirectory, std::filesystem::perms::owner_all);
+
+  EXPECT_EQ(1U, result.failed);
+  EXPECT_EQ(0U, result.written);
+  EXPECT_EQ("class A {}", read(target, "a/A.java"));
 }

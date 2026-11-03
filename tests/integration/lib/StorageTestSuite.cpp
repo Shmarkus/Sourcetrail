@@ -219,6 +219,31 @@ TEST(Storage, findsFilesReferencingSymbolsDeclaredInChangedFilesWithoutImports) 
   EXPECT_EQ(0U, referencing.count(FilePath(L"/project/lib/Clock.java")));
 }
 
+TEST(Storage, findsOnlyDirectImportersOfChangedFiles) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id fileA = addJavaFile(storage, L"/project/p/A.java");
+  const Id fileB = addJavaFile(storage, L"/project/p/B.java");
+  const Id fileC = addJavaFile(storage, L"/project/p/C.java");
+
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  const Id classB = addJavaSymbol(storage, NODE_CLASS, L"p.B");
+  const Id classC = addJavaSymbol(storage, NODE_CLASS, L"p.C");
+  addTokenLocation(storage, classA, fileA, 3);
+  addTokenLocation(storage, classB, fileB, 3);
+  addTokenLocation(storage, classC, fileC, 3);
+
+  // B imports A, C imports B; C does not depend on A's symbols.
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_IMPORT, fileB, classA)), fileB, 1);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_IMPORT, fileC, classB)), fileC, 1);
+  storage.buildCaches();
+
+  const std::set<FilePath> referencing = storage.getReferencing({FilePath(L"/project/p/A.java")});
+
+  EXPECT_EQ(1U, referencing.count(FilePath(L"/project/p/B.java")));
+  EXPECT_EQ(0U, referencing.count(FilePath(L"/project/p/C.java")));
+}
+
 TEST(Storage, findsImportersByTheFileDeclaringTheImportedSymbol) {
   PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
   storage.setup();

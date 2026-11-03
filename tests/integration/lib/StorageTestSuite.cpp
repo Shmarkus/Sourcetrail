@@ -161,4 +161,26 @@ TEST(Storage, answersThePerIdQueriesOfSt) {
   EXPECT_EQ(ACCESS_PRIVATE, storage.getAccessKindForNodeId(method));
   EXPECT_EQ(ACCESS_NONE, storage.getAccessKindForNodeId(classA));
 }
+
+TEST(Storage, findsImportersByTheFileDeclaringTheImportedSymbol) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id fileA = addJavaFile(storage, L"/project/p/A.java");
+  const Id fileB = addJavaFile(storage, L"/project/p/B.java");
+
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  const Id classB = addJavaSymbol(storage, NODE_CLASS, L"p.B");
+  const Id list = addJavaSymbol(storage, NODE_CLASS, L"java.util.List");
+  addTokenLocation(storage, classA, fileA, 3);
+  addTokenLocation(storage, classB, fileB, 3);
+
+  // B imports List, which no project file declares. A merely qualifies it, and does so last.
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_IMPORT, fileB, list)), fileB, 1);
+  addLocation(storage, list, fileB, 1, LOCATION_QUALIFIER);
+  addLocation(storage, list, fileA, 5, LOCATION_QUALIFIER);
+  storage.buildCaches();
+
+  EXPECT_EQ(0U, storage.getReferencing({FilePath(L"/project/p/A.java")}).count(FilePath(L"/project/p/B.java")));
+  EXPECT_EQ(0U, storage.getReferenced({FilePath(L"/project/p/B.java")}).count(FilePath(L"/project/p/A.java")));
+}
 }    // namespace

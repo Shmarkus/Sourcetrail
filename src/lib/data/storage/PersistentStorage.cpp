@@ -2104,7 +2104,7 @@ std::unordered_map<Id, std::set<Id>> PersistentStorage::getFileIdToImportingFile
           elementIdToImportingFileIds[edge.targetNodeId].insert(edge.sourceNodeId);
         });
 
-    std::unordered_map<Id, Id> importedElementIdToFileNodeId;
+    std::unordered_map<Id, std::set<Id>> importedElementIdToFileNodeIds;
     {
       std::vector<Id> importedSourceLocationIds;
       std::unordered_map<Id, Id> importedSourceLocationToElementIds;
@@ -2113,19 +2113,22 @@ std::unordered_map<Id, std::set<Id>> PersistentStorage::getFileIdToImportingFile
         importedSourceLocationToElementIds[occurrence.sourceLocationId] = occurrence.elementId;
       }
 
+      // Only the declaration token names the imported file; qualifiers sit in any file using the name.
       for(const StorageSourceLocation& sourceLocation :
           m_sqliteIndexStorage.getAllByIds<StorageSourceLocation>(importedSourceLocationIds)) {
         auto it = importedSourceLocationToElementIds.find(sourceLocation.id);
-        if(it != importedSourceLocationToElementIds.end()) {
-          importedElementIdToFileNodeId[it->second] = sourceLocation.fileNodeId;
+        if(it != importedSourceLocationToElementIds.end() && intToLocationType(sourceLocation.type) == LOCATION_TOKEN) {
+          importedElementIdToFileNodeIds[it->second].insert(sourceLocation.fileNodeId);
         }
       }
     }
 
     for(const auto& it : elementIdToImportingFileIds) {
-      auto importedFileIt = importedElementIdToFileNodeId.find(it.first);
-      if(importedFileIt != importedElementIdToFileNodeId.end()) {
-        fileIdToImportingFileIdMap[importedFileIt->second].insert(it.second.begin(), it.second.end());
+      auto importedFileIt = importedElementIdToFileNodeIds.find(it.first);
+      if(importedFileIt != importedElementIdToFileNodeIds.end()) {
+        for(Id importedFileId : importedFileIt->second) {
+          fileIdToImportingFileIdMap[importedFileId].insert(it.second.begin(), it.second.end());
+        }
       }
     }
   }

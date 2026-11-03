@@ -1,10 +1,14 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <sstream>
 #include <thread>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
 
 #ifndef _WIN32
 #  define private public
@@ -317,6 +321,46 @@ TEST_F(MessageQueueRegistration, registerGoodCase) {
   TestMessage{}.dispatch();
 
   EXPECT_EQ(1, messageListener.m_messageCount);
+}
+
+// Routes the default logger into a string stream while it lives.
+struct CapturedLog {
+  CapturedLog() : previous(spdlog::default_logger()) {
+    auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(stream));
+    logger->set_level(spdlog::level::trace);
+    logger->set_pattern("%v");
+    spdlog::set_default_logger(logger);
+  }
+  ~CapturedLog() {
+    spdlog::set_default_logger(previous);
+  }
+  CapturedLog(const CapturedLog&) = delete;
+  CapturedLog& operator=(const CapturedLog&) = delete;
+
+  std::ostringstream stream;
+  std::shared_ptr<spdlog::logger> previous;
+};
+
+// Every listener unregisters itself when it is destroyed: the normal case, not an error.
+TEST_F(MessageQueueRegistration, unregisteringARegisteredListenerLogsNothing) {
+  const CapturedLog log;
+  auto messageListener = std::make_unique<TestMessageListener>();
+  ASSERT_EQ(1, messageQueue->mListeners.size());
+
+  messageListener.reset();
+
+  EXPECT_THAT(messageQueue->mListeners, testing::IsEmpty());
+  EXPECT_EQ(std::string::npos, log.stream.str().find("Listener was not found")) << log.stream.str();
+}
+
+TEST_F(MessageQueueRegistration, unregisteringAnUnknownListenerLogsAnError) {
+  TestMessageListener messageListener;
+  messageQueue->unregisterListener(&messageListener);
+  const CapturedLog log;
+
+  messageQueue->unregisterListener(&messageListener);
+
+  EXPECT_NE(std::string::npos, log.stream.str().find("Listener was not found")) << log.stream.str();
 }
 
 struct MessageQueueProcess : testing::Test {

@@ -39,10 +39,9 @@ void MessageQueue::registerListener(MessageListenerBase* listener) noexcept {
 void MessageQueue::unregisterListener(MessageListenerBase* listener) noexcept {
   const std::scoped_lock<std::mutex> lock(mListenersMutex);
   if(auto found = ranges::find(mListeners, listener); found != mListeners.end()) {
-    mListeners.erase(found);
-
     // TODO(Hussein): That sound fishy for me. It need `mListenersMutex`
     const auto index = static_cast<size_t>(std::distance(mListeners.begin(), found));
+    mListeners.erase(found);
     // mCurrentListenerIndex and mListenersLength need to be updated in case this happens
     // while a message is handled.
     if(index <= mCurrentListenerIndex) {
@@ -52,6 +51,7 @@ void MessageQueue::unregisterListener(MessageListenerBase* listener) noexcept {
     if(index < mListenersLength) {
       mListenersLength--;
     }
+    return;
   }
 
   LOG_ERROR("Listener was not found");

@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Indexes a copy of a project with two Sourcetrail builds and compares the indexes.
 #
-# Usage: JAVA_HOME=<jdk> [LIBJVM=<libjvm.so>] testing/port/compare-index.sh <old app dir> <new app dir> <project dir>
+# Usage: JAVA_HOME=<jdk> [LIBJVM=<libjvm.so>] testing/port/compare-index.sh [--after-edit <file>] <old app dir> <new app dir>
+#        <project dir>
 #
 # Each app dir holds a Sourcetrail binary (with its data/ next to it); <project dir> holds one *.srctrlprj. The project
 # is copied once per build into a scratch directory and indexed there with `Sourcetrail index --full`, under a scratch
@@ -19,8 +20,19 @@ set -euo pipefail
 # Compared, after sorting: node (type, name), edge (type, source name, target name), source location (file relative
 # to the project, start, end, type) and error (message, fatal). Prints "identical" and exits 0 when they match,
 # prints the differences and exits 1 when not, exits 2 on a usage or indexing failure. KEEP=1 keeps the scratch dir.
+#
+# --after-edit <file>: after the full index, appends a method to <file> (relative to the project; its last line must
+# close the class) in both copies and refreshes them with a plain `Sourcetrail index`, which indexes only what changed.
+# The refreshed indexes are compared, and each build's count of refreshed files is printed; differing counts exit 1.
 die() { echo "compare-index.sh: $*" >&2; exit 2; }
-[ $# -eq 3 ] || die "usage: JAVA_HOME=<jdk> [LIBJVM=<libjvm.so>] compare-index.sh <old app dir> <new app dir> <project dir>"
+usage="usage: JAVA_HOME=<jdk> [LIBJVM=<libjvm.so>] compare-index.sh [--after-edit <file>] <old app dir> <new app dir> <project dir>"
+edit_file=
+if [ "${1:-}" = --after-edit ]; then
+    [ $# -ge 2 ] || die "$usage"
+    edit_file="$2"
+    shift 2
+fi
+[ $# -eq 3 ] || die "$usage"
 old_app="$(realpath "$1")"
 new_app="$(realpath "$2")"
 project="$(realpath "$3")"
@@ -34,6 +46,7 @@ shopt -s nullglob
 project_files=("$project"/*.srctrlprj)
 [ ${#project_files[@]} -eq 1 ] || die "expected exactly one *.srctrlprj in $project"
 project_file="$(basename "${project_files[0]}")"
+[ -z "$edit_file" ] || [ -f "$project/$edit_file" ] || die "no $edit_file in $project"
 
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sourcetrail-compare-index.XXXXXX")"
@@ -72,6 +85,19 @@ with open(out, "w") as f:
     f.write("\n".join(sorted(rows)) + "\n")
 EOF
 
+cat > "$work/edit.py" << 'EOF'
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    lines = f.read().rstrip("\n").split("\n")
+if lines[-1].strip() != "}":
+    sys.exit("the last line of %s does not close the class" % path)
+lines[-1:-1] = ["", "    public int addedByCompareIndex() {", "        return 0;", "    }"]
+with open(path, "w") as f:
+    f.write("\n".join(lines) + "\n")
+EOF
+
 for side in old new; do
     app="$old_app"
     [ "$side" = new ] && app="$new_app"
@@ -89,12 +115,26 @@ for side in old new; do
     (cd "$dir" && HOME="$work/$side/home" SOURCETRAIL_VIA_SCRIPT=1 "$app/Sourcetrail" index --full "$dir/$project_file") \
         > "$work/$side/index.log" 2>&1 || { tail -20 "$work/$side/index.log" >&2; die "indexing with $app failed"; }
     grep -E "source files indexed" "$work/$side/index.log" | tail -1 | tr -d '\r' | sed "s|^|$side: |" >&2 || true
+    if [ -n "$edit_file" ]; then
+        # Modification times are compared in whole seconds.
+        sleep 2
+        python3 -I "$work/edit.py" "$dir/$edit_file" || die "cannot edit $edit_file"
+        echo "refreshing with $app after editing $edit_file ..." >&2
+        (cd "$dir" && HOME="$work/$side/home" SOURCETRAIL_VIA_SCRIPT=1 "$app/Sourcetrail" index "$dir/$project_file") \
+            > "$work/$side/refresh.log" 2>&1 || { tail -20 "$work/$side/refresh.log" >&2; die "refreshing with $app failed"; }
+        grep -oE "[0-9]+/[0-9]+ source files indexed" "$work/$side/refresh.log" | tail -1 > "$work/$side/refreshed.txt" || true
+        sed "s|^|$side refresh: |" "$work/$side/refreshed.txt" >&2
+    fi
     db=("$dir/${project_file%.srctrlprj}.srctrldb" "$dir"/.sourcetrail/*.srctrldb)
     [ -f "${db[0]}" ] || db=("${db[@]:1}")
     [ ${#db[@]} -ge 1 ] && [ -f "${db[0]}" ] || die "no index database for $app under $dir"
     python3 -I "$work/dump.py" "${db[0]}" "$dir" "$work/$side.txt"
 done
 
+if [ -n "$edit_file" ] && ! diff -q "$work/old/refreshed.txt" "$work/new/refreshed.txt" > /dev/null; then
+    echo "different refreshed file counts: old '$(cat "$work/old/refreshed.txt")', new '$(cat "$work/new/refreshed.txt")'"
+    exit 1
+fi
 if diff -u "$work/old.txt" "$work/new.txt" > "$work/diff.txt"; then
     echo "identical ($(wc -l < "$work/new.txt") rows)"
     exit 0

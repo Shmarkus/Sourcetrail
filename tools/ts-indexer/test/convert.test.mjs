@@ -100,6 +100,25 @@ describe('the fixture index', () => {
     assert.ok(imports.every(e => e.source.type === NODE.FILE));
   });
 
+  test('reExportsResolveToTheOriginalDeclaration', () => {
+    // app/orders/index.ts: export { OrderService }, export { OrderService as OrderApi }, export * from order.model
+    const home = 'app.home.home.component.HomeComponent';
+    for (const method of ['load', 'reload', 'refresh']) {
+      assert.deepEqual(index.edgesBetween(`${home}.${method}`, `${SERVICE}.list`).map(e => e.type), [EDGE.CALL], method);
+    }
+    assert.deepEqual(index.edgesBetween(`${home}.latest`, 'app.orders.order.model.Order').map(e => e.type),
+      [EDGE.TYPE_USAGE]);
+    const barrelOnly = index.nodes.filter(n => /^app\.orders\.index\./.test(n.name));
+    assert.deepEqual(barrelOnly.map(n => n.name), [], 'no node stands for a re-exported name');
+    // the barrel imports what it re-exports; the component imports the original and the barrel module
+    const barrel = index.edges.filter(e => e.type === EDGE.IMPORT && e.source.name.endsWith('/app/orders/index.ts'));
+    assert.deepEqual([...new Set(barrel.map(e => e.target.name))].sort(),
+      ['app.orders.order.model', 'app.orders.order.service', SERVICE]);
+    const homeImports = index.edges.filter(e => e.type === EDGE.IMPORT
+      && e.source.name.endsWith('/app/home/home.component.ts')).map(e => e.target.name);
+    assert.ok(homeImports.includes(SERVICE) && homeImports.includes('app.orders.index'), homeImports.join(', '));
+  });
+
   test('implementsIsInheritanceAndOverride', () => {
     const detail = 'app.orders.order-detail.component.OrderDetailComponent';
     assert.deepEqual(index.edgesBetween(detail, '@angular/core.OnInit').map(e => e.type), [EDGE.INHERITANCE]);

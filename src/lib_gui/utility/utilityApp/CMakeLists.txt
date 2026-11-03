@@ -7,6 +7,7 @@ add_sourcetrail_library(
   PUBLIC_HEADERS
   utilityApp.h
   PUBLIC_DEPS
+  Boost::headers
   Sourcetrail::core::utility::ApplicationArchitectureType
   Sourcetrail::core::utility::file::FilePath
   Sourcetrail::core::utility::OsType

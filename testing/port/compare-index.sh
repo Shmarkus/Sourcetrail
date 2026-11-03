@@ -23,7 +23,8 @@ set -euo pipefail
 #
 # --after-edit <file>: after the full index, appends a method to <file> (relative to the project; its last line must
 # close the class) in both copies and refreshes them with a plain `Sourcetrail index`, which indexes only what changed.
-# The refreshed indexes are compared, and each build's count of refreshed files is printed; differing counts exit 1.
+# The refreshed indexes are compared, and each build's count of refreshed files is printed; differing counts exit 1,
+# a refresh log without the count exits 2.
 die() { echo "compare-index.sh: $*" >&2; exit 2; }
 usage="usage: JAVA_HOME=<jdk> [LIBJVM=<libjvm.so>] compare-index.sh [--after-edit <file>] <old app dir> <new app dir> <project dir>"
 edit_file=
@@ -123,6 +124,8 @@ for side in old new; do
         (cd "$dir" && HOME="$work/$side/home" SOURCETRAIL_VIA_SCRIPT=1 "$app/Sourcetrail" index "$dir/$project_file") \
             > "$work/$side/refresh.log" 2>&1 || { tail -20 "$work/$side/refresh.log" >&2; die "refreshing with $app failed"; }
         grep -oE "[0-9]+/[0-9]+ source files indexed" "$work/$side/refresh.log" | tail -1 > "$work/$side/refreshed.txt" || true
+        # Without the count the comparison below would pass on two empty files.
+        [ -s "$work/$side/refreshed.txt" ] || { tail -20 "$work/$side/refresh.log" >&2; die "no 'N/M source files indexed' line in the refresh log of $app"; }
         sed "s|^|$side refresh: |" "$work/$side/refreshed.txt" >&2
     fi
     db=("$dir/${project_file%.srctrlprj}.srctrldb" "$dir"/.sourcetrail/*.srctrldb)

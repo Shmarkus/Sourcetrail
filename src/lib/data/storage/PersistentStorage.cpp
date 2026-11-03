@@ -457,8 +457,30 @@ NodeType PersistentStorage::getNodeTypeForNodeWithId(Id nodeId) const {
   return NodeType(intToNodeKind(m_sqliteIndexStorage.getFirstById<StorageNode>(nodeId).type));
 }
 
+DefinitionKind PersistentStorage::getDefinitionKindForNodeId(Id nodeId) const {
+  const auto it = m_symbolDefinitionKinds.find(nodeId);
+  return it == m_symbolDefinitionKinds.end() ? DEFINITION_NONE : it->second;
+}
+
+std::vector<StorageNode> PersistentStorage::getStorageNodesForIds(const std::vector<Id>& nodeIds) const {
+  return m_sqliteIndexStorage.getAllByIds<StorageNode>(nodeIds);
+}
+
+AccessKind PersistentStorage::getAccessKindForNodeId(Id nodeId) const {
+  const StorageComponentAccess access = m_sqliteIndexStorage.getComponentAccessByNodeId(nodeId);
+  return access.nodeId == 0 ? ACCESS_NONE : intToAccessKind(access.type);
+}
+
 StorageEdge PersistentStorage::getEdgeById(Id edgeId) const {
   return m_sqliteIndexStorage.getEdgeById(edgeId);
+}
+
+std::vector<StorageEdge> PersistentStorage::getEdgesForSourceIds(const std::vector<Id>& ids) const {
+  return m_sqliteIndexStorage.getEdgesBySourceIds(ids);
+}
+
+std::vector<StorageEdge> PersistentStorage::getEdgesForTargetIds(const std::vector<Id>& ids) const {
+  return m_sqliteIndexStorage.getEdgesByTargetIds(ids);
 }
 
 std::shared_ptr<SourceLocationCollection> PersistentStorage::getFullTextSearchLocations(const std::wstring& searchTerm,

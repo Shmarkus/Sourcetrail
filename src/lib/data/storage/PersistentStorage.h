@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include "AccessKind.h"
 #include "FullTextSearchIndex.h"
 #include "HierarchyCache.h"
 #include "SearchIndex.h"
@@ -110,8 +111,13 @@ public:
   std::map<Id, std::pair<Id, NameHierarchy>> getNodeIdToParentFileMap(const std::vector<Id>& nodeIds) const override;
 
   NodeType getNodeTypeForNodeWithId(Id nodeId) const override;
+  DefinitionKind getDefinitionKindForNodeId(Id nodeId) const;
+  std::vector<StorageNode> getStorageNodesForIds(const std::vector<Id>& nodeIds) const;
+  AccessKind getAccessKindForNodeId(Id nodeId) const;
 
   StorageEdge getEdgeById(Id edgeId) const override;
+  std::vector<StorageEdge> getEdgesForSourceIds(const std::vector<Id>& ids) const;
+  std::vector<StorageEdge> getEdgesForTargetIds(const std::vector<Id>& ids) const;
 
   std::shared_ptr<SourceLocationCollection> getFullTextSearchLocations(const std::wstring& searchTerm,
                                                                        bool caseSensitive) const override;

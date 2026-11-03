@@ -618,12 +618,10 @@ int refreshIfStale(const st::Io& io,
   // On disk before the indexer starts: should this process end first, the index it leaves is not taken as current.
   st::recordRefreshStart(settings, started, io.err);
   const size_t changedFiles = freshness->changedFiles;
-  std::string log;
+  QByteArray log;
   std::string failure;
   try {
-    cli::reindex(project, false, 600000, [&log](const QByteArray& text) {
-      log.append(text.constData(), static_cast<size_t>(text.size()));
-    });
+    cli::reindex(project, false, 600000, [&log](const QByteArray& text, bool /*log*/) { log += text; });
   } catch(const std::exception& error) {
     failure = error.what();
   }
@@ -636,7 +634,7 @@ int refreshIfStale(const st::Io& io,
     io.err << "refreshed " << changedFiles << " files in " << std::fixed << std::setprecision(1) << timer.elapsed() / 1000.0
            << "s\n";
   } else if(freshness->stale) {
-    io.err << log << "st: refresh failed: " << failure << '\n';
+    io.err << cli::lastLines(log, cli::INDEXER_TAIL_LINES).toStdString() << "st: refresh failed: " << failure << '\n';
     return st::EXIT_STALE;
   } else {
     io.err << "st: index was refreshed by another process\n";
@@ -645,9 +643,10 @@ int refreshIfStale(const st::Io& io,
   return st::EXIT_RESULTS;
 }
 
-// st index: re-indexes the project as a refresh does (--full: every file), the indexer's output on stderr (--verbose:
-// with each file it indexes), then `indexed <n> files, <m> errors` on stdout; n counts the files this run indexed, m
-// the errors in the index.
+// st index: re-indexes the project as a refresh does (--full: every file), the indexer's status lines on stderr
+// (--verbose: its log lines too, such as each file it indexes), then `indexed <n> files, <m> errors` on stdout; n
+// counts the files this run indexed, m the errors in the index. When indexing fails, the end of the indexer's output,
+// log lines included, follows on stderr.
 int index(const st::Io& io, const FilePath& projectFile, bool full, bool verbose, size_t wait) {
   constexpr int INDEX_FAILED = 1;
   ProjectSettings settings;
@@ -656,38 +655,47 @@ int index(const st::Io& io, const FilePath& projectFile, bool full, bool verbose
   }
   const TimeStamp started = st::refreshStart();
   st::recordRefreshStart(settings, started, io.err);
-  QByteArray output;
+  QByteArray status;
+  QByteArray captured;
+  const auto failed = [&]() {
+    if(!verbose) {
+      io.err << "st: the last " << cli::INDEXER_TAIL_LINES << " lines of the indexer's output:\n"
+             << cli::lastLines(captured, cli::INDEXER_TAIL_LINES).toStdString();
+    }
+    return INDEX_FAILED;
+  };
   try {
     cli::reindex(
-        QString::fromStdWString(projectFile.wstr()),
-        full,
-        std::numeric_limits<int>::max(),
-        [&](const QByteArray& text) {
-          output += text;
-          io.err.write(text.constData(), text.size());
-          io.err.flush();
-        },
-        verbose);
+        QString::fromStdWString(projectFile.wstr()), full, std::numeric_limits<int>::max(), [&](const QByteArray& text, bool log) {
+          captured += text;
+          if(!log) {
+            status += text;
+          }
+          if(!log || verbose) {
+            io.err.write(text.constData(), text.size());
+            io.err.flush();
+          }
+        });
   } catch(const std::exception& error) {
     io.err << "st: " << error.what() << '\n';
-    return INDEX_FAILED;
+    return failed();
   }
   const auto lock = lockProject(io, st::projectLockFile(projectFile), wait);
   if(!lock) {
     return INDEX_FAILED;
   }
   if(checkIndex(io, settings)) {
-    return INDEX_FAILED;
+    return failed();
   }
   PersistentStorage storage(settings.getDBFilePath(), settings.getBookmarkDBFilePath(), true);
   if(storage.isEmpty() || storage.isIncompatible()) {
     io.err << "st: index is empty or incompatible after indexing\n";
-    return INDEX_FAILED;
+    return failed();
   }
   st::recordRefresh(settings, {started, storage.getStorageStats().timestamp}, io.err);
   // "Finished indexing: <n>/<total> source files indexed; ..."; an index with nothing to refresh prints none.
   const QRegularExpressionMatch finished =
-      QRegularExpression(QStringLiteral("Finished indexing: (\\d+)/\\d+ source files indexed")).match(QString::fromUtf8(output));
+      QRegularExpression(QStringLiteral("Finished indexing: (\\d+)/\\d+ source files indexed")).match(QString::fromUtf8(status));
   io.out << "indexed " << (finished.hasMatch() ? finished.captured(1).toStdString() : "0") << " files, "
          << storage.getErrorCount().total << " errors\n";
   return st::EXIT_RESULTS;

@@ -86,7 +86,7 @@ TEST(JavaIndexing, bracesInPathsAndOutputAreLoggedNotThrown) {
 }
 
 // Headless indexing prints only its status lines by default: no INFO log line, such as each file it indexes, reaches
-// the console unless --verbose asks for them.
+// the console unless --verbose asks for them, on stderr.
 TEST(JavaIndexing, headlessIndexLogsEachSourceFileOnlyWhenVerbose) {
   ASSERT_FALSE(IApplicationSettings::getInstance()->getJavaPath().empty()) << "no JVM configured for the Java tests";
 
@@ -114,7 +114,9 @@ TEST(JavaIndexing, headlessIndexLogsEachSourceFileOnlyWhenVerbose) {
   ASSERT_TRUE(verbose.finished) << log;
   EXPECT_EQ(0, verbose.exitCode) << log;
   EXPECT_TRUE(verbose.output.contains(QStringLiteral("9/9 source files indexed"))) << log;
-  EXPECT_EQ(9, verbose.output.count(QStringLiteral("indexing source file: "))) << log;
+  // The log lines go to stderr, the status lines stay on stdout.
+  EXPECT_EQ(9, verbose.errors.count(QStringLiteral("indexing source file: "))) << log;
+  EXPECT_FALSE(verbose.output.contains(QStringLiteral("indexing source file: "))) << log;
   // Listeners unregistering at shutdown is no error.
   EXPECT_FALSE((verbose.output + verbose.errors).contains(QStringLiteral("Listener was not found"))) << log;
 }

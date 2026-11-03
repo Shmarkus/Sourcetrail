@@ -22,7 +22,7 @@ void CommandlineCommandIndex::setup() {
     ("incomplete,i", "Also reindex incomplete files (files with errors)")
     ("full,f", "Index full project (omit to only index new/changed files)")
     ("shallow,s", "Build a shallow index is supported by the project")
-    ("verbose,v", "Also print progress and INFO log lines on the console")
+    ("verbose,v", "Also print INFO log lines on stderr")
     ("project-file", po::value<std::string>(), "Project file to index (.srctrlprj)");
   // clang-format on
   m_options.add(options);

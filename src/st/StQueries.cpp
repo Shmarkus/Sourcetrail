@@ -8,7 +8,7 @@
 #include <QProcess>
 
 namespace cli {
-void prepareIndexer(QProcess& process, const QString& project, bool full, bool verbose) {
+void prepareIndexer(QProcess& process, const QString& project, bool full) {
   QString executable = QCoreApplication::applicationDirPath() + "/Sourcetrail";
 #ifdef _WIN32
   executable += ".exe";
@@ -20,21 +20,17 @@ void prepareIndexer(QProcess& process, const QString& project, bool full, bool v
 #endif
   process.setProgram(executable);
   process.setWorkingDirectory(QCoreApplication::applicationDirPath());
-  process.setProcessChannelMode(QProcess::MergedChannels);
-  QStringList args{"index"};
+  QStringList args{"index", "--verbose"};
   if(full) {
     args << "--full";
-  }
-  if(verbose) {
-    args << "--verbose";
   }
   args << project;
   process.setArguments(args);
 }
 
-void reindex(const QString& project, bool full, int timeoutMs, const std::function<void(const QByteArray&)>& output, bool verbose) {
+void reindex(const QString& project, bool full, int timeoutMs, const std::function<void(const QByteArray& text, bool log)>& output) {
   QProcess process;
-  prepareIndexer(process, project, full, verbose);
+  prepareIndexer(process, project, full);
   process.start();
   if(!process.waitForStarted()) {
     throw std::runtime_error("Cannot start adjacent Sourcetrail executable: " + process.errorString().toStdString());
@@ -43,7 +39,9 @@ void reindex(const QString& project, bool full, int timeoutMs, const std::functi
   timer.start();
   while(process.state() != QProcess::NotRunning) {
     process.waitForReadyRead(100);
-    output(process.readAll());
+    // Status lines first: what the indexer printed before a log line arrives no later than it.
+    output(process.readAllStandardOutput(), false);
+    output(process.readAllStandardError(), true);
     if(timer.elapsed() > timeoutMs) {
       process.terminate();
       if(!process.waitForFinished(5000)) {
@@ -53,9 +51,22 @@ void reindex(const QString& project, bool full, int timeoutMs, const std::functi
       throw std::runtime_error("Indexing timed out; inspect logs before retrying");
     }
   }
-  output(process.readAll());
+  output(process.readAllStandardOutput(), false);
+  output(process.readAllStandardError(), true);
   if(process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
     throw std::runtime_error("Indexing failed; see stderr for Gradle, delombok or indexer diagnostics");
   }
+}
+
+QByteArray lastLines(const QByteArray& text, int count) {
+  // The newline that ends the last line does not start another.
+  qsizetype from = text.endsWith('\n') ? text.size() - 1 : text.size();
+  for(int lines = 0; lines < count; ++lines) {
+    from = from > 0 ? text.lastIndexOf('\n', from - 1) : -1;
+    if(from < 0) {
+      return text;
+    }
+  }
+  return text.mid(from + 1);
 }
 }    // namespace cli

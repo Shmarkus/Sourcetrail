@@ -244,6 +244,7 @@ private:
     m_process = new QProcess();
     cli::prepareIndexer(*m_process, QString::fromStdWString(m_project.wstr()), false);
     m_process->setStandardInputFile(QProcess::nullDevice());
+    m_process->setProcessChannelMode(QProcess::MergedChannels);
     m_process->setStandardOutputFile(logFile(), QIODevice::Truncate);
     QObject::connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), [this]() { end(); });
     m_err << "st: refreshing " << m_changed << " changed files in the background" << std::endl;
@@ -279,6 +280,10 @@ private:
       m_err << "st: background refresh of " << m_changed << " files finished in " << seconds(m_running.elapsed())
             << (read ? "" : "; project busy, recording it later") << std::endl;
     } else {
+      QFile log(logFile());
+      if(log.open(QIODevice::ReadOnly)) {
+        m_err << cli::lastLines(log.readAll(), cli::INDEXER_TAIL_LINES).toStdString();
+      }
       m_err << "st: background refresh failed; see " << logFile().toStdString() << std::endl;
     }
     m_scheduler.finished();

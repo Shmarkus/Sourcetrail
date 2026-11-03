@@ -50,6 +50,7 @@
 #include "StorageSymbol.h"
 #include "StOutput.h"
 #include "StProject.h"
+#include "StQueries.h"
 #include "StServer.h"
 #include "StSocket.h"
 #include "StTestSupport.h"
@@ -1707,6 +1708,52 @@ TEST(StWatch, ignoresWritesInsideDotFolder) {
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
   }
   EXPECT_TRUE(scheduler.pending());
+}
+
+TEST(StIndex, lastLinesKeepsTheEndOfTheOutput) {
+  EXPECT_EQ("c\nd\n", cli::lastLines("a\nb\nc\nd\n", 2).toStdString());
+  EXPECT_EQ("c\nd", cli::lastLines("a\nb\nc\nd", 2).toStdString());
+  EXPECT_EQ("a\nb\n", cli::lastLines("a\nb\n", 5).toStdString());
+  EXPECT_EQ("", cli::lastLines("", 5).toStdString());
+}
+
+// A failing indexer's log lines are shown although st index was not asked for --verbose: the last 50 lines of what it
+// printed. st always asks the indexer for them.
+TEST(StIndex, failedIndexingShowsTheEndOfTheIndexerOutput) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const std::filesystem::path project = (base + "/lombok").toStdString();
+  std::filesystem::copy(ST_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  // st runs the Sourcetrail beside it: a copy of st beside a stand-in that fails.
+  QDir().mkpath(base + "/app");
+  ASSERT_TRUE(QFile::copy(ST_APP_PATH, base + "/app/st"));
+  write(base + "/app/Sourcetrail",
+        "#!/bin/sh\n"
+        "echo \"$@\" > \"$(dirname \"$0\")/args.txt\"\n"
+        "echo 'Loading Project'\n"
+        "i=1; while [ $i -le 60 ]; do echo \"log line $i\" >&2; i=$((i+1)); done\n"
+        "echo '[2026-11-03 10:00:00.000] [error] Delombok failed with exit code 1: boom' >&2\n"
+        "exit 3\n");
+  QFile::setPermissions(base + "/app/Sourcetrail", QFile::permissions(base + "/app/Sourcetrail") | QFile::ExeOwner);
+
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  environment.insert("HOME", base + "/home");
+  QProcess st;
+  st.setProcessEnvironment(environment);
+  st.setWorkingDirectory(QString::fromStdString(project.string()));
+  st.start(base + "/app/st", {"index", "--no-server"});
+  ASSERT_TRUE(st.waitForFinished(60000));
+  const std::string err = st.readAllStandardError().toStdString();
+
+  EXPECT_EQ(1, st.exitCode()) << err;
+  EXPECT_NE(std::string::npos, err.find("Loading Project")) << err;
+  EXPECT_NE(std::string::npos, err.find("Delombok failed with exit code 1: boom")) << err;
+  EXPECT_NE(std::string::npos, err.find("\nlog line 12\n")) << err;
+  EXPECT_EQ(std::string::npos, err.find("log line 11\n")) << err;
+  QFile args(base + "/app/args.txt");
+  ASSERT_TRUE(args.open(QIODevice::ReadOnly));
+  EXPECT_TRUE(args.readAll().contains("--verbose"));
 }
 
 TEST(StIndex, fullIndexReportsFileCount) {

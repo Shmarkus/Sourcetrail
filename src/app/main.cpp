@@ -9,6 +9,7 @@
 
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 #include <system_error>
 
@@ -68,13 +69,14 @@ void addLanguagePackages() {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 }
 
-// `index --verbose`: the console shows INFO log lines too (such as the indexer's "indexing source file:" lines), whatever
-// the logging settings say; the configured level stays for the log file. Without it a headless run prints only its
-// status lines.
-void logInfoToConsole() {
+// `index --verbose`: INFO log lines (such as the indexer's "indexing source file:" lines) go to stderr, whatever the
+// logging settings say, apart from the status lines on stdout; the configured level stays for the log file. Without
+// it a headless run prints only its status lines.
+void logInfoToStderr() {
   if(auto* logger = spdlog::default_logger_raw(); nullptr != logger) {
     for(auto& sink : logger->sinks()) {
-      if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr && sink->level() > spdlog::level::info) {
+      if(dynamic_cast<spdlog::sinks::basic_file_sink_mt*>(sink.get()) == nullptr) {
+        sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
         sink->set_level(spdlog::level::info);
       }
     }
@@ -119,7 +121,7 @@ int runConsole(int argc, char** argv, const Version& version, commandline::Comma
     return EXIT_SUCCESS;
   }
   if(commandLineParser.getVerbose()) {
-    logInfoToConsole();
+    logInfoToStderr();
   }
 
   if(commandLineParser.hasError()) {

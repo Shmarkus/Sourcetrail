@@ -11,8 +11,10 @@ set(TS_INDEXER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tools/ts-indexer")
 set(TS_INDEXER_STAGE_DIR "${CMAKE_SOURCE_DIR}/bin/app/data/ts-indexer")
 set(TS_INDEXER_SCRIPTS
     convert.mjs
+    endpoints.mjs
     http.mjs
     index.mjs
+    link.mjs
     sqlite.mjs)
 set(TS_INDEXER_MANIFESTS package.json package-lock.json)
 

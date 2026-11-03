@@ -8,3 +8,4 @@ node_modules/
 *.lock
 *.scip
 ts-http-calls.json
+.st-links.log

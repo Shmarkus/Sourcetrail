@@ -409,6 +409,12 @@ public:
   std::vector<Id> getFileIdsReferencingSymbolsDeclaredInFiles(const std::vector<Id>& fileIds) const;
 
   /**
+   * @brief Returns the files the endpoint layer (HTTP.<VERB> <path> nodes) is declared in
+   * @return The IDs of those files
+   */
+  std::vector<Id> getFileIdsWithEndpoints() const;
+
+  /**
    * @brief Describes what a file declares: its symbols with their signatures, bases and overrides
    * @param fileId The ID of the file
    * @return One line per declaration, comparable between two indexes of the same project

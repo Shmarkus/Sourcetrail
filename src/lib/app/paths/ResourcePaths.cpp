@@ -38,3 +38,7 @@ FilePath ResourcePaths::getJavaDirectoryPath() {
 FilePath ResourcePaths::getTypeScriptIndexerFilePath() {
   return AppPath::getSharedDataDirectoryPath().concatenate(L"data/ts-indexer/index.mjs");
 }
+
+FilePath ResourcePaths::getEndpointLinkerFilePath() {
+  return AppPath::getSharedDataDirectoryPath().concatenate(L"data/ts-indexer/link.mjs");
+}

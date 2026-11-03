@@ -28,11 +28,14 @@ public:
   std::set<FilePath> getAllSourceFilePaths() const override;
   std::vector<std::shared_ptr<IndexerCommand>> getIndexerCommands(const RefreshInfo& info) const override;
 
+  // The folder of the tsconfig, which the sidecar's file paths are relative to.
+  FilePath getTypeScriptProjectPath() const;
+  // The HttpClient calls of the last successful run, next to the project file, for the endpoint linking.
+  FilePath getHttpCallsFilePath() const;
+
 private:
   std::shared_ptr<SourceGroupSettings> getSourceGroupSettings() override;
   std::shared_ptr<const SourceGroupSettings> getSourceGroupSettings() const override;
-
-  FilePath getTypeScriptProjectPath() const;
 
   std::shared_ptr<SourceGroupSettingsTypeScript> m_settings;
 };

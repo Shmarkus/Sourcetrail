@@ -1,248 +1,7 @@
-#include <algorithm>
-#include <filesystem>
-#include <map>
-#include <set>
-#include <tuple>
+#include "MixedProjectTest.h"
 
-#include <QCoreApplication>
-#include <QDir>
-#include <QFile>
-#include <QProcess>
-#include <QProcessEnvironment>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlRecord>
-#include <QString>
-#include <QStringList>
-#include <QTemporaryDir>
-#include <QThread>
-#include <QUuid>
-
-#include <gtest/gtest.h>
-
-// Indexes copies of the Angular + Spring fixture with the built Sourcetrail, headless: a project of its Gradle half and
-// a TypeScript source group for its Angular half.
 namespace {
-const QString kJavaGroup = QStringLiteral(
-    "<source_group_java><name>Java</name><type>Java Source Group from Gradle</type><status>enabled</status>"
-    "<java_standard>21</java_standard><source_extensions><source_extension>.java</source_extension></source_extensions>"
-    "<gradle><project_file_path>build.gradle</project_file_path><should_index_tests>1</should_index_tests></gradle>"
-    "</source_group_java>");
-const QString kTypeScriptGroup = QStringLiteral(
-    "<source_group_ts><name>TypeScript</name><type>TypeScript Source Group</type><status>enabled</status>"
-    "<typescript><tsconfig_path>tsconfig.json</tsconfig_path></typescript></source_group_ts>");
-
-const QChar kColumnSeparator(0x1f);
-
-struct RunResult {
-  int exitCode = -1;
-  QString output;
-};
-
-// "app.orders.order.service.OrderService" for a serialized name hierarchy; a file node's name is its path.
-QString dottedName(const QString& serialized) {
-  const qsizetype start = serialized.indexOf(QStringLiteral("\tm"));
-  if(start < 0) {
-    return serialized;
-  }
-  const QString delimiter = serialized.left(start);
-  QStringList names;
-  for(const QString& element : serialized.mid(start + 2).split(QStringLiteral("\tn"))) {
-    names.push_back(element.left(element.indexOf(QStringLiteral("\ts"))));
-  }
-  return names.join(delimiter);
-}
-
-class TypeScriptSourceGroup : public testing::Test {
-protected:
-  static void SetUpTestSuite() {
-    // QSqlDatabase needs an application object.
-    static int argc = 1;
-    static char name[] = "TypeScriptSourceGroupTestSuite";
-    static char* argv[] = {name, nullptr};
-    // Never destroyed: Qt's own statics may be gone by then.
-    static auto* application = new QCoreApplication(argc, argv);
-    std::ignore = application;
-  }
-
-  void SetUp() override {
-    if(!QFile::exists(QFileInfo(QStringLiteral(SOURCETRAIL_APP_PATH)).absolutePath() + "/data/ts-indexer/index.mjs")) {
-      GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
-    }
-    const QByteArray javaHome = qgetenv("JAVA_HOME");
-    ASSERT_FALSE(javaHome.isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
-    ASSERT_TRUE(mDir.isValid());
-    const QString base = QDir(mDir.path()).canonicalPath();
-    mRoot = base + "/angular-spring";
-    mHome = base + "/home";
-    std::filesystem::copy(TS_FIXTURE_PATH, mRoot.toStdString(), std::filesystem::copy_options::recursive);
-    for(const char* generated : {"build", ".gradle", "node_modules", ".sourcetrail"}) {
-      std::filesystem::remove_all((mRoot + "/" + generated).toStdString());
-    }
-    write(mHome + "/.config/sourcetrail/ApplicationSettings.xml",
-          "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
-          "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
-              QString::fromLocal8Bit(javaHome) + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
-  }
-
-  void TearDown() override {
-    for(const QString& connection : mConnections) {
-      QSqlDatabase::removeDatabase(connection);
-    }
-  }
-
-  void writeProject(const QString& name, bool java, bool typeScript) {
-    write(mRoot + "/" + name + ".srctrlprj",
-          "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<config><source_groups>" + (java ? kJavaGroup : QString()) +
-              (typeScript ? kTypeScriptGroup : QString()) + "</source_groups><version>8</version></config>\n");
-  }
-
-  RunResult index(const QString& name, bool full, const QString& path = QString()) {
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    if(!path.isNull()) {
-      environment.insert(QStringLiteral("PATH"), path);
-    }
-    if(!environment.contains(QStringLiteral("GRADLE_USER_HOME"))) {
-      environment.insert(QStringLiteral("GRADLE_USER_HOME"), environment.value(QStringLiteral("HOME")) + "/.gradle");
-    }
-    environment.insert(QStringLiteral("HOME"), mHome);
-    environment.insert(QStringLiteral("SOURCETRAIL_VIA_SCRIPT"), QStringLiteral("1"));
-    environment.remove(QStringLiteral("DISPLAY"));
-
-    QStringList arguments{QStringLiteral("index")};
-    if(full) {
-      arguments.push_back(QStringLiteral("--full"));
-    }
-    arguments.push_back(mRoot + "/" + name + ".srctrlprj");
-
-    QProcess process;
-    process.setProcessEnvironment(environment);
-    process.setProcessChannelMode(QProcess::MergedChannels);
-    process.start(QStringLiteral(SOURCETRAIL_APP_PATH), arguments);
-    RunResult result;
-    if(!process.waitForFinished(600000)) {
-      process.kill();
-      process.waitForFinished();
-    }
-    result.exitCode = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
-    result.output = QString::fromLocal8Bit(process.readAll());
-    return result;
-  }
-
-  // Rows of `sql` on the project's index, each row's columns joined by kColumnSeparator (names hold tabs).
-  QStringList query(const QString& name, const QString& sql) {
-    const QString connection = QUuid::createUuid().toString();
-    mConnections.push_back(connection);
-    QStringList rows;
-    {
-      QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
-      db.setDatabaseName(mRoot + "/" + name + ".srctrldb");
-      EXPECT_TRUE(db.open());
-      QSqlQuery q(db);
-      EXPECT_TRUE(q.exec(sql)) << sql.toStdString();
-      while(q.next()) {
-        QStringList columns;
-        for(int i = 0; i < q.record().count(); ++i) {
-          columns.push_back(q.value(i).toString());
-        }
-        rows.push_back(columns.join(kColumnSeparator));
-      }
-      db.close();
-    }
-    return rows;
-  }
-
-  std::set<QString> nodeNames(const QString& name) {
-    std::set<QString> names;
-    for(const QString& serialized : query(name, QStringLiteral("SELECT serialized_name FROM node"))) {
-      names.insert(dottedName(serialized));
-    }
-    return names;
-  }
-
-  // File path -> file node id; a file indexed again gets a new id.
-  std::map<QString, QString> fileIds(const QString& name, const QString& suffix) {
-    std::map<QString, QString> ids;
-    for(const QString& row : query(name, QStringLiteral("SELECT path, id FROM file"))) {
-      const QStringList columns = row.split(kColumnSeparator);
-      if(columns[0].endsWith(suffix)) {
-        ids[columns[0]] = columns[1];
-      }
-    }
-    return ids;
-  }
-
-  // Each location in files ending in `suffix`, with the names of what occurs there.
-  std::multiset<QString> locations(const QString& name, const QString& suffix) {
-    std::multiset<QString> rows;
-    for(const QString& row :
-        query(name,
-              QStringLiteral("SELECT f.path, l.start_line, l.start_column, l.end_line, l.end_column, l.type, "
-                             "coalesce(n.serialized_name, e.type || ' ' || s.serialized_name || ' -> ' || "
-                             "t.serialized_name, ''), l.id "
-                             "FROM source_location l JOIN file f ON f.id = l.file_node_id "
-                             "LEFT JOIN occurrence o ON o.source_location_id = l.id "
-                             "LEFT JOIN node n ON n.id = o.element_id LEFT JOIN edge e ON e.id = o.element_id "
-                             "LEFT JOIN node s ON s.id = e.source_node_id LEFT JOIN node t ON t.id = e.target_node_id"))) {
-      QStringList columns = row.split(kColumnSeparator);
-      if(columns[0].endsWith(suffix)) {
-        columns.removeLast();    // the location id
-        rows.insert(columns.join(kColumnSeparator));
-      }
-    }
-    return rows;
-  }
-
-  int count(const QString& name, const QString& table) {
-    return query(name, "SELECT count(*) FROM " + table).value(0).toInt();
-  }
-
-  static void write(const QString& path, const QString& text) {
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    file.write(text.toUtf8());
-  }
-
-  static QString read(const QString& path) {
-    QFile file(path);
-    EXPECT_TRUE(file.open(QIODevice::ReadOnly));
-    return QString::fromUtf8(file.readAll());
-  }
-
-  // Modification times are compared in whole seconds.
-  static void edit(const QString& path, const QString& text) {
-    QThread::msleep(1100);
-    write(path, text);
-  }
-
-  // A folder whose `node` runs `script` instead (a POSIX shell script), for PATH; empty when Sourcetrail would find a
-  // real node first.
-  QString fakeNode(const QString& script) {
-    for(const char* folder : {"/opt/local/bin", "/usr/local/bin"}) {
-      if(QFile::exists(QString(folder) + "/node")) {
-        return {};
-      }
-    }
-    const QString folder = mRoot + "/../fake-bin";
-    write(folder + "/node", "#!/bin/sh\n" + script + "\n");
-    QFile::setPermissions(folder + "/node", QFile::permissions(folder + "/node") | QFile::ExeOwner);
-    return folder + ":/usr/bin:/bin";
-  }
-
-  QString sidecar() const {
-    return mRoot + "/ts-http-calls.json";
-  }
-
-  QString orderService() const {
-    return mRoot + "/src/main/webapp/app/orders/order.service.ts";
-  }
-
-  QTemporaryDir mDir;
-  QString mRoot;
-  QString mHome;
-  std::vector<QString> mConnections;
-};
+class TypeScriptSourceGroup : public MixedProjectTest {};
 }    // namespace
 
 TEST_F(TypeScriptSourceGroup, mixedProjectIndexesBoth) {
@@ -433,7 +192,9 @@ TEST_F(TypeScriptSourceGroup, interruptedReimportIsRepairedByTheNextRefresh) {
 // A TypeScript indexer that fails is not run again until its inputs change, but each refresh repeats its error.
 TEST_F(TypeScriptSourceGroup, failedTypeScriptRunIsRetriedOnlyAfterAnEdit) {
   const QString runs = mRoot + "/../node-runs";
-  const QString failingNode = fakeNode("echo run >> '" + runs + "'\necho 'ts-indexer: converter broke' >&2\nexit 1");
+  // The endpoint linking runs node too; it has nothing to link here.
+  const QString failingNode = fakeNode("case \"$1\" in *link.mjs) exit 0;; esac\necho run >> '" + runs +
+                                       "'\necho 'ts-indexer: converter broke' >&2\nexit 1");
   if(failingNode.isEmpty()) {
     GTEST_SKIP() << "a node in /opt/local/bin or /usr/local/bin comes before PATH";
   }
@@ -465,7 +226,8 @@ TEST_F(TypeScriptSourceGroup, failedTypeScriptRunIsRetriedOnlyAfterAnEdit) {
 }
 
 // What the Java half indexes to must not change because a TypeScript group sits next to it: every node, edge and
-// location of a Java-only index is in the mixed index, and everything else there belongs to the TypeScript files.
+// location of a Java-only index is in the mixed index, and everything else there belongs to the TypeScript files or to
+// the endpoint layer that links the two (HTTP.* nodes, the edges to and from them and their locations).
 TEST_F(TypeScriptSourceGroup, javaPartIdenticalToJavaOnlyIndex) {
   writeProject("mixed", true, true);
   writeProject("java", true, false);
@@ -493,22 +255,32 @@ TEST_F(TypeScriptSourceGroup, javaPartIdenticalToJavaOnlyIndex) {
       return it != nodeFiles.end() && std::ranges::any_of(it->second, [](const QString& path) { return path.endsWith(".java"); });
     };
     std::map<QString, QString> names;
+    std::set<QString> endpoints;
     for(const QString& row : query(name, QStringLiteral("SELECT id, type, serialized_name FROM node"))) {
       const QStringList columns = row.split(kColumnSeparator);
       const auto file = filePaths.find(columns[0]);
       names[columns[0]] = columns[1] + " " + (file != filePaths.end() ? file->second : columns[2]);
+      if(isEndpointLayer(columns[2])) {
+        endpoints.insert(columns[0]);
+      }
     }
     std::multimap<QString, bool> all;
     for(const auto& [id, node] : names) {
-      all.emplace("node " + node, inJava(id));
+      if(!endpoints.contains(id)) {
+        all.emplace("node " + node, inJava(id));
+      }
     }
     for(const QString& row : query(name, QStringLiteral("SELECT id, type, source_node_id, target_node_id FROM edge"))) {
       const QStringList columns = row.split(kColumnSeparator);
-      all.emplace("edge " + columns[1] + " " + names[columns[2]] + " -> " + names[columns[3]],
-                  inJava(columns[0]) || inJava(columns[2]) || inJava(columns[3]));
+      if(!endpoints.contains(columns[2]) && !endpoints.contains(columns[3])) {
+        all.emplace("edge " + columns[1] + " " + names[columns[2]] + " -> " + names[columns[3]],
+                    inJava(columns[0]) || inJava(columns[2]) || inJava(columns[3]));
+      }
     }
     for(const QString& location : locations(name, QString())) {
-      all.emplace("location " + location, location.section(kColumnSeparator, 0, 0).endsWith(".java"));
+      if(!isEndpointLayer(location)) {
+        all.emplace("location " + location, location.section(kColumnSeparator, 0, 0).endsWith(".java"));
+      }
     }
     for(const QString& error : query(name, QStringLiteral("SELECT message, fatal, translation_unit FROM error"))) {
       all.emplace("error " + error, error.section(kColumnSeparator, 2).endsWith(".java"));

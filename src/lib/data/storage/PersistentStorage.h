@@ -100,6 +100,8 @@ public:
   std::set<FilePath> getReferencingByDeclarations(const std::set<FilePath>& filePaths) const;
   // What other files can see of the given files, comparable between two indexes of the same project.
   std::set<std::string> getDeclarations(const std::set<FilePath>& filePaths) const;
+  // The files the endpoint layer (HTTP.<VERB> <path> nodes, see TaskLinkEndpoints) is located in.
+  std::set<FilePath> getFilePathsWithEndpoints() const;
 
   void clearAllErrors();
   void clearFileElements(const std::vector<FilePath>& filePaths, std::function<void(int)> updateStatusCallback);

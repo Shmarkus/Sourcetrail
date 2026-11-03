@@ -1,6 +1,7 @@
 #include "Project.h"
 
 #include <cassert>
+#include <regex>
 #include <tuple>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include "SourceGroup.h"
 #include "SourceGroupFactory.h"
 #include "SourceGroupStatusType.h"
+#include "SourceGroupTypeScript.h"
 #include "StorageCache.h"
 #include "StorageProvider.h"
 #include "TabId.h"
@@ -37,6 +39,7 @@
 #include "TaskFinishParsing.h"
 #include "TaskIndexIfDeclarationsChanged.h"
 #include "TaskInjectStorage.h"
+#include "TaskLinkEndpoints.h"
 #include "TaskMergeStorages.h"
 #include "TaskParseWrapper.h"
 #include "TextAccess.h"
@@ -63,6 +66,30 @@ int getIndexerThreadCount() {
     }
   }
   return indexerThreadCount;
+}
+
+// Whether clearing and indexing these files may change the endpoint layer, which links the TypeScript group's HTTP
+// calls to the Spring handlers in the Java files: they hold TypeScript, or endpoints, or Java that may map a path.
+bool changesEndpointLayer(const std::set<FilePath>& clearedFilePaths,
+                          const std::set<FilePath>& indexedFilePaths,
+                          const SourceGroupTypeScript& typeScriptGroup,
+                          const PersistentStorage& storage) {
+  if(!typeScriptGroup.filterToContainedFilePaths(clearedFilePaths).empty() ||
+     std::ranges::any_of(typeScriptGroup.getAllSourceFilePaths(),
+                         [&indexedFilePaths](const FilePath& path) { return indexedFilePaths.contains(path); }) ||
+     std::ranges::any_of(storage.getFilePathsWithEndpoints(),
+                         [&clearedFilePaths](const FilePath& path) { return clearedFilePaths.contains(path); })) {
+    return true;
+  }
+
+  static const std::regex mapping(R"(@\w*Mapping\b|@FeignClient\b)");
+  return std::ranges::any_of(indexedFilePaths, [](const FilePath& path) {
+    if(path.extension() != L".java" || !path.exists()) {
+      return false;
+    }
+    const std::string text = TextAccess::createFromFile(path)->getText();
+    return text.find("Mapping") != std::string::npos && std::regex_search(text, mapping);
+  });
 }
 
 }    // namespace
@@ -557,6 +584,7 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
   taskSequential->addTask(std::make_shared<TaskSetValue<int>>("indexed_source_file_count", 0));
   taskSequential->addTask(std::make_shared<TaskSetValue<bool>>("interrupted_indexing", false));
   taskSequential->addTask(std::make_shared<TaskSetValue<float>>("index_time", 0.0F));
+  taskSequential->addTask(std::make_shared<TaskSetValue<bool>>(TaskLinkEndpoints::DependentFilesClearedKey, false));
 
   const int indexerThreadCount = getIndexerThreadCount();
 
@@ -579,10 +607,12 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
         info.filesToCompareDeclarations,
         m_storage->getDeclarations(info.filesToCompareDeclarations),
         [this, info, tempStorage, dialogView, indexerThreadCount, firstPassSourceFileCount](bool index) -> std::shared_ptr<Task> {
-          std::shared_ptr<Task> clearTask = std::make_shared<TaskCleanStorage>(
-              tempStorage, dialogView, utility::toVector(info.dependentFilesToClear), false);
+          auto dependentTasks = std::make_shared<TaskGroupSequence>();
+          dependentTasks->addTask(
+              std::make_shared<TaskCleanStorage>(tempStorage, dialogView, utility::toVector(info.dependentFilesToClear), false));
+          dependentTasks->addTask(std::make_shared<TaskSetValue<bool>>(TaskLinkEndpoints::DependentFilesClearedKey, true));
           if(!index) {
-            return clearTask;
+            return dependentTasks;
           }
 
           RefreshInfo dependentInfo;
@@ -593,8 +623,6 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
           const size_t dependentSourceFileCount = dependentIndexerCommandProvider->size() +
               dependentCustomIndexerCommandProvider->size();
 
-          auto dependentTasks = std::make_shared<TaskGroupSequence>();
-          dependentTasks->addTask(clearTask);
           dependentTasks->addTask(std::make_shared<TaskSetValue<int>>(
               "source_file_count", static_cast<int>(firstPassSourceFileCount + dependentSourceFileCount)));
           addIndexingTasks(dependentTasks,
@@ -605,6 +633,30 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
                            indexerThreadCount);
           return dependentTasks;
         }));
+  }
+
+  // Once both sides are indexed and before the index is finished: the links between them. Files referencing the
+  // changed ones are cleared only if the second pass above finds that it has to.
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
+    const auto typeScriptGroup = std::dynamic_pointer_cast<SourceGroupTypeScript>(sourceGroup);
+    if(!typeScriptGroup || SOURCE_GROUP_STATUS_ENABLED != typeScriptGroup->getStatus()) {
+      continue;
+    }
+    const bool link = RefreshMode::AllFiles == info.mode ||
+        changesEndpointLayer(utility::concat(info.filesToClear, info.nonIndexedFilesToClear),
+                             info.filesToIndex,
+                             *typeScriptGroup,
+                             *m_storage);
+    if(link || changesEndpointLayer(info.dependentFilesToClear, info.dependentFilesToIndex, *typeScriptGroup, *m_storage)) {
+      taskSequential->addTask(
+          std::make_shared<TaskLinkEndpoints>(m_settings->getTempDBFilePath(),
+                                              typeScriptGroup->getHttpCallsFilePath(),
+                                              typeScriptGroup->getTypeScriptProjectPath(),
+                                              m_settings->getProjectDirectoryPath().concatenate(L".st-links.log"),
+                                              !link,
+                                              dialogView));
+    }
+    break;
   }
 
   // TODO(Hussein): Create Tasks using factory pattern

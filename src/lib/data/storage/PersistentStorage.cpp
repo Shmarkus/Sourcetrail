@@ -362,6 +362,14 @@ std::set<std::string> PersistentStorage::getDeclarations(const std::set<FilePath
   return declarations;
 }
 
+std::set<FilePath> PersistentStorage::getFilePathsWithEndpoints() const {
+  std::set<FilePath> paths;
+  for(Id id : m_sqliteIndexStorage.getFileIdsWithEndpoints()) {
+    paths.insert(getFileNodePath(id));
+  }
+  return paths;
+}
+
 void PersistentStorage::clearAllErrors() {
   m_sqliteIndexStorage.removeAllErrors();
 }

@@ -13,4 +13,5 @@ public:
   static FilePath getCxxCompilerHeaderDirectoryPath();
   static FilePath getJavaDirectoryPath();
   static FilePath getTypeScriptIndexerFilePath();
+  static FilePath getEndpointLinkerFilePath();
 };

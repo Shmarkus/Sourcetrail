@@ -90,8 +90,6 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCo
   }
 
   const ProjectSettings* projectSettings = m_settings->getProjectSettings();
-  // The HTTP calls go next to the project file, where the endpoint linking reads them.
-  const FilePath httpCallsFilePath = projectSettings->getProjectDirectoryPath().concatenate(L"ts-http-calls.json");
   auto command = std::make_shared<IndexerCommandCustom>(
       L"node",
       std::vector<std::wstring>{ResourcePaths::getTypeScriptIndexerFilePath().wstr(),
@@ -104,7 +102,7 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCo
                                 L"%{DATABASE_FILE_PATH}",
                                 L"--append",
                                 L"--http-out",
-                                httpCallsFilePath.wstr()},
+                                getHttpCallsFilePath().wstr()},
       projectSettings->getProjectFilePath(),
       projectSettings->getTempDBFilePath(),
       std::to_wstring(SqliteIndexStorage::getStorageVersion()),
@@ -133,4 +131,8 @@ std::shared_ptr<const SourceGroupSettings> SourceGroupTypeScript::getSourceGroup
 
 FilePath SourceGroupTypeScript::getTypeScriptProjectPath() const {
   return m_settings->getTsconfigPathExpandedAndAbsolute().getParentDirectory();
+}
+
+FilePath SourceGroupTypeScript::getHttpCallsFilePath() const {
+  return m_settings->getProjectSettings()->getProjectDirectoryPath().concatenate(L"ts-http-calls.json");
 }

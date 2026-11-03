@@ -23,6 +23,19 @@ std::pair<std::wstring, std::wstring> splitLocalSymbolName(const std::wstring& n
 
   return std::make_pair(name.substr(0, pos), name.substr(pos + 1, name.size() - pos - 2));
 }
+
+// The endpoint layer, HTTP.<VERB> <path> nodes in the HTTP package (ts-indexer's link.mjs, run by TaskLinkEndpoints).
+// It is rebuilt after every refresh that may change it, so it is no declaration of the files it is located in: the
+// refresh must not re-index other files because of it.
+const std::string EndpointNamePrefix = ".\tmHTTP\ts\tp\tn";
+
+bool isEndpointName(const std::string& serializedName) {
+  return serializedName.starts_with(EndpointNamePrefix);
+}
+
+std::string isEndpointNameSql(const std::string& column) {
+  return "substr(" + column + ", 1, " + std::to_string(EndpointNamePrefix.size()) + ") == '" + EndpointNamePrefix + "'";
+}
 }    // namespace
 
 size_t SqliteIndexStorage::getStorageVersion() {
@@ -647,7 +660,7 @@ std::vector<Id> SqliteIndexStorage::getFileIdsReferencingSymbolsDeclaredInFiles(
       "JOIN source_location AS reference_location ON reference_location.id = reference.source_location_id "
       "WHERE declaration_location.type == " +
       std::to_string(locationTypeToInt(LOCATION_TOKEN)) + " AND declaration_location.file_node_id IN (" +
-      utility::join(utility::toStrings(fileIds), ',') + ");");
+      utility::join(utility::toStrings(fileIds), ',') + ") AND NOT " + isEndpointNameSql("node.serialized_name") + ";");
 
   std::vector<Id> referencingFileIds;
   while(!query.eof()) {
@@ -655,6 +668,21 @@ std::vector<Id> SqliteIndexStorage::getFileIdsReferencingSymbolsDeclaredInFiles(
     query.nextRow();
   }
   return referencingFileIds;
+}
+
+std::vector<Id> SqliteIndexStorage::getFileIdsWithEndpoints() const {
+  CppSQLite3Query query = executeQuery(
+      "SELECT DISTINCT source_location.file_node_id FROM node "
+      "JOIN occurrence ON occurrence.element_id = node.id "
+      "JOIN source_location ON source_location.id = occurrence.source_location_id WHERE " +
+      isEndpointNameSql("node.serialized_name") + ";");
+
+  std::vector<Id> fileIds;
+  while(!query.eof()) {
+    fileIds.push_back(static_cast<Id>(query.getIntField(0, 0)));
+    query.nextRow();
+  }
+  return fileIds;
 }
 
 std::vector<std::string> SqliteIndexStorage::getDeclarationsInFile(Id fileId) const {
@@ -686,7 +714,7 @@ std::vector<std::string> SqliteIndexStorage::getDeclarationsInFile(Id fileId) co
       std::to_string(locationTypeToInt(LOCATION_SIGNATURE)) + ");");
   while(!query.eof()) {
     const std::string serializedName = query.getStringField(0, "");
-    if(!isAnonymous(serializedName)) {
+    if(!isAnonymous(serializedName) && !isEndpointName(serializedName)) {
       const std::string symbol = std::to_string(query.getIntField(1, 0)) + '\t' + std::to_string(query.getIntField(2, 0)) + '\t' +
           std::to_string(query.getIntField(3, 0)) + '\t' + serializedName;
       const int startLine = query.getIntField(5, 0);

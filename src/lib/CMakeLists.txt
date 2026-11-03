@@ -202,6 +202,8 @@ add_files(
   data/indexer/TaskExecuteCustomCommands.h
   data/indexer/TaskFillIndexerCommandQueue.cpp
   data/indexer/TaskFillIndexerCommandQueue.h
+  data/indexer/TaskLinkEndpoints.cpp
+  data/indexer/TaskLinkEndpoints.h
   data/location/LocationType.cpp
   data/location/LocationType.h
   data/location/SourceLocation.cpp

@@ -21,8 +21,11 @@
 #include "mocks/MockedStorageCache.hpp"
 #include "mocks/MockedTaskManager.hpp"
 #include "PersistentStorage.h"
+#include "SourceGroupFactory.h"
+#include "SourceGroupFactoryModule.h"
 #include "SourceGroupSettings.h"
 #include "SourceGroupSettingsCppEmpty.h"
+#include "SourceGroupSettingsCustomCommand.h"
 #include "TabId.h"
 
 using namespace std::chrono_literals;
@@ -322,6 +325,42 @@ TEST_F(ProjectFix, buildIndex_statusIsNoneAndNoFilesToIndex) {
 
   // Then: The status keep the same.
   EXPECT_EQ(mProject->m_refreshStage, Project::RefreshStageType::NONE);
+}
+
+// The factory outlives the test, so the module only borrows the source group.
+struct SingleSourceGroupFactoryModule : SourceGroupFactoryModule {
+  explicit SingleSourceGroupFactoryModule(const std::shared_ptr<SourceGroup>& sourceGroup) : mSourceGroup(sourceGroup) {}
+
+  [[nodiscard]] bool supports(SourceGroupType type) const override {
+    return type == SOURCE_GROUP_CUSTOM_COMMAND;
+  }
+
+  [[nodiscard]] std::shared_ptr<SourceGroup> createSourceGroup(std::shared_ptr<SourceGroupSettings> /*settings*/) const override {
+    return mSourceGroup.lock();
+  }
+
+  std::weak_ptr<SourceGroup> mSourceGroup;
+};
+
+TEST_F(ProjectFix, refreshPreparesSourceGroupsForAFullRefreshWhenTheProjectNeedsOne) {
+  // Given: The project file changed after the last indexing, so the refresh reindexes all files.
+  mProject->m_state = Project::ProjectStateType::OUTDATED;
+  auto settings = std::make_shared<SourceGroupSettingsCustomCommand>("ID", mSettings.get());
+  mSettings->setAllSourceGroupSettings({settings});
+  EXPECT_CALL(*mSettings, load).WillRepeatedly(Return(true));
+  // And: The factory hands out a source group that records how it is prepared.
+  auto sourceGroup = std::make_shared<NiceMock<MockedSourceGroup>>();
+  ON_CALL(testing::Const(*sourceGroup), getSourceGroupSettings()).WillByDefault(Return(settings));
+  ON_CALL(*sourceGroup, getSourceGroupSettings()).WillByDefault(Return(settings));
+  SourceGroupFactory::getInstance()->addModule(std::make_shared<SingleSourceGroupFactoryModule>(sourceGroup));
+  EXPECT_CALL(*mDialogView, confirm).WillOnce(Return(0));
+  EXPECT_CALL(*mDialogView, startIndexingDialog);
+
+  // Then: The source group learns the refresh rebuilds everything.
+  EXPECT_CALL(*sourceGroup, prepareIndexing(true)).WillOnce(Return(true));
+
+  // When: The caller asks for an updated-files refresh.
+  mProject->refresh(mDialogView, RefreshMode::UpdatedFiles, false);
 }
 
 #if BUILD_CXX_LANGUAGE_PACKAGE

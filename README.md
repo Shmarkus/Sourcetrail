@@ -46,7 +46,9 @@ and Python support returns in a later release. Windows and macOS builds are not 
     * On Ubuntu 22.04: `sudo apt install gcc-13 g++-13 lld ninja-build cmake git python3-venv` (gcc 13 comes from
       `ppa:ubuntu-toolchain-r/test`). The presets and the Conan profile call plain `gcc`/`g++`, so make gcc 13 the default
       (for example with `update-alternatives`).
-    * Git also provides the version number: the newest `v*` tag (`v2.0.0-fork` gives version `2.0.0-fork`).
+    * Git also provides the version number: `git describe` picks the nearest tag reachable from the commit that matches
+      `[0-9]*` or `v[0-9]*`. A build of tag `v2.0.0-fork` reports `2.0.0-fork`. Until such a tag exists, local builds
+      report upstream's `2.0.0`, and a checkout without tags (a shallow CI clone) reports `1.0.0`.
 * __JDK 21__ and __Maven__, to build the Java indexer (`java_indexer/`) and to run the Java tests.
 
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by
@@ -153,8 +155,9 @@ It needs the adjacent `Sourcetrail`, `sourcetrail_indexer` and data payload, so 
 `indexed N files, M errors` on stdout (exit 0 even when the index holds parse errors, 1 when indexing fails). It runs
 the same headless indexing as the GUI (`Sourcetrail index`), including Gradle dependency resolution and delombok, with
 the Java settings from the GUI's preferences; the configured Java path is the JVM library (`libjvm.so`), not
-`bin/java`. Status lines go to stderr; `--verbose` adds the indexer's log lines, such as each file it indexes. When
-indexing fails, `st` prints the last 50 lines of the indexer's output. With `st serve` running, `st index` goes through
+`bin/java`. The indexer's status lines go to stderr; `--verbose` adds its log lines, such as each file it indexes. When
+indexing fails (including a failed Gradle or Maven command), `st index` also prints the indexer's last 50 log lines, so
+the error is visible without `--verbose`. A failed refresh before a query prints those log lines and the status lines. With `st serve` running, `st index` goes through
 the server. Create the project first (see [New Java projects](#new-java-projects)), then run `st index --full` once from
 anywhere in its folder (or with `--project /abs/project.srctrlprj`). After an upgrade, an index built by an older version
 needs one `--full` reindex; until then `st` exits 4 with `index is empty or incompatible; reindex with --full`.

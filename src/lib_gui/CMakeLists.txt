@@ -319,3 +319,18 @@ if(BUILD_CXX_LANGUAGE_PACKAGE)
     utility/path_detector/cxx_header/utilityCxxHeaderDetection.cpp
     utility/path_detector/cxx_header/utilityCxxHeaderDetection.h)
 endif()
+
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  add_files(
+    LIB_GUI
+    qt/project_wizard/content/path/QtProjectWizardContentPathSettingsMaven.cpp
+    qt/project_wizard/content/path/QtProjectWizardContentPathSettingsMaven.h
+    qt/project_wizard/content/path/QtProjectWizardContentPathSourceGradle.cpp
+    qt/project_wizard/content/path/QtProjectWizardContentPathSourceGradle.h
+    qt/project_wizard/content/path/QtProjectWizardContentPathSourceMaven.cpp
+    qt/project_wizard/content/path/QtProjectWizardContentPathSourceMaven.h
+    qt/project_wizard/content/paths/QtProjectWizardContentPathsClassJava.cpp
+    qt/project_wizard/content/paths/QtProjectWizardContentPathsClassJava.h
+    qt/project_wizard/content/QtProjectWizardContentJavaStandard.cpp
+    qt/project_wizard/content/QtProjectWizardContentJavaStandard.h)
+endif()

@@ -13,6 +13,8 @@
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "JavaPathDetectorLinux.h"
+#  include "JreSystemLibraryPathDetectorLinux.h"
 #  include "MavenPathDetectorUnix.h"
 #  include "MavenPathDetectorWindows.h"
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
@@ -80,6 +82,31 @@ std::shared_ptr<CombinedPathDetector> utility::getCxxFrameworkPathDetector() {
   combinedDetector->addDetector(std::make_shared<CxxFrameworkPathDetector>("clang"));
   combinedDetector->addDetector(std::make_shared<CxxFrameworkPathDetector>("gcc"));
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+  return combinedDetector;
+}
+
+// Linux only: the fork builds no Windows or macOS package. Any JDK version is accepted.
+std::shared_ptr<CombinedPathDetector> utility::getJavaRuntimePathDetector() {
+  std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  if(utility::getOsType() == OsType::Linux) {
+    combinedDetector->addDetector(std::make_shared<JavaPathDetectorLinux>(""));
+  } else {
+    LOG_WARNING("No suitable Java Runtime path detector found");
+  }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+  return combinedDetector;
+}
+
+std::shared_ptr<CombinedPathDetector> utility::getJreSystemLibraryPathsDetector() {
+  std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  if(utility::getOsType() == OsType::Linux) {
+    combinedDetector->addDetector(std::make_shared<JreSystemLibraryPathDetectorLinux>(""));
+  } else {
+    LOG_WARNING("No suitable JRE system library path detector found");
+  }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   return combinedDetector;
 }
 

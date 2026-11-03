@@ -267,9 +267,18 @@ target_sources(
 target_include_directories(Sourcetrail_lib_gui_utility PUBLIC src/lib_gui/utility/ src/lib_gui/utility/path_detector/
                                                               src/lib_gui/utility/path_detector/cxx_header/)
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
-  target_sources(Sourcetrail_lib_gui_utility PRIVATE src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorUnix.cpp
-                                                     src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorWindows.cpp)
-  target_include_directories(Sourcetrail_lib_gui_utility PUBLIC src/lib_gui/utility/path_detector/maven_executable/)
+  target_sources(
+    Sourcetrail_lib_gui_utility
+    PRIVATE src/lib_gui/utility/path_detector/java_runtime/JavaPathDetector.cpp
+            src/lib_gui/utility/path_detector/java_runtime/JavaPathDetectorLinux.cpp
+            src/lib_gui/utility/path_detector/jre_system_library/JreSystemLibraryPathDetector.cpp
+            src/lib_gui/utility/path_detector/jre_system_library/JreSystemLibraryPathDetectorLinux.cpp
+            src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorUnix.cpp
+            src/lib_gui/utility/path_detector/maven_executable/MavenPathDetectorWindows.cpp)
+  target_include_directories(
+    Sourcetrail_lib_gui_utility PUBLIC src/lib_gui/utility/path_detector/java_runtime/
+                                       src/lib_gui/utility/path_detector/jre_system_library/
+                                       src/lib_gui/utility/path_detector/maven_executable/)
 endif()
 
 target_link_libraries(
@@ -281,6 +290,7 @@ target_link_libraries(
           Sourcetrail::lib
           Sourcetrail::core::utility::ScopedFunctor
           Sourcetrail::core::utility::logging
+          Sourcetrail::core::utility::file::FileSystem
           Sourcetrail::libGui::utility::utilityApp)
 
 # Lib Gui ------------------------------------------------------------------------------------------------------------------------
@@ -321,7 +331,8 @@ target_link_libraries(
           Sourcetrail::libGui::utility::utilityApp
           Sourcetrail::messaging
           Qt6::Core5Compat
-          $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>)
+          $<$<BOOL:${BUILD_CXX_LANGUAGE_PACKAGE}>:Sourcetrail::lib_cxx>
+          $<$<BOOL:${BUILD_JAVA_LANGUAGE_PACKAGE}>:Sourcetrail::lib_java>)
 
 # command for versioning script
 add_custom_command(

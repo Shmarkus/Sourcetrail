@@ -10,7 +10,9 @@
 #include <QDockWidget>
 #include <QLayout>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <QSettings>
 #include <QTimer>
 #include <QToolBar>
@@ -22,6 +24,7 @@
 #include "FileSystem.h"
 #include "globalStrings.h"
 #include "IApplicationSettings.hpp"
+#include "language_packages.h"
 #include "logging.h"
 #include "QtAbout.h"
 #include "QtContextMenu.h"
@@ -52,6 +55,7 @@
 #include "type/MessageRefresh.h"
 #include "type/MessageRefreshUI.h"
 #include "type/MessageResetZoom.h"
+#include "type/MessageStatus.h"
 #include "type/MessageWindowClosed.h"
 #include "type/MessageZoom.h"
 #include "type/search/MessageFind.h"
@@ -63,6 +67,10 @@
 #include "utilityQt.h"
 #include "utilityString.h"
 #include "View.h"
+
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "JavaProjectSetup.h"
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
 QtViewToggle::QtViewToggle(View* view, QWidget* parent) : QWidget(parent), m_view(view) {}
 
@@ -496,7 +504,56 @@ void QtMainWindow::hideStartScreen() {
   m_windowStack.clearWindows();
 }
 
+// With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build.
 void QtMainWindow::newProject() {
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  const QString folder = QtFileDialog::getExistingDirectory(this, tr("Select the Project Folder"), FilePath());
+  if(folder.isEmpty()) {
+    return;
+  }
+
+  bool declined = false;
+  const JavaProjectChoice choice = openOrCreateJavaProject(FilePath(folder.toStdWString()), [this, &folder, &declined]() {
+    QMessageBox msgBox(this);
+    msgBox.setText(tr("No Gradle or Maven build found"));
+    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle or pom.xml at its top level.</p>"
+                                 "<p>You can create a plain Java project and fill in its class path, or cancel.</p>")
+                                  .arg(folder.toHtmlEscaped()));
+    QAbstractButton* plainJava = msgBox.addButton(tr("Plain Java Project"), QMessageBox::AcceptRole);
+    msgBox.addButton(QMessageBox::Cancel);
+    msgBox.exec();
+    declined = msgBox.clickedButton() != plainJava;
+    return !declined;
+  });
+
+  if(choice.projectFile.empty()) {
+    if(!declined) {
+      QMessageBox::warning(this,
+                           tr("Could not create Project"),
+                           tr("Sourcetrail was unable to write the project into %1/.sourcetrail.").arg(folder));
+    }
+    return;
+  }
+
+  if(choice.created) {
+    MessageStatus(L"Created project: " + choice.projectFile.wstr()).dispatch();
+  }
+
+  if(choice.created && choice.kind == JavaBuildKind::None) {
+    // the class path is still to be filled in; finishing the wizard loads the project
+    auto* wizard = createWindow<QtProjectWizard>();
+    wizard->editProject(choice.projectFile);
+    return;
+  }
+
+  MessageLoadProject(choice.projectFile).dispatch();
+  m_windowStack.clearWindows();
+#else
+  newCustomProject();
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+}
+
+void QtMainWindow::newCustomProject() {
   auto* wizard = createWindow<QtProjectWizard>();
   wizard->newProject();
 }
@@ -702,9 +759,11 @@ void QtMainWindow::setupProjectMenu() {
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
   menu->addAction(tr("&New Project..."), QKeySequence::New, this, &QtMainWindow::newProject);
+  menu->addAction(tr("New &Custom Project..."), this, &QtMainWindow::newCustomProject);
   menu->addAction(tr("&Open Project..."), QKeySequence::Open, this, &QtMainWindow::openProject);
 #else
   menu->addAction(tr("&New Project..."), this, &QtMainWindow::newProject, QKeySequence::New);
+  menu->addAction(tr("New &Custom Project..."), this, &QtMainWindow::newCustomProject);
   menu->addAction(tr("&Open Project..."), this, &QtMainWindow::openProject, QKeySequence::Open);
 #endif
 

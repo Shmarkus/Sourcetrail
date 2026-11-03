@@ -158,3 +158,18 @@ FilePath createJavaProject(const FilePath& folder, JavaBuildKind kind) {
   }
   return projectFile;
 }
+
+JavaProjectChoice openOrCreateJavaProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava) {
+  if(FilePath existing = existingProjectFile(folder); !existing.empty()) {
+    return {existing, false, detectJavaBuild(folder)};
+  }
+
+  const JavaBuildKind kind = detectJavaBuild(folder);
+  if(kind == JavaBuildKind::None && !acceptPlainJava()) {
+    return {};
+  }
+
+  FilePath projectFile = createJavaProject(folder, kind);
+  const bool created = !projectFile.empty();
+  return {std::move(projectFile), created, kind};
+}

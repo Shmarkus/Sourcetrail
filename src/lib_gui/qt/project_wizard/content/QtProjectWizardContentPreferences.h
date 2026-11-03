@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <QComboBox>
 
 #include "CombinedPathDetector.h"
@@ -64,6 +66,13 @@ private:
       const QString& label, int min, int max, const QString& helpText, std::vector<QWidget*> widgets, QGridLayout* layout, int& row);
   QLineEdit* addLineEdit(const QString& label, const QString& helpText, QGridLayout* layout, int& row);
 
+  void addJavaSection(QGridLayout* layout, int& row);
+  // An "Auto detection from: <detector> detect" row; onDetect gets the chosen detector's paths.
+  void addPathDetection(const std::shared_ptr<CombinedPathDetector>& detector,
+                        const std::function<void(const std::vector<FilePath>&)>& onDetect,
+                        QGridLayout* layout,
+                        int& row);
+
   QFontComboBox* m_fontFace;
   QtComboBoxPlaceHolder* m_fontFacePlaceHolder;
 
@@ -100,5 +109,9 @@ private:
   QLabel* m_threadsInfoLabel;
 
   QCheckBox* m_multiProcessIndexing;
+
+  QtLocationPicker* m_javaPath = nullptr;
+  QtPathListBox* m_jreSystemLibraryPaths = nullptr;
+  QtLocationPicker* m_mavenPath = nullptr;
   QComboBox* mLoggingLevelComboBox;
 };

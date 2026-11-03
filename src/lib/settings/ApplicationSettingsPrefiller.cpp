@@ -16,6 +16,8 @@ void ApplicationSettingsPrefiller::prefillPaths(IApplicationSettings* settings) 
   updated |= prefillCxxHeaderPaths(settings);
   updated |= prefillCxxFrameworkPaths(settings);
 #if BUILD_JAVA_LANGUAGE_PACKAGE
+  updated |= prefillJavaRuntimePath(settings);
+  updated |= prefillJreSystemLibraryPaths(settings);
   updated |= prefillMavenExecutablePath(settings);
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
@@ -63,6 +65,47 @@ bool ApplicationSettingsPrefiller::prefillCxxFrameworkPaths(IApplicationSettings
   }
 
   settings->setHasPrefilledFrameworkSearchPaths(true);
+  return true;
+}
+
+bool ApplicationSettingsPrefiller::prefillJavaRuntimePath(IApplicationSettings* settings) {
+  if(settings->getHasPrefilledJavaPath() && !settings->getJavaPath().empty()) {
+    return false;
+  }
+
+  LOG_INFO("Prefilling Java path");
+  std::shared_ptr<CombinedPathDetector> javaPathDetector = utility::getJavaRuntimePathDetector();
+  std::vector<FilePath> paths = javaPathDetector->getPaths();
+  if(!paths.empty()) {
+    MessageStatus(L"Ran Java runtime path detection, found: " + paths.front().wstr()).dispatch();
+
+    settings->setJavaPath(paths.front());
+  } else {
+    MessageStatus(L"Ran Java runtime path detection, no path found.").dispatch();
+  }
+
+  settings->setHasPrefilledJavaPath(true);
+  return true;
+}
+
+bool ApplicationSettingsPrefiller::prefillJreSystemLibraryPaths(IApplicationSettings* settings) {
+  if(settings->getHasPrefilledJreSystemLibraryPaths())    // allow empty
+  {
+    return false;
+  }
+
+  LOG_INFO("Prefilling JRE system library path");
+  std::shared_ptr<CombinedPathDetector> jreSystemLibraryPathsDetector = utility::getJreSystemLibraryPathsDetector();
+  std::vector<FilePath> paths = jreSystemLibraryPathsDetector->getPaths();
+  if(!paths.empty()) {
+    MessageStatus(L"Ran JRE system library path detection, found: " + paths.front().wstr()).dispatch();
+
+    settings->setJreSystemLibraryPaths(paths);
+  } else {
+    MessageStatus(L"Ran JRE system library path detection, no path found.").dispatch();
+  }
+
+  settings->setHasPrefilledJreSystemLibraryPaths(true);
   return true;
 }
 

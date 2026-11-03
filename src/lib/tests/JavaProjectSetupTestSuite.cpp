@@ -170,3 +170,42 @@ TEST_F(JavaProjectSetupTest, existingProjectWithAnotherNameIsFound) {
 
   EXPECT_EQ(FilePath{(mRoot / ".sourcetrail" / "renamed.srctrlprj").wstring()}, existingProjectFile(folder()));
 }
+
+TEST_F(JavaProjectSetupTest, openOrCreateOpensTheExistingProject) {
+  touch("build.gradle");
+  const FilePath projectFile = createJavaProject(folder(), JavaBuildKind::Gradle);
+
+  const JavaProjectChoice choice = openOrCreateJavaProject(folder(), [] { return true; });
+
+  EXPECT_EQ(projectFile, choice.projectFile);
+  EXPECT_FALSE(choice.created);
+}
+
+TEST_F(JavaProjectSetupTest, openOrCreateCreatesAProjectForTheDetectedBuild) {
+  touch("pom.xml");
+  bool asked = false;
+
+  const JavaProjectChoice choice = openOrCreateJavaProject(folder(), [&asked] { return asked = true; });
+
+  EXPECT_FALSE(asked);
+  EXPECT_TRUE(choice.created);
+  EXPECT_EQ(JavaBuildKind::Maven, choice.kind);
+  EXPECT_EQ(projectFileFor(folder()), choice.projectFile);
+  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(onlySourceGroup(choice.projectFile)));
+}
+
+TEST_F(JavaProjectSetupTest, openOrCreateWithoutABuildCreatesAPlainJavaProjectWhenAccepted) {
+  const JavaProjectChoice choice = openOrCreateJavaProject(folder(), [] { return true; });
+
+  EXPECT_TRUE(choice.created);
+  EXPECT_EQ(JavaBuildKind::None, choice.kind);
+  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(onlySourceGroup(choice.projectFile)));
+}
+
+TEST_F(JavaProjectSetupTest, openOrCreateWithoutABuildWritesNothingWhenDeclined) {
+  const JavaProjectChoice choice = openOrCreateJavaProject(folder(), [] { return false; });
+
+  EXPECT_TRUE(choice.projectFile.empty());
+  EXPECT_FALSE(choice.created);
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}

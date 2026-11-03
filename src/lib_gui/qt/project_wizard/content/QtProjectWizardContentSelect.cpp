@@ -11,6 +11,7 @@
 #include <QVariant>
 
 #include "globalStrings.h"
+#include "language_packages.h"
 #include "LanguageType.h"
 #include "QtFlowLayout.h"
 #include "QtProjectWizardWindow.h"
@@ -37,6 +38,11 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
   sourceGroupInfos[LANGUAGE_CPP].emplace_back(SOURCE_GROUP_CXX_VS);
   sourceGroupInfos[LANGUAGE_CPP].emplace_back(SOURCE_GROUP_CPP_EMPTY);
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  sourceGroupInfos[LANGUAGE_JAVA].emplace_back(SOURCE_GROUP_JAVA_MAVEN);
+  sourceGroupInfos[LANGUAGE_JAVA].emplace_back(SOURCE_GROUP_JAVA_GRADLE);
+  sourceGroupInfos[LANGUAGE_JAVA].emplace_back(SOURCE_GROUP_JAVA_EMPTY);
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   sourceGroupInfos[LANGUAGE_CUSTOM].emplace_back(SOURCE_GROUP_CUSTOM_COMMAND);
 
   // define which icons should be used for which kind of source group
@@ -46,6 +52,11 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
   m_sourceGroupTypeIconName[SOURCE_GROUP_CXX_CDB] = L"cdb_icon";
   m_sourceGroupTypeIconName[SOURCE_GROUP_CXX_VS] = L"vs_icon";
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  m_sourceGroupTypeIconName[SOURCE_GROUP_JAVA_EMPTY] = L"empty_icon";
+  m_sourceGroupTypeIconName[SOURCE_GROUP_JAVA_MAVEN] = L"mvn_icon";
+  m_sourceGroupTypeIconName[SOURCE_GROUP_JAVA_GRADLE] = L"gradle_icon";
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   m_sourceGroupTypeIconName[SOURCE_GROUP_CUSTOM_COMMAND] = L"empty_icon";
 
   // define descriptions for each kind of Source Group
@@ -67,6 +78,12 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
           "<a href=\""} +
       "documentation"_g + "#visual-studio\">Sourcetrail Visual Studio Extension</a> installed.</p>";
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+  m_sourceGroupTypeDescriptions[SOURCE_GROUP_JAVA_EMPTY] =
+      "Create a new Source Group by defining which Java files will be indexed.";
+  m_sourceGroupTypeDescriptions[SOURCE_GROUP_JAVA_MAVEN] = "Create a new Source Group from an existing Maven project.";
+  m_sourceGroupTypeDescriptions[SOURCE_GROUP_JAVA_GRADLE] = "Create a new Source Group from an existing Gradle project.";
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   m_sourceGroupTypeDescriptions[SOURCE_GROUP_CUSTOM_COMMAND] =
       "Create a new Source Group executing a custom command on each source file. "
       "This Source Group type can be used on <a "

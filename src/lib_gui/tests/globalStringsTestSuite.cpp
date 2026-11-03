@@ -9,8 +9,8 @@ using namespace testing;
 TEST(getGithubUrl, goodCase) {
   constexpr auto GITHUB_URL = "github"_g;
   static_assert(std::is_same_v<const char* const, decltype(GITHUB_URL)>);
-  EXPECT_THAT(GITHUB_URL, StrEq("https://github.com/OpenSourceSourceTrail/Sourcetrail"));
+  EXPECT_THAT(GITHUB_URL, StrEq("https://github.com/Shmarkus/Sourcetrail"));
 
   constexpr auto documentation_URL = "documentation"_g;
-  EXPECT_THAT(documentation_URL, StrEq("https://github.com/OpenSourceSourceTrail/Sourcetrail/blob/main/DOCUMENTATION.md"));
+  EXPECT_THAT(documentation_URL, StrEq("https://github.com/Shmarkus/Sourcetrail/blob/master/DOCUMENTATION.md"));
 }

@@ -65,7 +65,7 @@ void QtAbout::setupAbout() {
         QString::fromStdString("<b>Authors: <a href=\"%1\" "
                                "style=\"color: "
                                "white;\">%1</a></b>")
-            .arg("https://raw.githubusercontent.com/OpenSourceSourceTrail/Sourcetrail/refs/heads/main/AUTHORS.txt")};
+            .arg("https://raw.githubusercontent.com/Shmarkus/Sourcetrail/refs/heads/master/AUTHORS.txt")};
 
     developerLabel->setObjectName(QStringLiteral("small"));
     layoutHorz1->addWidget(developerLabel);

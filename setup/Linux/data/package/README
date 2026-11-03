@@ -32,17 +32,16 @@ Run resetPreferences.sh to delete them and reset Sourcetrail to the initial conf
 Documentation
 -------------
 
-Documentation is available at http://sourcetrail.com/documentation/
+Documentation is available at https://github.com/Shmarkus/Sourcetrail/blob/master/DOCUMENTATION.md
 
 
 Website
 -------
 
-http://www.sourcetrail.com/
+https://github.com/Shmarkus/Sourcetrail
 
 
 Reporting a Bug
 ---------------
 
-Report bugs at https://github.com/CoatiSoftware/SourcetrailBugTracker/issues
-or write an e-mail to support@coati.io
+Report bugs at https://github.com/Shmarkus/Sourcetrail/issues

@@ -10,6 +10,7 @@ class DialogView;
 // Rebuilds the endpoint layer of a mixed Java + TypeScript index: runs the bundled linker (ts-indexer's link.mjs) on the
 // database being built, which links the frontend's HTTP calls (the TypeScript group's sidecar) to the Spring handlers
 // in the index through HTTP.<VERB> <path> nodes. Its summary becomes a status line; its unlinked calls go to a log.
+// Without a sidecar it only removes the layer, for a project that no longer has a TypeScript group.
 class TaskLinkEndpoints : public Task {
 public:
   // Set on the blackboard once the refresh has cleared the files referencing the changed ones (its second pass).
@@ -22,6 +23,7 @@ public:
                     FilePath logFilePath,
                     bool onlyIfDependentFilesCleared,
                     std::shared_ptr<DialogView> dialogView);
+  TaskLinkEndpoints(FilePath databaseFilePath, std::shared_ptr<DialogView> dialogView);
 
 private:
   void doEnter(std::shared_ptr<Blackboard> blackboard) override;

@@ -12,8 +12,22 @@ export const ANY = 'ANY';
 // "/api/orders/{}" for "api/orders/{id}", "/api//orders/", "/api/orders/${id}?x=1": path variables become `{}`, the
 // query goes, slashes are collapsed, one leading slash and no trailing one.
 export function normalizePath(path) {
-  const withoutQuery = path.split('?')[0];
-  const variables = withoutQuery.replace(/\$\{[^}]*\}/g, '{}').replace(/\{[^}]*\}/g, '{}');
+  let variables = '';
+  for (let i = 0; i < path.length && path[i] !== '?'; i++) {
+    const brace = path[i] === '$' && path[i + 1] === '{' ? i + 1 : path[i] === '{' ? i : -1;
+    if (brace < 0) {
+      variables += path[i];
+      continue;
+    }
+    // to the matching brace: a variable's regex may hold braces of its own, `{id:\d{3}}`
+    let depth = 0, end = brace;
+    for (; end < path.length; end++) {
+      if (path[end] === '{') depth++;
+      else if (path[end] === '}' && --depth === 0) break;
+    }
+    variables += '{}';
+    i = end;
+  }
   return `/${variables.split('/').filter(Boolean).join('/')}`;
 }
 
@@ -40,6 +54,23 @@ export function blankComments(text) {
       out += c;
       i++;
     }
+  }
+  return out;
+}
+
+// The text with the contents of string, text block and char literals blanked (newlines kept), for finding code.
+function blankLiterals(text) {
+  let out = '';
+  for (let i = 0; i < text.length;) {
+    if (text[i] !== '"' && text[i] !== "'") {
+      out += text[i++];
+      continue;
+    }
+    const stop = literalEnd(text, i);
+    const quotes = text.startsWith('"""', i) ? 3 : 1;
+    const inner = text.slice(i + quotes, Math.max(i + quotes, stop - quotes)).replace(/[^\n]/g, ' ');
+    out += text.slice(i, i + quotes) + inner + text.slice(i + quotes + inner.length, stop);
+    i = stop;
   }
   return out;
 }
@@ -144,13 +175,56 @@ const lineColumn = (text, index) => {
   return { line, column: index - before.lastIndexOf('\n') };
 };
 
+// Whether the declaration after `index` (past further annotations) is a type's.
+function declaresType(structure, index) {
+  let i = index;
+  for (;;) {
+    while (/\s/.test(structure[i] ?? '')) i++;
+    const annotation = /^@[\w.]+\s*/.exec(structure.slice(i, i + 256));
+    if (!annotation) break;
+    i += annotation[0].length;
+    if (structure[i] === '(') {
+      const close = closingParen(structure, i);
+      if (close < 0) return false;
+      i = close + 1;
+    }
+  }
+  const end = structure.slice(i).search(/[({;=]/);
+  return /\b(class|interface|enum|record)\s+\w+/.test(structure.slice(i, end < 0 ? undefined : i + end));
+}
+
+// The brace depth at each index, counting braces outside parentheses only (annotation arguments hold array braces).
+function braceDepths(structure) {
+  const depths = new Int32Array(structure.length);
+  let braces = 0, parens = 0;
+  for (let i = 0; i < structure.length; i++) {
+    const c = structure[i];
+    if (c === '(') parens++;
+    else if (c === ')') parens = Math.max(0, parens - 1);
+    else if (c === '{' && parens === 0) braces++;
+    else if (c === '}' && parens === 0) braces--;
+    depths[i] = braces;
+  }
+  return depths;
+}
+
+// The verbs of a method mapping under its class's: the method's, the class's, or their overlap if both name some;
+// null if they do not overlap.
+function combineVerbs(classVerbs, methodVerbs) {
+  if (!classVerbs) return methodVerbs ?? [ANY];
+  if (!methodVerbs) return classVerbs;
+  const both = methodVerbs.filter(v => classVerbs.includes(v));
+  return both.length > 0 ? both : null;
+}
+
 // The mappings a Java file declares: {handlers: [{verb, path, start, end}], problems: [{line, message}]}. Paths are
 // string literals, or the file's own string constants (see stringConstants). `start` and `end` are the annotation's
-// 1-based line and column (end inclusive); the handler method is the first one declared after `end`.
+// 1-based line and column (end inclusive); the handler method is the first one declared after `end`. Only the methods
+// of the file's first type are handlers; mappings elsewhere (nested types, other types of the file) are reported.
 export function springHandlers(source) {
   const text = blankComments(source);
-  // Searched for declarations and annotations: the text with string contents blanked too.
-  const structure = text.replace(/"(?:[^"\\\n]|\\.)*"/g, s => `"${' '.repeat(s.length - 2)}"`);
+  // Searched for declarations and annotations: the text with literal contents blanked too.
+  const structure = blankLiterals(text);
   const handlers = [], problems = [];
   const constants = stringConstants(text);
   const type = /\b(class|interface|enum|record)\s+\w+/.exec(structure);
@@ -158,26 +232,28 @@ export function springHandlers(source) {
   const header = structure.slice(0, type.index);
   if (!/@(?:[\w.]+\.)?(?:RestController|Controller)\b/.test(header)) return { handlers, problems };
 
-  const annotations = (from, to) => {
-    const found = [];
-    const re = /@(?:[\w.]+\.)?(Get|Post|Put|Patch|Delete|Request)Mapping\b\s*/g;
-    re.lastIndex = from;
-    for (let m; (m = re.exec(structure)) && m.index < to;) {
-      let args = '', last = m.index + m[0].trimEnd().length - 1;
-      if (structure[re.lastIndex] === '(') {
-        const close = closingParen(text, re.lastIndex);
-        if (close < 0) break;
-        args = text.slice(re.lastIndex + 1, close);
-        last = close;
-        re.lastIndex = close + 1;
-      }
-      found.push({ kind: m[1], args, index: m.index, last });
-    }
-    return found;
-  };
+  const depths = braceDepths(structure);
+  let bodyStart = type.index;
+  while (bodyStart < structure.length && depths[bodyStart] === 0) bodyStart++;
+  let bodyEnd = bodyStart;
+  while (bodyEnd < structure.length && depths[bodyEnd] > 0) bodyEnd++;
 
-  let prefixes = [''];
-  const classMapping = annotations(0, type.index).find(a => a.kind === 'Request');
+  const annotations = [];
+  const re = /@(?:[\w.]+\.)?(Get|Post|Put|Patch|Delete|Request)Mapping\b\s*/g;
+  for (let m; (m = re.exec(structure));) {
+    let args = '', last = m.index + m[0].trimEnd().length - 1;
+    if (structure[re.lastIndex] === '(') {
+      const close = closingParen(text, re.lastIndex);
+      if (close < 0) break;
+      args = text.slice(re.lastIndex + 1, close);
+      last = close;
+      re.lastIndex = close + 1;
+    }
+    annotations.push({ kind: m[1], args, index: m.index, last });
+  }
+
+  let prefixes = [''], classVerbs = null;
+  const classMapping = annotations.find(a => a.index < type.index && a.kind === 'Request');
   if (classMapping) {
     const parsed = mappingArguments(classMapping.args, constants);
     if (parsed.error) {
@@ -185,16 +261,31 @@ export function springHandlers(source) {
       return { handlers, problems };
     }
     prefixes = parsed.paths;
+    classVerbs = parsed.verbs;
   }
 
-  for (const a of annotations(type.index, text.length)) {
+  for (const a of annotations.filter(a => a.index > type.index)) {
     const start = lineColumn(text, a.index), end = lineColumn(text, a.last);
-    const parsed = mappingArguments(a.args, constants);
-    if (parsed.error) {
-      problems.push({ line: start.line, message: parsed.error });
+    const problem = message => problems.push({ line: start.line, message });
+    if (a.index >= bodyEnd) {
+      problem('mapping outside the first type of the file: not supported');
       continue;
     }
-    const verbs = a.kind === 'Request' ? parsed.verbs ?? [ANY] : [a.kind.toUpperCase()];
+    if (depths[a.index] !== 1 || declaresType(structure, a.last + 1)) {
+      problem('mapping in or on a nested type, or in a method body: not supported');
+      continue;
+    }
+    const parsed = mappingArguments(a.args, constants);
+    if (parsed.error) {
+      problem(parsed.error);
+      continue;
+    }
+    const methodVerbs = a.kind === 'Request' ? parsed.verbs : [a.kind.toUpperCase()];
+    const verbs = combineVerbs(classVerbs, methodVerbs);
+    if (!verbs) {
+      problem(`method verbs ${methodVerbs.join(', ')} not among the class's ${classVerbs.join(', ')}`);
+      continue;
+    }
     for (const prefix of prefixes) {
       for (const path of parsed.paths) {
         for (const verb of verbs) handlers.push({ verb, path: normalizePath(`${prefix}/${path}`), start, end });

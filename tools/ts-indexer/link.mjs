@@ -18,26 +18,35 @@ process.on('warning', warning => {
   if (warning.name !== 'ExperimentalWarning') process.stderr.write(`${warning.name}: ${warning.message}\n`);
 });
 
-const USAGE = 'link: usage: link.mjs --db <db> --http-calls <json> --project <dir> [--log <file>]';
+const USAGE = 'link: usage: link.mjs --db <db> (--http-calls <json> --project <dir> [--log <file>] | --remove)';
 // NodeKind.h, Edge.h, LocationType.h, DefinitionKind.h
 const NODE = { PACKAGE: 32, FUNCTION: 4096, METHOD: 8192 };
 const EDGE = { MEMBER: 1, CALL: 8 };
 const TOKEN = 0;
 const EXPLICIT = 2;
 
-// The endpoint layer's names. Sourcetrail's refresh leaves nodes under this prefix out of what a file declares
-// (SqliteIndexStorage), since this step rebuilds them.
+// The endpoint layer's names: function nodes `HTTP.<VERB> /<path>` in the package HTTP. The space sets them apart from
+// Java and TypeScript names (a Java package may be called HTTP). Sourcetrail's refresh leaves them out of what a file
+// declares (SqliteIndexStorage), since this step rebuilds them.
 const HTTP_PACKAGE = '.\tmHTTP\ts\tp';
 const endpointName = (verb, endpointPath) => `${HTTP_PACKAGE}\tn${verb} ${endpointPath}\ts\tp`;
+const IS_ENDPOINT = `type = ${NODE.FUNCTION} AND substr(serialized_name, 1, ${HTTP_PACKAGE.length + 2}) = `
+  + `'${HTTP_PACKAGE}\tn' AND substr(serialized_name, ${HTTP_PACKAGE.length + 3}) GLOB '[A-Z]* /*'`;
 
 function parseArguments(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--remove') {
+      options.remove = true;
+      continue;
+    }
     const key = { '--db': 'db', '--http-calls': 'calls', '--project': 'project', '--log': 'log' }[argv[i]];
     if (!key || i + 1 >= argv.length) throw Object.assign(new Error(USAGE), { code: 2 });
     options[key] = path.resolve(argv[++i]);
   }
-  if (!options.db || !options.calls || !options.project) throw Object.assign(new Error(USAGE), { code: 2 });
+  if (!options.db || (!options.remove && (!options.calls || !options.project))) {
+    throw Object.assign(new Error(USAGE), { code: 2 });
+  }
   return options;
 }
 
@@ -51,8 +60,7 @@ function displayName(serialized) {
 function removeEndpointLayer(db) {
   db.exec('CREATE TEMP TABLE IF NOT EXISTS endpoint_element(id INTEGER PRIMARY KEY)');
   db.exec('DELETE FROM endpoint_element');
-  db.prepare(`INSERT INTO endpoint_element SELECT id FROM node WHERE type = ? AND substr(serialized_name, 1, ?) = ?`)
-    .run(NODE.FUNCTION, HTTP_PACKAGE.length + 2, `${HTTP_PACKAGE}\tn`);
+  db.exec(`INSERT INTO endpoint_element SELECT id FROM node WHERE ${IS_ENDPOINT}`);
   db.exec(`INSERT OR IGNORE INTO endpoint_element SELECT id FROM edge
     WHERE source_node_id IN (SELECT id FROM endpoint_element) OR target_node_id IN (SELECT id FROM endpoint_element)`);
   db.exec('CREATE TEMP TABLE IF NOT EXISTS endpoint_location(id INTEGER PRIMARY KEY)');
@@ -179,7 +187,7 @@ class Writer {
 
 async function main(argv) {
   const options = parseArguments(argv);
-  const calls = readCalls(options.calls);
+  const calls = options.remove ? [] : readCalls(options.calls);
   // Imported once the warning handler is in place.
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(options.db);
@@ -190,6 +198,11 @@ async function main(argv) {
   let linked = 0, ambiguous = 0, unresolved = 0;
   try {
     removeEndpointLayer(db);
+    if (options.remove) {
+      db.exec('COMMIT;');
+      process.stdout.write('link: endpoints removed, no TypeScript group\n');
+      return;
+    }
     const { handlers, problems } = collectHandlers(db);
     for (const p of problems) log.push(`mapping\t${p.where}\t${p.message}`);
 

@@ -23,8 +23,8 @@ set -euo pipefail
 # prints the differences and exits 1 when not, exits 2 on a usage or indexing failure. KEEP=1 keeps the scratch dir.
 #
 # --exclude-endpoints: compares only what the Java indexer wrote, so that a Java-only index and a mixed Java +
-# TypeScript index of one folder can be compared. Dropped from both: the endpoint layer (HTTP.* nodes, every edge to
-# or from them and their locations) and the TypeScript rows (.ts/.tsx files and their locations and errors, the nodes
+# TypeScript index of one folder can be compared. Dropped from both: the endpoint layer (the functions
+# HTTP.<VERB> /<path>, their package HTTP unless it holds anything else, every edge to or from them and their locations) and the TypeScript rows (.ts/.tsx files and their locations and errors, the nodes
 # and edges that occur only there, and what only edges without a location connect to those).
 #
 # --after-edit <file>: after the full index, appends a method to <file> (relative to the project; its last line must
@@ -79,6 +79,7 @@ if [ -n "${LIBJVM:-}" ]; then
 fi
 
 cat > "$work/dump.py" << 'EOF'
+import re
 import sqlite3
 import sys
 
@@ -100,7 +101,12 @@ def rel(text):
 kept_nodes, kept_edges, kept_locations = set(names), {e[0] for e in edges}, {l[0] for l in locations}
 if java_part == "1":
     # the endpoint layer
-    endpoints = {i for i, n in names.items() if n.startswith(".\tmHTTP\ts\tp")}
+    types = dict(c.execute("SELECT id, type FROM node"))
+    endpoints = {i for i, n in names.items()
+                 if types[i] == 4096 and re.match(r"\.\tmHTTP\ts\tp\tn[A-Z]+ /", n)}
+    package = [i for i, n in names.items() if n == ".\tmHTTP\ts\tp" and types[i] == 32]
+    if package and all(e[3] in endpoints for e in edges if e[2] == package[0]):
+        endpoints.add(package[0])
     endpoint_edges = {e[0] for e in edges if e[2] in endpoints or e[3] in endpoints}
     kept_locations -= {l for e, l in occurrences if e in endpoints or e in endpoint_edges}
     edges = [e for e in edges if e[0] not in endpoint_edges]

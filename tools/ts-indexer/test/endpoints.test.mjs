@@ -82,6 +82,50 @@ describe('Spring mappings', () => {
     assert.deepEqual(routes(feign), []);
   });
 
+  test('nestedTypesAreReportedNotParsed', () => {
+    const source = controller('@RestController\n@RequestMapping("/a")', [
+      '  @GetMapping("/x")\n  public void x() {}',
+      '  @RequestMapping("/inner")\n  static class B {\n    @GetMapping("/y")\n    public void y() {}\n  }',
+      '  @PostMapping({"/after"})\n  public void after() {}',
+      '  @PutMapping("/record")\n  public void record(String raw) {}',
+    ].join('\n'));
+    const { handlers, problems } = springHandlers(source);
+    assert.deepEqual(handlers.map(h => `${h.verb} ${h.path}`), ['GET /a/x', 'POST /a/after', 'PUT /a/record']);
+    assert.deepEqual(problems.map(p => p.line), [8, 10]);
+    for (const p of problems) assert.match(p.message, /nested type/);
+  });
+
+  test('otherTopLevelTypesAreReportedNotParsed', () => {
+    const source = `${controller('@RestController', '  @GetMapping("/x")\n  public void x() {}')}\n`
+      + 'class Helper {\n  @GetMapping("/z")\n  public void z() {}\n}\n';
+    const { handlers, problems } = springHandlers(source);
+    assert.deepEqual(handlers.map(h => `${h.verb} ${h.path}`), ['GET /x']);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0].message, /outside the first type/);
+  });
+
+  test('classVerbsApplyToItsMethods', () => {
+    const source = controller('@RestController\n@RequestMapping(value = "/a", method = RequestMethod.POST)', [
+      '  @RequestMapping("/x")\n  public void x() {}',
+      '  @RequestMapping(value = "/p", method = {RequestMethod.POST, RequestMethod.PUT})\n  public void p() {}',
+      '  @PostMapping("/q")\n  public void q() {}',
+      '  @GetMapping("/g")\n  public void g() {}',
+    ].join('\n'));
+    const { handlers, problems } = springHandlers(source);
+    assert.deepEqual(handlers.map(h => `${h.verb} ${h.path}`), ['POST /a/x', 'POST /a/p', 'POST /a/q']);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0].message, /GET.*POST/);
+  });
+
+  test('charLiteralsAndRegexPathVariables', () => {
+    const source = controller('@RestController', [
+      "  private static final char QUOTE = '\"';",
+      '  @GetMapping("/items/{id:\\d{3}}/parts")\n  public void item() {}',
+    ].join('\n'));
+    assert.deepEqual(routes(source), ['GET /items/{}/parts']);
+    assert.equal(normalizePath('/a/{id:[0-9]{2,3}}/b/{x}'), '/a/{}/b/{}');
+  });
+
   test('aMappingNamingTheVerbComesFirst', () => {
     const handlers = [{ verb: ANY, path: '/a', id: 1 }, { verb: 'GET', path: '/a', id: 2 }, { verb: ANY, path: '/b', id: 3 }];
     assert.deepEqual(matchingHandlers(handlers, 'GET', '/a').map(h => h.id), [2]);

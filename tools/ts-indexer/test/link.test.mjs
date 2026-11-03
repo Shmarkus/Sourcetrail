@@ -212,6 +212,42 @@ describe('endpoint linking', () => {
     assert.match(fs.readFileSync(feign.log, 'utf8'), /^unresolved\tPOST\t\/authorizations\t.*\tno handler$/m);
   });
 
+  test('aJavaPackageNamedHttpIsNoEndpoint', () => {
+    const db = new DatabaseSync(fixture.db);
+    const id = db.prepare('SELECT max(id) AS m FROM element').get().m + 1;
+    db.prepare('INSERT INTO element(id) VALUES (?), (?), (?)').run(id, id + 1, id + 2);
+    const pkg = db.prepare('SELECT id FROM node WHERE serialized_name = ?').get(serializedName('HTTP'))?.id;
+    db.prepare('INSERT INTO node VALUES (?, ?, ?)').run(id, NODE.CLASS, serializedName('HTTP.Client'));
+    // a method whose name holds a space cannot be Java's; one in a class of the HTTP package is still not an endpoint
+    db.prepare('INSERT INTO node VALUES (?, ?, ?)').run(id + 1, NODE.FUNCTION, serializedName('HTTP.Client.get'));
+    db.prepare('INSERT INTO edge VALUES (?, ?, ?, ?)').run(id + 2, EDGE.MEMBER, pkg, id);
+    db.close();
+    link(fixture);
+    const index = openIndex(fixture.db);
+    try {
+      assert.deepEqual(index.named('HTTP.Client').map(n => n.type), [NODE.CLASS]);
+      assert.deepEqual(index.named('HTTP.Client.get').map(n => n.type), [NODE.FUNCTION]);
+      assert.deepEqual(index.edgesBetween('HTTP', 'HTTP.Client').map(e => e.type), [EDGE.MEMBER]);
+      assert.deepEqual(links(index), FIXTURE_LINKS);
+    } finally {
+      index.close();
+    }
+  });
+
+  test('removeOnlyDropsTheLayer', () => {
+    const r = spawnSync(process.execPath, [linkCli, '--db', fixture.db, '--remove'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, 'link: endpoints removed, no TypeScript group\n');
+    const index = openIndex(fixture.db);
+    try {
+      assert.deepEqual(index.nodes.filter(n => /^HTTP\.[A-Z]+ \//.test(n.name)), []);
+      assert.equal(index.named('HTTP.Client').length, 1);
+    } finally {
+      index.close();
+    }
+    link(fixture);
+  });
+
   test('withoutCallsTheEndpointsStayUnlinked', () => {
     const copy = { ...fixture, calls: path.join(fixture.dir, 'none.json') };
     assert.equal(link(copy), 'link: 0 linked, 0 ambiguous, 0 unresolved\n');

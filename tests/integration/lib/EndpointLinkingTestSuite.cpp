@@ -206,3 +206,47 @@ TEST_F(EndpointLinking, controllerBodyEditKeepsItsUsersAsTheyAre) {
   EXPECT_EQ(clientId, fileIds("mixed", ".java").at(client)) << "the controller's user was indexed again";
   EXPECT_EQ(fixtureLinks(), links("mixed"));
 }
+
+// Only HTTP.<VERB> /<path> functions are endpoints: a Java package named HTTP is Java like any other.
+TEST_F(EndpointLinking, javaPackageNamedHttpIsNoEndpoint) {
+  const QString client = mRoot + "/src/main/java/HTTP/Client.java";
+  const QString user = mRoot + "/src/main/java/com/acme/shop/ClientUser.java";
+  write(client, "package HTTP;\n\npublic class Client {\n    public int get() {\n        return 0;\n    }\n}\n");
+  write(user,
+        "package com.acme.shop;\n\npublic class ClientUser {\n    public long use() {\n"
+        "        return new HTTP.Client().get();\n    }\n}\n");
+  writeProject("mixed", true, true);
+  ASSERT_EQ(0, index("mixed", true).exitCode);
+  ASSERT_TRUE(nodeNames("mixed").contains("HTTP.Client.get"));
+  const QString userId = fileIds("mixed", ".java").at(user);
+
+  // A changed declaration of the client re-indexes its user.
+  edit(client, QString(read(client)).replace("public int get()", "public long get()"));
+  const RunResult result = index("mixed", false);
+  ASSERT_EQ(0, result.exitCode) << result.output.toStdString();
+
+  EXPECT_NE(userId, fileIds("mixed", ".java").at(user)) << "the client's user was not indexed again";
+  EXPECT_TRUE(nodeNames("mixed").contains("HTTP.Client.get"));
+  EXPECT_EQ(fixtureLinks(), links("mixed"));
+}
+
+// The GUI may refresh only the updated files after the project settings changed: without its TypeScript group the
+// project has no endpoint layer either.
+TEST_F(EndpointLinking, disabledTypeScriptGroupDropsTheEndpoints) {
+  writeProject("mixed", true, true);
+  ASSERT_EQ(0, index("mixed", true).exitCode);
+  ASSERT_FALSE(endpoints("mixed").empty());
+
+  write(mRoot + "/mixed.srctrlprj",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<config><source_groups>" + kJavaGroup +
+            QString(kTypeScriptGroup).replace("<status>enabled</status>", "<status>disabled</status>") +
+            "</source_groups><version>8</version></config>\n");
+  // What the GUI's "updated files" choice does after a settings change: the index takes the new settings as is.
+  query("mixed", "UPDATE meta SET value = '" + read(mRoot + "/mixed.srctrlprj") + "' WHERE key = 'project_settings'");
+  const RunResult result = index("mixed", false);
+  ASSERT_EQ(0, result.exitCode) << result.output.toStdString();
+
+  EXPECT_TRUE(result.output.contains("link: endpoints removed, no TypeScript group")) << result.output.toStdString();
+  EXPECT_TRUE(fileIds("mixed", ".ts").empty()) << result.output.toStdString();
+  EXPECT_TRUE(std::ranges::none_of(nodeNames("mixed"), [](const QString& name) { return name.startsWith("HTTP"); }));
+}

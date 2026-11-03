@@ -7,6 +7,7 @@
 #include "GlobalId.hpp"
 #include "LocationType.h"
 #include "logging.h"
+#include "NodeKind.h"
 #include "SourceLocationCollection.h"
 #include "SourceLocationFile.h"
 #include "TextAccess.h"
@@ -24,17 +25,24 @@ std::pair<std::wstring, std::wstring> splitLocalSymbolName(const std::wstring& n
   return std::make_pair(name.substr(0, pos), name.substr(pos + 1, name.size() - pos - 2));
 }
 
-// The endpoint layer, HTTP.<VERB> <path> nodes in the HTTP package (ts-indexer's link.mjs, run by TaskLinkEndpoints).
-// It is rebuilt after every refresh that may change it, so it is no declaration of the files it is located in: the
-// refresh must not re-index other files because of it.
+// The endpoint layer, HTTP.<VERB> /<path> function nodes in the HTTP package (ts-indexer's link.mjs, run by
+// TaskLinkEndpoints); the space sets them apart from Java and TypeScript names. It is rebuilt after every refresh that
+// may change it, so it is no declaration of the files it is located in: the refresh must not re-index other files
+// because of it.
 const std::string EndpointNamePrefix = ".\tmHTTP\ts\tp\tn";
 
-bool isEndpointName(const std::string& serializedName) {
-  return serializedName.starts_with(EndpointNamePrefix);
+bool isEndpoint(const std::string& serializedName, int type) {
+  if(type != nodeKindToInt(NODE_FUNCTION) || !serializedName.starts_with(EndpointNamePrefix)) {
+    return false;
+  }
+  const size_t verbEnd = serializedName.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", EndpointNamePrefix.size());
+  return verbEnd > EndpointNamePrefix.size() && serializedName.compare(verbEnd, 2, " /") == 0;
 }
 
-std::string isEndpointNameSql(const std::string& column) {
-  return "substr(" + column + ", 1, " + std::to_string(EndpointNamePrefix.size()) + ") == '" + EndpointNamePrefix + "'";
+std::string isEndpointSql(const std::string& node) {
+  return "(" + node + ".type == " + std::to_string(nodeKindToInt(NODE_FUNCTION)) + " AND substr(" + node +
+      ".serialized_name, 1, " + std::to_string(EndpointNamePrefix.size()) + ") == '" + EndpointNamePrefix + "' AND substr(" +
+      node + ".serialized_name, " + std::to_string(EndpointNamePrefix.size() + 1) + ") GLOB '[A-Z]* /*')";
 }
 }    // namespace
 
@@ -660,7 +668,7 @@ std::vector<Id> SqliteIndexStorage::getFileIdsReferencingSymbolsDeclaredInFiles(
       "JOIN source_location AS reference_location ON reference_location.id = reference.source_location_id "
       "WHERE declaration_location.type == " +
       std::to_string(locationTypeToInt(LOCATION_TOKEN)) + " AND declaration_location.file_node_id IN (" +
-      utility::join(utility::toStrings(fileIds), ',') + ") AND NOT " + isEndpointNameSql("node.serialized_name") + ";");
+      utility::join(utility::toStrings(fileIds), ',') + ") AND NOT " + isEndpointSql("node") + ";");
 
   std::vector<Id> referencingFileIds;
   while(!query.eof()) {
@@ -675,7 +683,7 @@ std::vector<Id> SqliteIndexStorage::getFileIdsWithEndpoints() const {
       "SELECT DISTINCT source_location.file_node_id FROM node "
       "JOIN occurrence ON occurrence.element_id = node.id "
       "JOIN source_location ON source_location.id = occurrence.source_location_id WHERE " +
-      isEndpointNameSql("node.serialized_name") + ";");
+      isEndpointSql("node") + ";");
 
   std::vector<Id> fileIds;
   while(!query.eof()) {
@@ -714,7 +722,7 @@ std::vector<std::string> SqliteIndexStorage::getDeclarationsInFile(Id fileId) co
       std::to_string(locationTypeToInt(LOCATION_SIGNATURE)) + ");");
   while(!query.eof()) {
     const std::string serializedName = query.getStringField(0, "");
-    if(!isAnonymous(serializedName) && !isEndpointName(serializedName)) {
+    if(!isAnonymous(serializedName) && !isEndpoint(serializedName, query.getIntField(1, 0))) {
       const std::string symbol = std::to_string(query.getIntField(1, 0)) + '\t' + std::to_string(query.getIntField(2, 0)) + '\t' +
           std::to_string(query.getIntField(3, 0)) + '\t' + serializedName;
       const int startLine = query.getIntField(5, 0);

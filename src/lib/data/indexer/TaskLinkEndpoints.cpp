@@ -1,7 +1,9 @@
 #include "TaskLinkEndpoints.h"
 
 #include <format>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "Blackboard.h"
 #include "DialogView.h"
@@ -25,6 +27,9 @@ TaskLinkEndpoints::TaskLinkEndpoints(FilePath databaseFilePath,
     , mOnlyIfDependentFilesCleared(onlyIfDependentFilesCleared)
     , mDialogView(std::move(dialogView)) {}
 
+TaskLinkEndpoints::TaskLinkEndpoints(FilePath databaseFilePath, std::shared_ptr<DialogView> dialogView)
+    : TaskLinkEndpoints(std::move(databaseFilePath), {}, {}, {}, false, std::move(dialogView)) {}
+
 void TaskLinkEndpoints::doEnter(std::shared_ptr<Blackboard> /*blackboard*/) {}
 
 Task::TaskState TaskLinkEndpoints::doUpdate(std::shared_ptr<Blackboard> blackboard) {
@@ -34,22 +39,27 @@ Task::TaskState TaskLinkEndpoints::doUpdate(std::shared_ptr<Blackboard> blackboa
     return STATE_SUCCESS;
   }
 
+  bool interruptedIndexing = false;
+  blackboard->get("interrupted_indexing", interruptedIndexing);
+  if(interruptedIndexing) {
+    // Whatever the links' files lost stays unlinked until a refresh indexes them again; no link is guessed meanwhile.
+    MessageStatus(L"Endpoint linking skipped: indexing was interrupted").dispatch();
+    return STATE_SUCCESS;
+  }
+
+  std::vector<std::wstring> arguments{ResourcePaths::getEndpointLinkerFilePath().wstr(), L"--db", mDatabaseFilePath.wstr()};
+  if(mHttpCallsFilePath.empty()) {
+    arguments.emplace_back(L"--remove");
+  } else {
+    arguments.insert(
+        arguments.end(),
+        {L"--http-calls", mHttpCallsFilePath.wstr(), L"--project", mTypeScriptProjectPath.wstr(), L"--log", mLogFilePath.wstr()});
+  }
+
   const TimeStamp start = TimeStamp::now();
   mDialogView->showUnknownProgressDialog(L"Finish Indexing", L"Linking HTTP endpoints");
-  const utility::ProcessOutput out = utility::executeProcess(L"node",
-                                                             {ResourcePaths::getEndpointLinkerFilePath().wstr(),
-                                                              L"--db",
-                                                              mDatabaseFilePath.wstr(),
-                                                              L"--http-calls",
-                                                              mHttpCallsFilePath.wstr(),
-                                                              L"--project",
-                                                              mTypeScriptProjectPath.wstr(),
-                                                              L"--log",
-                                                              mLogFilePath.wstr()},
-                                                             mTypeScriptProjectPath,
-                                                             false,
-                                                             -1,
-                                                             true);
+  const utility::ProcessOutput out = utility::executeProcess(
+      L"node", arguments, mHttpCallsFilePath.empty() ? mDatabaseFilePath.getParentDirectory() : mTypeScriptProjectPath, false, -1, true);
   mDialogView->hideUnknownProgressDialog();
   if(!out.error.empty()) {
     // Without Node the TypeScript step was skipped too, and says so.

@@ -637,11 +637,13 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
 
   // Once both sides are indexed and before the index is finished: the links between them. Files referencing the
   // changed ones are cleared only if the second pass above finds that it has to.
+  bool hasTypeScriptGroup = false;
   for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
     const auto typeScriptGroup = std::dynamic_pointer_cast<SourceGroupTypeScript>(sourceGroup);
     if(!typeScriptGroup || SOURCE_GROUP_STATUS_ENABLED != typeScriptGroup->getStatus()) {
       continue;
     }
+    hasTypeScriptGroup = true;
     const bool link = RefreshMode::AllFiles == info.mode ||
         changesEndpointLayer(utility::concat(info.filesToClear, info.nonIndexedFilesToClear),
                              info.filesToIndex,
@@ -657,6 +659,10 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
                                               dialogView));
     }
     break;
+  }
+  // The group was removed or disabled, and the refresh keeps the index: its links go too.
+  if(!hasTypeScriptGroup && RefreshMode::AllFiles != info.mode && !m_storage->getFilePathsWithEndpoints().empty()) {
+    taskSequential->addTask(std::make_shared<TaskLinkEndpoints>(m_settings->getTempDBFilePath(), dialogView));
   }
 
   // TODO(Hussein): Create Tasks using factory pattern

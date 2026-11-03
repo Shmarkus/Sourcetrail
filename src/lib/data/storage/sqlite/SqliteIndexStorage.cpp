@@ -31,7 +31,8 @@ size_t SqliteIndexStorage::getStorageVersion() {
 
 SqliteIndexStorage::SqliteIndexStorage() = default;
 
-SqliteIndexStorage::SqliteIndexStorage(const FilePath& dbFilePath) : SqliteStorage(dbFilePath.getCanonical()) {}
+SqliteIndexStorage::SqliteIndexStorage(const FilePath& dbFilePath, bool readOnly)
+    : SqliteStorage(dbFilePath.getCanonical(), readOnly) {}
 
 size_t SqliteIndexStorage::getStaticVersion() const {
   return sStorageVersion;

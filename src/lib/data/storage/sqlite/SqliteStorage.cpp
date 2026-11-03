@@ -16,13 +16,17 @@ SqliteStorage::SqliteStorage() {
   executeStatement("PRAGMA foreign_keys=ON;");
 }
 
-SqliteStorage::SqliteStorage(const FilePath& dbFilePath) : m_dbFilePath(dbFilePath.getCanonical()) {
-  if(!m_dbFilePath.getParentDirectory().empty() && !m_dbFilePath.getParentDirectory().exists()) {
+SqliteStorage::SqliteStorage(const FilePath& dbFilePath, bool readOnly) : m_dbFilePath(dbFilePath.getCanonical()) {
+  if(!readOnly && !m_dbFilePath.getParentDirectory().empty() && !m_dbFilePath.getParentDirectory().exists()) {
     FileSystem::createDirectory(m_dbFilePath.getParentDirectory());
   }
 
   try {
-    m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
+    if(readOnly) {
+      m_database.openReadOnly(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
+    } else {
+      m_database.open(utility::encodeToUtf8(m_dbFilePath.wstr()).c_str());
+    }
   } catch(CppSQLite3Exception& e) {
     LOG_ERROR(L"Failed to load database file \"" + m_dbFilePath.wstr() + L"\" with message: " +
               utility::decodeFromUtf8(e.errorMessage()));

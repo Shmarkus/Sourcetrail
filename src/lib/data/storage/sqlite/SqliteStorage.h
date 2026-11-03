@@ -27,9 +27,10 @@ public:
    * @brief Construct a new SqliteStorage object
    *
    * This constructor is used for SQLite databases that are stored on the file system.
+   * @param readOnly Opens an existing database without write access and creates no directory.
    * @throw CppSQLite3Exception
    */
-  explicit SqliteStorage(const FilePath& dbFilePath);
+  explicit SqliteStorage(const FilePath& dbFilePath, bool readOnly = false);
 
   /**
    * @brief Destroy the SqliteStorage object

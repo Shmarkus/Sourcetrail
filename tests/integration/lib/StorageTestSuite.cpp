@@ -3,6 +3,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -12,12 +13,14 @@
 
 #include "AccessKind.h"
 #include "Blackboard.h"
+#include "CppSQLite3.h"
 #include "DefinitionKind.h"
 #include "FileSystem.h"
 #include "Graph.h"
 #include "IntermediateStorage.h"
 #include "LocationType.h"
 #include "MockedMessageQueue.hpp"
+#include "NodeTypeSet.h"
 #include "ParseLocation.h"
 #include "PersistentStorage.h"
 #include "TaskIndexIfDeclarationsChanged.h"
@@ -629,5 +632,40 @@ TEST(Storage, optimizesMemoryWithoutCompactingWhenAsked) {
   }
   FileSystem::remove(indexDbPath);
   FileSystem::remove(bookmarkDbPath);
+}
+
+// master 11b50d15d: st reads the index through a read-only connection.
+TEST(Storage, readOnlyStorageDoesNotCreateBookmarksOrAllowDatabaseWrites) {
+  const FilePath indexDbPath(L"data/StorageTestSuite/readOnly.srctrldb");
+  const FilePath bookmarkDbPath(L"data/StorageTestSuite/readOnly.srctrlbm");
+  FileSystem::createDirectory(indexDbPath.getParentDirectory());
+  FileSystem::remove(indexDbPath);
+  FileSystem::remove(bookmarkDbPath);
+  const auto readAll = [](const FilePath& path) {
+    std::ifstream in(path.str(), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  };
+  {
+    PersistentStorage storage(indexDbPath, FilePath(L":memory:"));
+    storage.setup();
+    storage.updateVersion();
+    addJavaSymbol(storage, NODE_METHOD, L"readOnlyMethod");
+  }
+  const std::string original = readAll(indexDbPath);
+  ASSERT_FALSE(original.empty());
+  {
+    PersistentStorage storage(indexDbPath, bookmarkDbPath, true);
+    storage.buildCaches();
+    const auto matches = storage.getAutocompletionSymbolMatches(L"readOnlyMethod", NodeTypeSet::all(), 51, 0);
+    ASSERT_EQ(1U, matches.size());
+    ASSERT_EQ(1U, matches.front().tokenIds.size());
+  }
+  CppSQLite3DB db;
+  db.openReadOnly(indexDbPath.str().c_str());
+  ASSERT_THROW(db.execDML("DELETE FROM node"), CppSQLite3Exception);
+  db.close();
+  ASSERT_FALSE(bookmarkDbPath.exists());
+  ASSERT_EQ(original, readAll(indexDbPath));
+  FileSystem::remove(indexDbPath);
 }
 }    // namespace

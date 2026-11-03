@@ -106,8 +106,9 @@ public:
   /**
    * @brief Constructor that initializes a SQLite database at the specified file path
    * @param dbFilePath Path to the SQLite database file
+   * @param readOnly Opens the database without write access
    */
-  explicit SqliteIndexStorage(const FilePath& dbFilePath);
+  explicit SqliteIndexStorage(const FilePath& dbFilePath, bool readOnly = false);
 
   /**
    * @brief Returns the static version of the storage

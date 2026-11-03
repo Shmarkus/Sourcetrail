@@ -16,7 +16,8 @@ class PersistentStorage
     : public Storage
     , public StorageAccess {
 public:
-  PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath);
+  // A read-only storage opens the index without write access and keeps bookmarks in memory.
+  PersistentStorage(const FilePath& dbPath, const FilePath& bookmarkPath, bool readOnly = false);
 
   std::pair<Id, bool> addNode(const StorageNodeData& data) override;
   std::vector<Id> addNodes(const std::vector<StorageNode>& nodes) override;

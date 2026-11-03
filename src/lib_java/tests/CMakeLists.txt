@@ -1,5 +1,6 @@
 # ${CMAKE_SOURCE_DIR}/src/lib_java/tests/CMakeLists.txt
 set(java_test_names
+    DirectorySyncTestSuite
     GradleCacheTestSuite
     JavaIndexSampleProjectsTestSuite
     JavaLoggingTestSuite

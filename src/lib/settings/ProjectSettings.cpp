@@ -180,7 +180,7 @@ std::vector<std::shared_ptr<SourceGroupSettings>> ProjectSettings::getAllSourceG
       settings->loadSettings(m_config.get());
       allSettings.push_back(settings);
     } else {
-      LOG_WARNING("Sourcegroup with id \"" + id + "\" could not be loaded.");
+      LOG_WARNING("Sourcegroup with id \"{}\" could not be loaded.", id);
     }
   }
 
@@ -298,11 +298,11 @@ SettingsMigrator ProjectSettings::getMigrations() const {
                 settings, sourceGroupKey + "/maven/project_file_path", "");
             const std::string gradleProjectFilePath = migration->getValueFromSettings<std::string>(
                 settings, sourceGroupKey + "/gradle/project_file_path", "");
-            // the fork let the Gradle check overwrite a Maven match with "empty"; a Maven project stays Maven here
-            if(!mavenProjectFilePath.empty()) {
-              type = SOURCE_GROUP_JAVA_MAVEN;
-            } else if(!gradleProjectFilePath.empty()) {
+            // Gradle wins over Maven as in the fork, but a Maven match is no longer overwritten with "empty"
+            if(!gradleProjectFilePath.empty()) {
               type = SOURCE_GROUP_JAVA_GRADLE;
+            } else if(!mavenProjectFilePath.empty()) {
+              type = SOURCE_GROUP_JAVA_MAVEN;
             } else {
               type = SOURCE_GROUP_JAVA_EMPTY;
             }

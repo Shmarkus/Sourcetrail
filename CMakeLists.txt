@@ -5,7 +5,7 @@ include(cmake/version.cmake)
 project(
   Sourcetrail
   DESCRIPTION "interactive source explorer"
-  VERSION ${VERSION_STRING}
+  VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
   HOMEPAGE_URL "opensourcesourcetrail.github.io"
   LANGUAGES C CXX)
 #---------------------------------------------------------------------------------------------------------------------------------

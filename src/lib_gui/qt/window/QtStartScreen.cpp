@@ -7,6 +7,7 @@
 #include <range/v3/range/conversion.hpp>
 #include <range/v3/view/transform.hpp>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QHBoxLayout>
@@ -22,7 +23,6 @@
 #include "RecentItemModel.hpp"
 #include "UserPaths.h"
 #include "utilityQt.h"
-#include "Version.h"
 
 namespace {
 
@@ -153,7 +153,7 @@ void QtStartScreen::createVersionAndGithub(QHBoxLayout* layout) {
   layout->addLayout(vBoxLayout, 3);
 
   // Create a Version label
-  auto* pVersionLabel = new QLabel(fmt::format("Version {}", Version::getApplicationVersion().toString()).c_str(), this);
+  auto* pVersionLabel = new QLabel(fmt::format("Version {}", QCoreApplication::applicationVersion().toStdString()).c_str(), this);
   pVersionLabel->setObjectName(QStringLiteral("boldLabel"));
   vBoxLayout->addWidget(pVersionLabel);
 

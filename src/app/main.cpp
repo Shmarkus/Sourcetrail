@@ -204,9 +204,10 @@ int main(int argc, char* argv[]) {
 #endif
 
   const Version version(VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
-  QApplication::setApplicationVersion(version.toString().c_str());
+  // The about dialog and the start screen show this string, suffix included.
+  QApplication::setApplicationVersion(QStringLiteral(VERSION_STRING));
 
-  commandline::CommandLineParser commandLineParser(version.toString());
+  commandline::CommandLineParser commandLineParser(VERSION_STRING);
   std::vector<std::string> args;
   if(argc > 1) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)

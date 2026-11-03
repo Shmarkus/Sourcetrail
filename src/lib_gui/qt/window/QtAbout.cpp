@@ -1,5 +1,6 @@
 #include "QtAbout.h"
 
+#include <QCoreApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -11,7 +12,6 @@
 #include "SqliteIndexStorage.h"
 #include "utilityApp.h"
 #include "utilityQt.h"
-#include "Version.h"
 
 QtAbout::QtAbout(QWidget* parent) : QtWindow{false, parent} {}
 
@@ -41,7 +41,7 @@ void QtAbout::setupAbout() {
 
   {
     auto* versionLabel = new QLabel{
-        ("Version " + Version::getApplicationVersion().toString() + " - " +
+        ("Version " + QCoreApplication::applicationVersion().toStdString() + " - " +
          std::string(utility::getApplicationArchitectureType() == ApplicationArchitectureType::X86_32 ? "32" : "64") + " bit")
             .c_str(),
         this};

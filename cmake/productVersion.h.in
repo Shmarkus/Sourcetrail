@@ -3,3 +3,5 @@
 #define VERSION_MAJOR @VERSION_MAJOR@
 #define VERSION_MINOR @VERSION_MINOR@
 #define VERSION_PATCH @VERSION_PATCH@
+// The tag as released, with its suffix (2.0.0-fork); the numbers above drop it.
+#define VERSION_STRING "@VERSION_STRING@"

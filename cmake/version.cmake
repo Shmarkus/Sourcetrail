@@ -1,4 +1,7 @@
 # ${CMAKE_SOURCE_DIR}/cmake/version.cmake
+# VERSION_STRING keeps a tag's suffix (v2.0.0-fork gives "2.0.0-fork") for display; the numeric parts drop it.
+include(${CMAKE_CURRENT_LIST_DIR}/versionParts.cmake)
+
 if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
   find_package(Git)
 
@@ -28,24 +31,7 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
     set(VERSION_PATCH "0")
     set(VERSION_STRING "1.0.0")
   else()
-    string(
-      REGEX
-      REPLACE "^([0-9]+)\\..*"
-              "\\1"
-              VERSION_MAJOR
-              "${VERSION_STRING}")
-    string(
-      REGEX
-      REPLACE "^[0-9]+\\.([0-9]+).*"
-              "\\1"
-              VERSION_MINOR
-              "${VERSION_STRING}")
-    string(
-      REGEX
-      REPLACE "^[0-9]+\\.[0-9]+.([0-9]+)"
-              "\\1"
-              VERSION_PATCH
-              "${VERSION_STRING}")
+    sourcetrail_version_parts("${VERSION_STRING}")
   endif()
 endif()
 

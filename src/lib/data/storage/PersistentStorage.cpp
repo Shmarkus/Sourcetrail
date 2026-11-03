@@ -266,6 +266,14 @@ void PersistentStorage::setProjectSettingsText(std::string text) {
   m_sqliteIndexStorage.setProjectSettingsText(text);
 }
 
+std::string PersistentStorage::getSourceGroupInputs(const std::string& sourceGroupId) const {
+  return m_sqliteIndexStorage.getSourceGroupInputs(sourceGroupId);
+}
+
+void PersistentStorage::setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs) {
+  m_sqliteIndexStorage.setSourceGroupInputs(sourceGroupId, inputs);
+}
+
 void PersistentStorage::setup() {
   m_sqliteIndexStorage.setup();
   m_sqliteBookmarkStorage.setup();

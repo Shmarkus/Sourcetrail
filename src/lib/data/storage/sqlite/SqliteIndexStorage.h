@@ -135,6 +135,20 @@ public:
   void setProjectSettingsText(const std::string& text);
 
   /**
+   * @brief Returns what a source group indexed as a whole read when it was last indexed
+   * @param sourceGroupId The source group's id
+   * @return The group's inputs record, empty if there is none
+   */
+  std::string getSourceGroupInputs(const std::string& sourceGroupId) const;
+
+  /**
+   * @brief Sets what a source group indexed as a whole read when it was indexed
+   * @param sourceGroupId The source group's id
+   * @param inputs The group's inputs record, empty to drop it
+   */
+  void setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs);
+
+  /**
    * @brief Adds a node to the storage
    * @param data The data to add
    * @return The ID of the added node

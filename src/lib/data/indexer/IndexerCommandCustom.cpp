@@ -76,6 +76,29 @@ bool IndexerCommandCustom::getRunInParallel() const {
   return m_runInParallel;
 }
 
+void IndexerCommandCustom::setSkippedOn(const std::wstring& label, const std::set<int>& exitCodes) {
+  m_skippedLabel = label;
+  m_skippedExitCodes = exitCodes;
+}
+
+bool IndexerCommandCustom::isSkippedOn(int exitCode, bool started) const {
+  return !m_skippedLabel.empty() && (!started || m_skippedExitCodes.contains(exitCode));
+}
+
+const std::wstring& IndexerCommandCustom::getSkippedLabel() const {
+  return m_skippedLabel;
+}
+
+void IndexerCommandCustom::setFinishedHandler(FinishedHandler handler) {
+  m_finishedHandler = std::move(handler);
+}
+
+void IndexerCommandCustom::finished(bool succeeded, PersistentStorage& storage) const {
+  if(m_finishedHandler) {
+    m_finishedHandler(succeeded, storage);
+  }
+}
+
 QJsonObject IndexerCommandCustom::doSerialize() const {
   QJsonObject jsonObject = IndexerCommand::doSerialize();
 

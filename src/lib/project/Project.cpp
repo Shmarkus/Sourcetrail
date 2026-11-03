@@ -631,7 +631,7 @@ std::pair<std::unique_ptr<CombinedIndexerCommandProvider>, std::unique_ptr<Combi
   auto customIndexerCommandProvider = std::make_unique<CombinedIndexerCommandProvider>();
   for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
     if(SOURCE_GROUP_STATUS_ENABLED == sourceGroup->getStatus()) {
-      if(SOURCE_GROUP_CUSTOM_COMMAND == sourceGroup->getType()) {
+      if(SOURCE_GROUP_CUSTOM_COMMAND == sourceGroup->getType() || SOURCE_GROUP_TYPESCRIPT == sourceGroup->getType()) {
         customIndexerCommandProvider->addProvider(sourceGroup->getIndexerCommandProvider(info));
       } else {
         indexerCommandProvider->addProvider(sourceGroup->getIndexerCommandProvider(info));

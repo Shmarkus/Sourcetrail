@@ -82,6 +82,8 @@ public:
   bool isIncompatible() const;
   std::string getProjectSettingsText() const;
   void setProjectSettingsText(std::string text);
+  std::string getSourceGroupInputs(const std::string& sourceGroupId) const;
+  void setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs);
 
   void setup();
   void updateVersion();

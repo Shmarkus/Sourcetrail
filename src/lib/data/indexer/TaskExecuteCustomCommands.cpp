@@ -221,8 +221,17 @@ void TaskExecuteCustomCommands::runIndexerCommand(const std::shared_ptr<IndexerC
       }
     }
 
-    if(out.exitCode == 0 && out.error.empty()) {
+    const bool succeeded = out.exitCode == 0 && out.error.empty();
+    if(succeeded) {
       LOG_INFO(L"Process returned successfully.");
+    } else if(indexerCommand->isSkippedOn(out.exitCode, out.error.empty())) {
+      // The command's own message: its output, or why it could not be started.
+      const std::wstring message = out.error.empty() ?
+          out.output :
+          std::format(L"cannot run \"{}\": {}", indexerCommand->getCommand(), out.error);
+      const std::wstring statusText = std::format(L"{} skipped: {}", indexerCommand->getSkippedLabel(), message);
+      LOG_WARNING(statusText);
+      MessageStatus(statusText).dispatch();
     } else {
       std::wstring statusText = std::format(
           L"command \"{} {}\" returned", indexerCommand->getCommand(), utility::join(arguments, L" "));
@@ -237,6 +246,9 @@ void TaskExecuteCustomCommands::runIndexerCommand(const std::shared_ptr<IndexerC
       LOG_ERROR(statusText);
       MessageShowStatus().dispatch();
       MessageStatus(statusText, true, false, true).dispatch();
+    }
+    if(storage) {
+      indexerCommand->finished(succeeded, *storage);
     }
 
     indexedSourceFileCount++;

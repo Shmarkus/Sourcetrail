@@ -12,4 +12,5 @@ public:
   static FilePath getLicenseDirectoryPath();
   static FilePath getCxxCompilerHeaderDirectoryPath();
   static FilePath getJavaDirectoryPath();
+  static FilePath getTypeScriptIndexerFilePath();
 };

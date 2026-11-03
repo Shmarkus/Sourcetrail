@@ -23,4 +23,5 @@ TEST_F(ResourcePathsFix, goodCase) {
   ASSERT_EQ(tempDir / "data/gui/", ResourcePaths::getGuiDirectoryPath().str());
   ASSERT_EQ(tempDir / "data/license/", ResourcePaths::getLicenseDirectoryPath().str());
   ASSERT_EQ(tempDir / "data/cxx/include/", ResourcePaths::getCxxCompilerHeaderDirectoryPath().str());
+  ASSERT_EQ(tempDir / "data/ts-indexer/index.mjs", ResourcePaths::getTypeScriptIndexerFilePath().str());
 }

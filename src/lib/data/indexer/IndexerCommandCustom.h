@@ -1,10 +1,14 @@
 #ifndef INDEXER_COMMAND_CUSTOM_H
 #define INDEXER_COMMAND_CUSTOM_H
 
+#include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "IndexerCommand.h"
+
+class PersistentStorage;
 
 class IndexerCommandCustom : public IndexerCommand {
 public:
@@ -37,6 +41,17 @@ public:
   std::vector<std::wstring> getArguments() const;
   bool getRunInParallel() const;
 
+  // A command that exits with one of `exitCodes`, or cannot be started, did not apply to the project (a missing
+  // prerequisite, an unsupported layout): it is reported as "<label> skipped: <message>", not as a failed command.
+  void setSkippedOn(const std::wstring& label, const std::set<int>& exitCodes);
+  bool isSkippedOn(int exitCode, bool started) const;
+  const std::wstring& getSkippedLabel() const;
+
+  // Called once the command ran, with whether it succeeded and the storage it wrote to.
+  using FinishedHandler = std::function<void(bool succeeded, PersistentStorage& storage)>;
+  void setFinishedHandler(FinishedHandler handler);
+  void finished(bool succeeded, PersistentStorage& storage) const;
+
 protected:
   QJsonObject doSerialize() const override;
 
@@ -50,6 +65,9 @@ private:
   FilePath m_databaseFilePath;
   std::wstring m_databaseVersion;
   bool m_runInParallel;
+  std::wstring m_skippedLabel;
+  std::set<int> m_skippedExitCodes;
+  FinishedHandler m_finishedHandler;
 };
 
 #endif    // INDEXER_COMMAND_CXXL_H

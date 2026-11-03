@@ -87,6 +87,20 @@ private:
   const std::set<FilePath> m_allFilePaths;
 };
 
+// A group indexed as a whole: one source file (its config) and the files its indexer writes.
+class WholeSourceGroupTest : public SourceGroupTest {
+public:
+  WholeSourceGroupTest(const FilePath& configFilePath, std::set<FilePath> filePaths, std::string inputs)
+      : SourceGroupTest({configFilePath}, std::move(filePaths)), m_inputs(std::move(inputs)) {}
+
+  std::string getInputsRecord() const override {
+    return m_inputs;
+  }
+
+private:
+  const std::string m_inputs;
+};
+
 void cleanup() {
   FileSystem::remove(m_indexDbPath);
   FileSystem::remove(m_bookmarkDbPath);
@@ -917,6 +931,97 @@ TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReindexesFilesReferencingAR
     EXPECT_EQ(std::set<FilePath>({callerFilePath}), refreshInfo.filesToIndex);
     EXPECT_TRUE(refreshInfo.filesToCompareDeclarations.empty());
     EXPECT_TRUE(refreshInfo.dependentFilesToClear.empty());
+  }
+  cleanup();
+}
+
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesLeavesAnUnchangedWholeGroupAlone) {
+  cleanup();
+  {
+    const FilePath configFilePath = m_sourceFolder.getConcatenated(L"tsconfig.json");
+    const FilePath moduleFilePath = m_sourceFolder.getConcatenated(L"module.ts");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(std::make_shared<WholeSourceGroupTest>(configFilePath, std::set<FilePath>{moduleFilePath}, "inputs"));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+    addVeryNewFileToStorage(moduleFilePath, true, true, storage);
+    addFileToFileSystem(moduleFilePath);
+    addFileToFileSystem(configFilePath);
+    storage->setSourceGroupInputs("TEST_ID", "inputs");
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+
+    EXPECT_TRUE(refreshInfo.filesToClear.empty());
+    EXPECT_TRUE(refreshInfo.nonIndexedFilesToClear.empty());
+    EXPECT_TRUE(refreshInfo.filesToIndex.empty());
+  }
+  cleanup();
+}
+
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReimportsAWholeGroupWhoseInputsChanged) {
+  cleanup();
+  {
+    const FilePath configFilePath = m_sourceFolder.getConcatenated(L"tsconfig.json");
+    const FilePath moduleFilePath = m_sourceFolder.getConcatenated(L"module.ts");
+    const FilePath otherFilePath = m_sourceFolder.getConcatenated(L"Other.java");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(
+        std::make_shared<WholeSourceGroupTest>(configFilePath, std::set<FilePath>{moduleFilePath}, "new inputs"));
+    sourceGroups.push_back(std::make_shared<SourceGroupTest>(std::set<FilePath>{otherFilePath}));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+    addVeryNewFileToStorage(moduleFilePath, true, true, storage);
+    addFileToFileSystem(moduleFilePath);
+    addFileToFileSystem(configFilePath);
+    addVeryNewFileToStorage(otherFilePath, true, true, storage);
+    addFileToFileSystem(otherFilePath);
+    storage->setSourceGroupInputs("TEST_ID", "old inputs");
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+
+    EXPECT_EQ(std::set<FilePath>({moduleFilePath}), refreshInfo.filesToClear);
+    EXPECT_EQ(std::set<FilePath>({configFilePath}), refreshInfo.filesToIndex);
+  }
+  cleanup();
+}
+
+// An edit to one of the group's files re-imports all of them at once, with no second pass over the files that
+// reference it.
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReimportsAWholeGroupWithAnEditedFile) {
+  cleanup();
+  {
+    const FilePath configFilePath = m_sourceFolder.getConcatenated(L"tsconfig.json");
+    const FilePath editedFilePath = m_sourceFolder.getConcatenated(L"edited.ts");
+    const FilePath callerFilePath = m_sourceFolder.getConcatenated(L"caller.ts");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(
+        std::make_shared<WholeSourceGroupTest>(configFilePath, std::set<FilePath>{editedFilePath, callerFilePath}, "inputs"));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+    const Id editedFileId = addVeryOldFileToStorage(editedFilePath, true, true, storage);
+    addFileToFileSystem(editedFilePath);
+    const Id callerFileId = addVeryNewFileToStorage(callerFilePath, true, true, storage);
+    addFileToFileSystem(callerFilePath);
+    addSymbolReference(callerFileId, editedFileId, storage);
+    addFileToFileSystem(configFilePath);
+    storage->setSourceGroupInputs("TEST_ID", "inputs");
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+
+    EXPECT_EQ(std::set<FilePath>({editedFilePath, callerFilePath}), refreshInfo.filesToClear);
+    EXPECT_EQ(std::set<FilePath>({configFilePath}), refreshInfo.filesToIndex);
+    EXPECT_TRUE(refreshInfo.filesToCompareDeclarations.empty());
+    EXPECT_TRUE(refreshInfo.dependentFilesToClear.empty());
+    EXPECT_TRUE(refreshInfo.dependentFilesToIndex.empty());
   }
   cleanup();
 }

@@ -34,3 +34,7 @@ FilePath ResourcePaths::getCxxCompilerHeaderDirectoryPath() {
 FilePath ResourcePaths::getJavaDirectoryPath() {
   return AppPath::getSharedDataDirectoryPath().concatenate(L"data/java/");
 }
+
+FilePath ResourcePaths::getTypeScriptIndexerFilePath() {
+  return AppPath::getSharedDataDirectoryPath().concatenate(L"data/ts-indexer/index.mjs");
+}

@@ -783,6 +783,7 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
   case SOURCE_GROUP_CUSTOM_COMMAND:
     settings = std::make_shared<SourceGroupSettingsCustomCommand>(sourceGroupId, m_projectSettings.get());
     break;
+  case SOURCE_GROUP_TYPESCRIPT:    // not offered by the wizard's source group selection
   case SOURCE_GROUP_UNKNOWN:
     break;
   }

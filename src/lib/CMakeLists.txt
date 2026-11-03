@@ -315,6 +315,8 @@ add_files(
   project/SourceGroup.h
   project/SourceGroupCustomCommand.cpp
   project/SourceGroupCustomCommand.h
+  project/SourceGroupTypeScript.cpp
+  project/SourceGroupTypeScript.h
   project/SourceGroupFactory.cpp
   project/SourceGroupFactory.h
   project/SourceGroupFactoryModule.cpp
@@ -339,6 +341,8 @@ add_files(
   settings/source_group/component/SourceGroupSettingsWithSourceExtensionsEmpty.h
   settings/source_group/component/SourceGroupSettingsWithSourcePaths.cpp
   settings/source_group/component/SourceGroupSettingsWithSourcePaths.h
+  settings/source_group/type/SourceGroupSettingsTypeScript.cpp
+  settings/source_group/type/SourceGroupSettingsTypeScript.h
   settings/source_group/type/SourceGroupSettingsUnloadable.cpp
   settings/source_group/type/SourceGroupSettingsUnloadable.h
   settings/source_group/SourceGroupSettings.cpp

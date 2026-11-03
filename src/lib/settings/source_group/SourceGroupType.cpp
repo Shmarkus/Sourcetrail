@@ -20,6 +20,8 @@ std::string sourceGroupTypeToString(SourceGroupType v) {
   case SOURCE_GROUP_JAVA_GRADLE:
     return "Java Source Group from Gradle";
 #endif
+  case SOURCE_GROUP_TYPESCRIPT:
+    return "TypeScript Source Group";
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return "Custom Command Source Group";
   case SOURCE_GROUP_UNKNOWN:
@@ -48,6 +50,8 @@ std::string sourceGroupTypeToProjectSetupString(SourceGroupType v) {
   case SOURCE_GROUP_JAVA_GRADLE:
     return "Java Source Group from Gradle";
 #endif
+  case SOURCE_GROUP_TYPESCRIPT:
+    return "TypeScript Source Group";
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return "Custom Command Source Group";
   case SOURCE_GROUP_UNKNOWN:
@@ -76,6 +80,9 @@ SourceGroupType stringToSourceGroupType(const std::string& v) {
   if(v == sourceGroupTypeToString(SOURCE_GROUP_JAVA_MAVEN)) return SOURCE_GROUP_JAVA_MAVEN;
   if(v == sourceGroupTypeToString(SOURCE_GROUP_JAVA_GRADLE)) return SOURCE_GROUP_JAVA_GRADLE;
 #endif
+  if(v == sourceGroupTypeToString(SOURCE_GROUP_TYPESCRIPT)) {
+    return SOURCE_GROUP_TYPESCRIPT;
+  }
   if(v == sourceGroupTypeToString(SOURCE_GROUP_CUSTOM_COMMAND)) {
     return SOURCE_GROUP_CUSTOM_COMMAND;
   }

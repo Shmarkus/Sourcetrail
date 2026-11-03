@@ -1,5 +1,7 @@
 #include "RefreshInfoGenerator.h"
 
+#include <algorithm>
+
 #include "FileInfo.h"
 #include "FileSystem.h"
 #include "PersistentStorage.h"
@@ -15,6 +17,67 @@ std::set<FilePath> subtract(std::set<FilePath> paths, const std::set<FilePath>& 
     paths.erase(path);
   }
   return paths;
+}
+
+// A group indexed as a whole (see SourceGroup::getInputsRecord) is cleared and indexed in full when its inputs changed
+// or any of its files is to be cleared, and left alone otherwise. Its files never take part in the second pass that
+// compares declarations: they are not indexed one by one.
+void applyGroupsIndexedAsWhole(RefreshInfo& info,
+                               const std::vector<std::shared_ptr<SourceGroup>>& sourceGroups,
+                               const std::shared_ptr<const PersistentStorage>& storage) {
+  std::vector<std::pair<std::shared_ptr<SourceGroup>, std::string>> wholeGroups;
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : sourceGroups) {
+    if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED) {
+      if(std::string inputs = sourceGroup->getInputsRecord(); !inputs.empty()) {
+        wholeGroups.emplace_back(sourceGroup, std::move(inputs));
+      }
+    }
+  }
+  if(wholeGroups.empty()) {
+    return;
+  }
+
+  std::set<FilePath> storedFilePaths;
+  for(const FileInfo& fileInfo : storage->getFileInfoForAllFiles()) {
+    storedFilePaths.insert(fileInfo.path);
+  }
+
+  for(const auto& [sourceGroup, inputs] : wholeGroups) {
+    const std::set<FilePath> groupFilePaths = sourceGroup->filterToContainedFilePaths(storedFilePaths);
+    const std::set<FilePath> sourceFilePaths = sourceGroup->getAllSourceFilePaths();
+    const auto toClear = [&info](const FilePath& path) {
+      return info.filesToClear.contains(path) || info.nonIndexedFilesToClear.contains(path);
+    };
+    const bool changed = inputs != storage->getSourceGroupInputs(sourceGroup->getId()) ||
+        std::ranges::any_of(groupFilePaths, toClear);
+
+    info.filesToCompareDeclarations = subtract(info.filesToCompareDeclarations, groupFilePaths);
+    info.dependentFilesToClear = subtract(info.dependentFilesToClear, groupFilePaths);
+    info.dependentFilesToIndex = subtract(subtract(info.dependentFilesToIndex, groupFilePaths), sourceFilePaths);
+    if(changed) {
+      for(const FilePath& path : groupFilePaths) {
+        if(storage->getFilePathIndexed(path)) {
+          info.filesToClear.insert(path);
+        } else {
+          info.nonIndexedFilesToClear.insert(path);
+        }
+      }
+      for(const FilePath& path : sourceFilePaths) {
+        if(path.exists()) {
+          info.filesToIndex.insert(path);
+        }
+      }
+    } else {
+      info.filesToClear = subtract(info.filesToClear, groupFilePaths);
+      info.nonIndexedFilesToClear = subtract(info.nonIndexedFilesToClear, groupFilePaths);
+      info.filesToIndex = subtract(info.filesToIndex, sourceFilePaths);
+    }
+  }
+
+  if(info.dependentFilesToClear.empty()) {
+    info.filesToCompareDeclarations.clear();
+    info.dependentFilesToIndex.clear();
+  }
 }
 }    // namespace
 
@@ -143,6 +206,7 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(const std::vecto
     }
   }
 
+  applyGroupsIndexedAsWhole(info, sourceGroups, storage);
   return info;
 }
 
@@ -188,6 +252,7 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForIncompleteFiles(const std::ve
     }
   }
 
+  applyGroupsIndexedAsWhole(info, sourceGroups, storage);
   return info;
 }
 

@@ -36,3 +36,25 @@ foreach(test_name IN LISTS test_lib_names)
     WORKING_DIRECTORY
     "${CMAKE_BINARY_DIR}/test/")
 endforeach()
+
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  # Runs the built Sourcetrail on copies of the Angular + Spring fixture; the Java half needs a JDK 21 JAVA_HOME.
+  add_sourcetrail_test(
+    NAME
+    TypeScriptSourceGroupTestSuite
+    SOURCES
+    TypeScriptSourceGroupTestSuite.cpp
+    DEPS
+    GTest::gtest
+    Qt6::Core
+    Qt6::Sql
+    Sourcetrail::gtest_main
+    TEST_PREFIX
+    "integration.lib."
+    WORKING_DIRECTORY
+    "${CMAKE_BINARY_DIR}/test/")
+  target_compile_definitions(
+    TypeScriptSourceGroupTestSuite PRIVATE SOURCETRAIL_APP_PATH="$<TARGET_FILE:Sourcetrail>"
+                                           TS_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring")
+  add_dependencies(TypeScriptSourceGroupTestSuite Sourcetrail)
+endif()

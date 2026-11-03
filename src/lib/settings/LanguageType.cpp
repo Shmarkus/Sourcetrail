@@ -58,6 +58,7 @@ LanguageType getLanguageTypeForSourceGroupType(SourceGroupType type) {
   case SOURCE_GROUP_JAVA_GRADLE:
     return LANGUAGE_JAVA;
 #endif
+  case SOURCE_GROUP_TYPESCRIPT:
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return LANGUAGE_CUSTOM;
   default:

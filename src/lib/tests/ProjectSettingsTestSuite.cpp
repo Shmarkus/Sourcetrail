@@ -3,6 +3,7 @@
 #include "language_packages.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettings.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithSourcePaths.h"
 #if BUILD_JAVA_LANGUAGE_PACKAGE
 #  include "SourceGroupSettingsJavaMaven.h"
@@ -53,6 +54,29 @@ TEST(ProjectSettings, loadSourcePathFromFile) {
   EXPECT_EQ(2, paths.size());
   EXPECT_EQ(paths[0].wstr(), L"src");
   EXPECT_EQ(paths[1].wstr(), L"test");
+}
+
+TEST(ProjectSettings, loadsAndSavesTypeScriptSourceGroup) {
+  ProjectSettings settings;
+  ASSERT_TRUE(
+      settings.loadFromString("<config><version>8</version><source_groups><source_group_ts><name>TypeScript</name>"
+                              "<type>TypeScript Source Group</type><status>enabled</status>"
+                              "<typescript><tsconfig_path>web/tsconfig.json</tsconfig_path></typescript>"
+                              "</source_group_ts></source_groups></config>"));
+
+  const auto allSourceGroupSettings = settings.getAllSourceGroupSettings();
+  ASSERT_EQ(1, allSourceGroupSettings.size());
+  const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(allSourceGroupSettings.front());
+  ASSERT_TRUE(typeScript);
+  EXPECT_EQ(SOURCE_GROUP_TYPESCRIPT, typeScript->getType());
+  EXPECT_EQ(L"web/tsconfig.json", typeScript->getTsconfigPath().wstr());
+
+  typeScript->setTsconfigPath(FilePath(L"tsconfig.json"));
+  settings.setAllSourceGroupSettings({typeScript});
+  const auto saved = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(settings.getAllSourceGroupSettings().front());
+  ASSERT_TRUE(saved);
+  EXPECT_EQ(L"tsconfig.json", saved->getTsconfigPath().wstr());
+  EXPECT_EQ("TypeScript Source Group", sourceGroupTypeToString(saved->getType()));
 }
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE

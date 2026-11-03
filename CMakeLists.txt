@@ -388,6 +388,8 @@ if(BUILD_JAVA_LANGUAGE_PACKAGE)
   add_dependencies(Sourcetrail java_indexer_jar)
   add_dependencies(Sourcetrail_indexer java_indexer_jar)
 endif()
+include(cmake/ts_indexer.cmake)
+add_dependencies(Sourcetrail ts_indexer)
 # Tests --------------------------------------------------------------------------------------------------------------------------
 if(ENABLE_UNIT_TEST
    OR ENABLE_GUI_TEST

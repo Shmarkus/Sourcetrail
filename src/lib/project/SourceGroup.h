@@ -2,6 +2,7 @@
 // STL
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 // internal
 #include "LanguageType.h"
@@ -27,6 +28,12 @@ public:
   virtual bool allowsPartialClearing() const;
   virtual bool allowsShallowIndexing() const;
 
+  // A group indexed by one command over all of its files at once, the TypeScript group, returns a record of the inputs
+  // that command reads; the index stores it once the command succeeded. A refresh clears and re-imports the whole group
+  // when the record differs from the stored one or the refresh clears any of the group's files, and touches none of
+  // its files otherwise. Empty for groups indexed file by file.
+  virtual std::string getInputsRecord() const;
+
   virtual std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const = 0;
   virtual std::set<FilePath> getAllSourceFilePaths() const = 0;
   virtual std::shared_ptr<IndexerCommandProvider> getIndexerCommandProvider(const RefreshInfo& info) const;
@@ -34,6 +41,7 @@ public:
   virtual std::shared_ptr<Task> getPreIndexTask(std::shared_ptr<StorageProvider> storageProvider,
                                                 std::shared_ptr<DialogView> dialogView) const;
 
+  std::string getId() const;
   SourceGroupType getType() const;
   LanguageType getLanguage() const;
   SourceGroupStatusType getStatus() const;

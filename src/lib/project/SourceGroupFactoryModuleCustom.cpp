@@ -2,9 +2,12 @@
 
 #include "SourceGroupCustomCommand.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsTypeScript.h"
+#include "SourceGroupTypeScript.h"
 
 bool SourceGroupFactoryModuleCustom::supports(SourceGroupType type) const {
   switch(type) {
+  case SOURCE_GROUP_TYPESCRIPT:
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return true;
   default:
@@ -18,6 +21,9 @@ std::shared_ptr<SourceGroup> SourceGroupFactoryModuleCustom::createSourceGroup(s
   if(std::shared_ptr<SourceGroupSettingsCustomCommand> customSettings =
          std::dynamic_pointer_cast<SourceGroupSettingsCustomCommand>(settings)) {
     sourceGroup = std::shared_ptr<SourceGroup>(new SourceGroupCustomCommand(customSettings));
+  } else if(std::shared_ptr<SourceGroupSettingsTypeScript> typeScriptSettings =
+                std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(settings)) {
+    sourceGroup = std::make_shared<SourceGroupTypeScript>(typeScriptSettings);
   }
   return sourceGroup;
 }

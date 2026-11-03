@@ -5,6 +5,7 @@
 #include "SettingsMigrationLambda.h"
 #include "SettingsMigrationMoveKey.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsUnloadable.h"
 #include "utilityFile.h"
 #include "utilityString.h"
@@ -169,6 +170,9 @@ std::vector<std::shared_ptr<SourceGroupSettings>> ProjectSettings::getAllSourceG
       settings = std::make_shared<SourceGroupSettingsJavaGradle>(id, this);
       break;
 #endif
+    case SOURCE_GROUP_TYPESCRIPT:
+      settings = std::make_shared<SourceGroupSettingsTypeScript>(id, this);
+      break;
     case SOURCE_GROUP_CUSTOM_COMMAND:
       settings = std::make_shared<SourceGroupSettingsCustomCommand>(id, this);
       break;

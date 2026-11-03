@@ -18,6 +18,10 @@ std::shared_ptr<Task> SourceGroup::getPreIndexTask(std::shared_ptr<StorageProvid
   return std::make_shared<TaskLambda>([]() {});
 }
 
+std::string SourceGroup::getId() const {
+  return getSourceGroupSettings()->getId();
+}
+
 SourceGroupType SourceGroup::getType() const {
   return getSourceGroupSettings()->getType();
 }
@@ -40,6 +44,10 @@ bool SourceGroup::allowsPartialClearing() const {
 
 bool SourceGroup::allowsShallowIndexing() const {
   return false;
+}
+
+std::string SourceGroup::getInputsRecord() const {
+  return {};
 }
 
 std::set<FilePath> SourceGroup::filterToContainedSourceFilePath(const std::set<FilePath>& sourceFilePaths) const {

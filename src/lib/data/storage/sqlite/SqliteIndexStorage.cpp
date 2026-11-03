@@ -64,6 +64,14 @@ void SqliteIndexStorage::setProjectSettingsText(const std::string& text) {
   insertOrUpdateMetaValue("project_settings", text);
 }
 
+std::string SqliteIndexStorage::getSourceGroupInputs(const std::string& sourceGroupId) const {
+  return getMetaValue("source_group_inputs_" + sourceGroupId);
+}
+
+void SqliteIndexStorage::setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs) {
+  insertOrUpdateMetaValue("source_group_inputs_" + sourceGroupId, inputs);
+}
+
 Id SqliteIndexStorage::addNode(const StorageNodeData& data) {
   std::vector<Id> ids = addNodes({StorageNode(0, data)});
   return ids.empty() ? 0 : ids.front();

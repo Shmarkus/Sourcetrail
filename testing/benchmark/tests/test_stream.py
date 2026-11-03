@@ -83,5 +83,21 @@ class ParseStreamTest(unittest.TestCase):
         self.assertEqual(metrics["text_tool_calls"], 0)
         self.assertFalse(metrics["used_st"])
 
+class DenialsAndTargetsTest(unittest.TestCase):
+    def test_permission_denials_come_from_the_result(self):
+        lines = ['{"type": "result", "subtype": "success", "is_error": false, "result": "x", '
+                 '"permission_denials": [{"tool_name": "Bash"}, {"tool_name": "Edit"}]}']
+        self.assertEqual(parse_stream(lines)["permission_denials"], 2)
+        self.assertEqual(load("run_mixed.jsonl")["permission_denials"], 0)
+
+    def test_paths_and_commands_of_every_tool_call_are_kept_for_leak_checks(self):
+        lines = ['{"type": "assistant", "message": {"content": ['
+                 '{"type": "tool_use", "id": "a", "name": "Read", "input": {"file_path": "/r/questions/q.json"}},'
+                 '{"type": "tool_use", "id": "b", "name": "Grep", "input": {"pattern": "x", "path": "/r/.superpowers"}},'
+                 '{"type": "tool_use", "id": "c", "name": "Glob", "input": {"pattern": "**/*.json", "path": "/p"}},'
+                 '{"type": "tool_use", "id": "d", "name": "Bash", "input": {"command": "cat ../results/x"}}]}}']
+        targets = parse_stream(lines)["tool_targets"]
+        self.assertEqual(targets, ["/r/questions/q.json", "/r/.superpowers", "**/*.json /p", "cat ../results/x"])
+
 if __name__ == "__main__":
     unittest.main()

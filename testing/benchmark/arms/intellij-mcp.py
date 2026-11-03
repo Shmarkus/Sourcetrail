@@ -9,8 +9,10 @@ stop it, or print the IDE build.
 The server is a second IDE process (`idea.sh mcpServer`) with its own config, system and log folders under --home, so
 it never touches an IDE the user has open. --java-home is the JDK the project's Gradle build runs with. Ready means:
 the MCP server is up, the Gradle import is done, and the project has left dumb mode (indexing) with no new dumb mode
-for --quiet seconds. "MCP Server started" alone is printed before the Gradle import even begins. The last output line
-is JSON: ready_s is the IDE's uptime at the last "exit dumb mode", the warm-up time to report.
+for --quiet seconds. "MCP Server started" alone is printed before the Gradle import even begins. Then the server must
+offer exactly the whitelisted tools (plus the generic execute_tool) and execute_tool must refuse a tool outside the
+whitelist. The last output line is JSON: warm_up_s (= ready_s) is the IDE's uptime at the last "exit dumb mode", the
+warm-up time to report.
 """
 
 from __future__ import annotations
@@ -68,8 +70,13 @@ def _log_state(log: str) -> dict:
     return state
 
 
-def _mcp_tools(port: int) -> list[str]:
-    """tools/list over the server's SSE transport: requests are POSTed, answers arrive as events on the stream."""
+# A tool the server must refuse through execute_tool: it exists in the IDE but is not on the whitelist.
+_ESCAPE_TOOL = "get_run_configurations"
+
+
+def _mcp_check(port: int, project: str) -> tuple[list[str], dict | None]:
+    """tools/list over the server's SSE transport, then execute_tool asked to run a tool outside the whitelist.
+    Requests are POSTed; answers arrive as events on the stream."""
     base = f"http://127.0.0.1:{port}"
     stream = urllib.request.urlopen(base + "/sse", timeout=60)
 
@@ -90,7 +97,8 @@ def _mcp_tools(port: int) -> list[str]:
                                          headers={"Content-Type": "application/json"})
         urllib.request.urlopen(request, timeout=60).read()
 
-    def answer(ident: int) -> dict:
+    def call(ident: int, method: str, params: dict) -> dict:
+        send({"jsonrpc": "2.0", "id": ident, "method": method, "params": params})
         while True:
             message = json.loads(next_event()[1])
             if message.get("id") == ident:
@@ -99,14 +107,36 @@ def _mcp_tools(port: int) -> list[str]:
     _, endpoint = next_event()
     post = base + endpoint if endpoint.startswith("/") else endpoint
     try:
-        send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "bench", "version": "1"}}})
-        answer(1)
+        call(1, "initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
+                               "clientInfo": {"name": "bench", "version": "1"}})
         send({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
-        send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
-        return [tool["name"] for tool in answer(2)["result"]["tools"]]
+        tools = [tool["name"] for tool in call(2, "tools/list", {})["result"]["tools"]]
+        escape = None
+        if "execute_tool" in tools:
+            escape = call(3, "tools/call", {"name": "execute_tool",
+                                            "arguments": {"command": _ESCAPE_TOOL, "projectPath": project}})
+        return tools, escape
     finally:
         stream.close()
+
+
+def isolation_problems(offered: list[str], whitelist: list[str], escape: dict | None) -> list[str]:
+    """What breaks the arm's isolation: a whitelisted tool missing, any tool beyond the whitelist and the generic
+    execute_tool, or execute_tool running a tool outside the whitelist."""
+    problems = []
+    missing = [tool for tool in whitelist if tool not in offered]
+    if missing:
+        problems.append(f"the server does not offer {', '.join(missing)}; it offers {', '.join(offered)}")
+    extra = [tool for tool in offered if tool not in whitelist and tool != "execute_tool"]
+    if extra:
+        problems.append(f"the server offers tools outside the whitelist: {', '.join(extra)}")
+    if "execute_tool" in offered:
+        result = (escape or {}).get("result") or {}
+        text = " ".join(block.get("text", "") for block in result.get("content", []) if isinstance(block, dict))
+        refused = "error" in (escape or {}) or result.get("isError") or "not found" in text
+        if not refused:
+            problems.append(f"execute_tool ran {_ESCAPE_TOOL}, a tool outside the whitelist: {text[:200]}")
+    return problems
 
 
 def start(args) -> int:
@@ -156,13 +186,14 @@ def start(args) -> int:
         if quiet_since and time.time() - quiet_since >= args.quiet:
             break
         time.sleep(1)
-    tools = _mcp_tools(args.port)
-    missing = [tool for tool in args.tools.split(",") if tool not in tools]
-    if missing:
-        print(f"the server does not offer {', '.join(missing)}; it offers {', '.join(tools)}", file=sys.stderr)
+    tools, escape = _mcp_check(args.port, os.path.abspath(args.project))
+    problems = isolation_problems(tools, args.tools.split(","), escape)
+    if problems:
+        print("\n".join(problems), file=sys.stderr)
         return 1
-    print(json.dumps({"ready_s": (state["last_exit_ms"] or 0) / 1000.0, "imports": state["imports_done"],
-                      "tools": len(tools), "pid": process.pid}))
+    ready_s = (state["last_exit_ms"] or 0) / 1000.0
+    print(json.dumps({"warm_up_s": ready_s, "ready_s": ready_s, "imports": state["imports_done"],
+                      "tools": len(tools), "escape_refused": True, "pid": process.pid}))
     return 0
 
 

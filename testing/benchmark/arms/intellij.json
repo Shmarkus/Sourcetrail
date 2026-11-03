@@ -10,7 +10,12 @@
     "BENCH_INTELLIJ_TOOLS": "analyze_calls,get_symbol_info,search_symbol,search_text,search_regex,search_file,read_file,list_directory_tree,get_project_modules,get_project_dependencies"
   },
   "tools": ["Bash", "Read", "Grep", "Glob"],
-  "allowed_tools": ["Bash", "Read", "Grep", "Glob", "mcp__intellij"],
+  "allowed_tools": ["Bash", "Read", "Grep", "Glob",
+                    "mcp__intellij__analyze_calls", "mcp__intellij__get_symbol_info", "mcp__intellij__search_symbol",
+                    "mcp__intellij__search_text", "mcp__intellij__search_regex", "mcp__intellij__search_file",
+                    "mcp__intellij__read_file", "mcp__intellij__list_directory_tree",
+                    "mcp__intellij__get_project_modules", "mcp__intellij__get_project_dependencies",
+                    "mcp__intellij__execute_tool"],
   "mcp_servers": {"intellij": {"type": "sse", "url": "http://127.0.0.1:{BENCH_INTELLIJ_PORT}/sse"}},
   "note": "intellij-note.md",
   "adoption": {"tool_prefixes": ["mcp__intellij__"]},

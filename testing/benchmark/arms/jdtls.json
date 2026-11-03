@@ -22,5 +22,6 @@
   "warm_up": "'{python}' '{arms}/jdtls-probe.py' --build --symbol '{BENCH_JDTLS_PROBE_SYMBOL}'",
   "startup": "'{python}' '{arms}/jdtls-probe.py' --symbol '{BENCH_JDTLS_PROBE_SYMBOL}'",
   "startup_repeats": 3,
+  "session_log": "{work}/jdtls/data/wrapper.log",
   "version": "ls '{BENCH_JDTLS_HOME}/plugins' | sed -n 's/^org\\.eclipse\\.jdt\\.ls\\.core_\\(.*\\)\\.jar$/jdtls \\1/p'; claude plugin list 2>/dev/null | grep -A1 jdtls-lsp | tr -s ' \\n' ' '"
 }

@@ -34,7 +34,7 @@ from stbench.questions import QuestionError, load_questions  # noqa: E402
 from stbench.report import render_markdown, summarize  # noqa: E402
 from stbench.rescore import rescore  # noqa: E402
 from stbench.runner import (RECORDS, BuildChanged, RunConfig, WarmUpFailed, read_records, read_warm_up,  # noqa: E402
-                            run_benchmark)
+                            run_benchmark, work_problems)
 from stbench.speed import measure  # noqa: E402
 
 README = os.path.join(REPO, "README.md")
@@ -191,6 +191,9 @@ def cmd_run(args) -> None:
     out_dir = args.out or _default_out(data.get("project", {}).get("name", "project"))
     os.makedirs(out_dir, exist_ok=True)
     work = os.path.abspath(args.work) if args.work else tempfile.mkdtemp(prefix="st-bench-")
+    problems = work_problems(work, out_dir, os.path.abspath(args.questions), REPO)
+    if problems:
+        _fail("; ".join(problems))
     os.makedirs(work, exist_ok=True)
     config = RunConfig(
         project=os.path.abspath(args.project), questions=data["questions"], arms=arms, repeats=args.repeats,
@@ -198,6 +201,7 @@ def cmd_run(args) -> None:
         model=args.model, bare=args.bare, max_turns=args.max_turns, timeout_s=args.timeout, work_dir=work,
         specs=specs, notes={name: _note(spec, work) for name, spec in specs.items() if spec.note},
         skip_warm_up=args.no_warm_up, startup_repeats=args.startup_repeats,
+        leak_markers=[os.path.basename(args.questions), os.path.dirname(os.path.abspath(args.questions))],
     )
     if not args.resume or not os.path.isfile(os.path.join(out_dir, "meta.json")):
         _write_meta(out_dir, args, arms, data.get("project", {}).get("name", ""),
@@ -278,7 +282,8 @@ def main(argv=None) -> None:
     run.add_argument("--arms", default="grep,st",
                      help="comma-separated arm names (arms/<name>.json) or arm files (default grep,st)")
     run.add_argument("--work", help="folder for the arms' project copies and tool state, kept after the run "
-                                    "(default: a temporary folder, deleted after)")
+                                    "(default: a temporary folder, deleted after); it must hold no question files "
+                                    "or results, the agents can reach it")
     run.add_argument("--no-warm-up", action="store_true",
                      help="skip the arms' warm-up, startup and shut-down commands (the tools are already warm)")
     run.add_argument("--startup-repeats", type=int, help="per-session startup probes per arm (default: the arm's)")

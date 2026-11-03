@@ -8,7 +8,8 @@ import textwrap
 import unittest
 
 from stbench.armconfig import load_arm
-from stbench.runner import (RunConfig, WarmUpFailed, read_records, read_warm_up, run_benchmark)
+from stbench.runner import (RunConfig, WarmUpFailed, _arm_order, config_markers, read_records, read_warm_up,
+                            run_benchmark, work_problems)
 
 FAKE_CLAUDE = textwrap.dedent("""\
     #!{python}
@@ -144,6 +145,36 @@ class ConfiguredArmTest(unittest.TestCase):
         run_benchmark(self.config(spec), progress=lambda _: None)
         self.assertEqual(read_warm_up(self.out)[0]["details"], {"ready_s": 2.5})
 
+    def test_a_run_that_reads_the_question_files_is_flagged(self):
+        config = self.config(self.spec())
+        config.leak_markers = ["grep -rn x ."]
+        run_benchmark(config, progress=lambda _: None)
+        self.assertEqual(read_records(self.out)[0]["leaks"], ["grep -rn x ."])
+        config.leak_markers = ["/questions/"]
+        os.remove(os.path.join(self.out, "runs.jsonl"))
+        run_benchmark(config, progress=lambda _: None)
+        self.assertEqual(read_records(self.out)[0]["leaks"], [])
+
+    def test_the_results_dir_is_always_a_leak_marker(self):
+        config = self.config(self.spec())
+        self.assertIn(os.path.realpath(self.out), config_markers(config))
+
+    def test_tool_starts_inside_a_session_are_counted_from_the_session_log(self):
+        log = os.path.join(self.root, "starts.log")
+        spec = self.spec(session_log=log,
+                         warm_up=f"echo \"$(date +%s.%N) start\" >> {log}")
+        executable(os.path.join(self.bin, "claude"), "#!/bin/sh\n"
+                   f"echo \"$(date +%s.%N) start\" >> {log}\n"
+                   f"exec {sys.executable} {os.path.join(self.bin, 'claude.py')} \"$@\"\n")
+        with open(os.path.join(self.bin, "claude.py"), "w") as handle:
+            handle.write(FAKE_CLAUDE.format(python=sys.executable))
+        run_benchmark(self.config(spec), progress=lambda _: None)
+        self.assertEqual([r["tool_started_in_session"] for r in read_records(self.out)], [1, 1])
+
+    def test_without_a_session_log_the_count_is_unknown(self):
+        run_benchmark(self.config(self.spec()), progress=lambda _: None)
+        self.assertIsNone(read_records(self.out)[0]["tool_started_in_session"])
+
     def test_a_failed_warm_up_stops_before_any_agent_run_and_still_shuts_down(self):
         spec = self.spec(warm_up="echo broken >&2; exit 4", shut_down=f"echo stop >> {self.marks}")
         with self.assertRaisesRegex(WarmUpFailed, "tool.*exit 4"):
@@ -168,6 +199,27 @@ class ConfiguredArmTest(unittest.TestCase):
             self.assertNotIn("--dangerously-skip-permissions", args)
             self.assertNotIn("--mcp-config", args)
 
+
+class ArmOrderTest(unittest.TestCase):
+    def test_two_arms_alternate_as_before(self):
+        for position in range(6):
+            expected = ["grep", "st"] if position % 2 == 0 else ["st", "grep"]
+            self.assertEqual(_arm_order(["grep", "st"], position), expected)
+
+    def test_every_arm_goes_first_and_last_equally_often(self):
+        arms = ["grep", "st", "intellij", "jdtls"]
+        orders = [_arm_order(arms, position) for position in range(8)]
+        for arm in arms:
+            self.assertEqual(sum(order[0] == arm for order in orders), 2)
+            self.assertEqual(sum(order[-1] == arm for order in orders), 2)
+            self.assertTrue(all(sorted(order) == sorted(arms) for order in orders))
+
+class WorkFolderTest(unittest.TestCase):
+    def test_the_work_folder_must_not_hold_the_questions_or_the_results(self):
+        self.assertEqual(work_problems("/w", "/r/out", "/q/questions.json", "/repo"), [])
+        self.assertTrue(work_problems("/w", "/w/out", "/q/questions.json", "/repo"))
+        self.assertTrue(work_problems("/w", "/r/out", "/w/q/questions.json", "/repo"))
+        self.assertTrue(work_problems("/repo/x", "/r/out", "/q/questions.json", "/repo"))
 
 if __name__ == "__main__":
     unittest.main()

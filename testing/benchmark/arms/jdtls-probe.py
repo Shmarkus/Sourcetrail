@@ -8,7 +8,8 @@ arm's jdtls workspace, which later sessions reuse. Its startup probe runs it wit
 the time to ready is the startup every agent session pays before its first LSP answer, because Claude Code's plugin
 starts one jdtls per session. The last output line is JSON: ready_s (launch to the "ServiceReady" status),
 first_answer_s (launch to the answer of a workspace/symbol query) and, with --build, built_s (to the end of
-java/buildWorkspace). Wall time includes the wait for jdtls to exit, so startup_s (= first_answer_s) is the startup.
+java/buildWorkspace, also given as warm_up_s). Wall time includes the wait for jdtls to exit, so startup_s
+(= first_answer_s) is the startup.
 """
 
 from __future__ import annotations
@@ -122,6 +123,7 @@ def main() -> int:
             build = server.request("java/buildWorkspace", True)
             answer = wait_for(server, lambda m: m.get("id") == build, deadline, statuses)
             result["built_s"] = round(time.time() - started, 2)
+            result["warm_up_s"] = result["built_s"]
             result["build_result"] = answer.get("result")
         shut = server.request("shutdown", None)
         wait_for(server, lambda m: m.get("id") == shut, time.time() + 60, statuses)

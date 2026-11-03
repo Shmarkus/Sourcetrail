@@ -9,7 +9,7 @@ def run(question, arm, verdict, tokens, calls, seconds, kind="structural", used=
         "question": question, "kind": kind, "arm": arm, "verdict": verdict, "total_tokens": tokens,
         "output_tokens": tokens // 10, "tool_calls": calls, "tool_output_chars": calls * 1000,
         "duration_s": seconds, "cost_usd": tokens / 1e6, "used_st": arm == "st" and bool(used), "is_error": False,
-        "used_arm_tool": used, "tool_names": names or {},
+        "used_arm_tool": used, "tool_names": names or {}, "repeat": 1,
     }
     return record
 
@@ -25,7 +25,7 @@ RUNS = [
 ]
 
 WARM_UP = [
-    {"arm": "intellij", "phase": "warm_up", "seconds": 95.2, "exit": 0, "details": {"ready_s": 87.0}},
+    {"arm": "intellij", "phase": "warm_up", "seconds": 95.2, "exit": 0, "details": {"warm_up_s": 87.0, "ready_s": 87.0}},
     {"arm": "jdtls", "phase": "warm_up", "seconds": 20.0, "exit": 0, "details": {}},
     {"arm": "jdtls", "phase": "startup", "seconds": 7.0, "exit": 0, "details": {}},
     {"arm": "jdtls", "phase": "startup", "seconds": 29.0, "exit": 0, "details": {"startup_s": 9.0}},
@@ -87,19 +87,48 @@ class WarmUpMarkdownTest(unittest.TestCase):
     def test_warm_up_and_startup_are_reported_apart_from_question_time(self):
         text = render_markdown(summarize(RUNS), RUNS, speed=None, warm_up=WARM_UP)
         self.assertIn("## Warm-up and per-session startup", text)
-        self.assertIn("| intellij | 95.2 s | ready_s 87.0 | none |", text)
-        self.assertIn("| jdtls | 20.0 s |  | 8.0 s (7.0–9.0 s, 3 runs) |", text)
+        self.assertIn("| intellij | 87.0 s | 95.2 s | ready_s 87.0 | none |", text)
+        self.assertIn("| jdtls | 20.0 s | 20.0 s |  | 8.0 s (7.0–9.0 s, 3 runs) |", text)
 
     def test_only_times_are_shown_as_the_tools_own_measure(self):
         entries = [dict(WARM_UP[0], details={"ready_s": 87.0, "tools": 11, "pid": 5})]
         text = render_markdown(summarize(RUNS), RUNS, speed=None, warm_up=entries)
-        self.assertIn("| intellij | 95.2 s | ready_s 87.0 | none |", text)
+        self.assertIn("| intellij | 95.2 s | 95.2 s | ready_s 87.0 | none |", text)
 
     def test_a_failed_warm_up_shows_its_exit_code(self):
         failed = [dict(WARM_UP[0], exit=3)]
         text = render_markdown(summarize(RUNS), RUNS, speed=None, warm_up=failed)
         self.assertIn("failed (exit 3)", text)
 
+
+class SafetyMarkdownTest(unittest.TestCase):
+    def test_permission_denials_are_totalled_per_arm(self):
+        runs = [dict(r, permission_denials=1 if r["arm"] == "intellij" else 0) for r in RUNS]
+        text = render_markdown(summarize(runs), runs, speed=None)
+        self.assertIn("| Permission denials (total) | 0 | 0 | 2 |", text)
+
+    def test_runs_touching_question_or_result_files_are_flagged(self):
+        runs = [dict(r, leaks=["/questions/"] if r["question"] == "Q1" and r["arm"] == "st" else []) for r in RUNS]
+        text = render_markdown(summarize(runs), runs, speed=None)
+        self.assertIn("| Runs that touched question or result files | 0 | 1 | 0 |", text)
+        self.assertIn("- Q1 st #1: `/questions/`", text)
+
+    def test_two_arm_reports_show_denials_and_leaks_too(self):
+        two = [dict(r, permission_denials=0, leaks=[]) for r in RUNS if r["arm"] != "intellij"]
+        text = render_markdown(summarize(two), two, speed=None)
+        self.assertIn("| Permission denials (total) | 0 | 0 |", text)
+        self.assertIn("| Runs that touched question or result files | 0 | 0 |", text)
+
+
+class SessionStartTest(unittest.TestCase):
+    def test_question_time_with_and_without_a_tool_start_in_the_session(self):
+        runs = [run("Q1", "jdtls", "correct", 1000, 2, 40.0), run("Q2", "jdtls", "correct", 1000, 2, 10.0),
+                run("Q3", "jdtls", "correct", 1000, 2, 12.0), run("Q1", "grep", "correct", 1000, 2, 9.0)]
+        for record, started in zip(runs, [1, 0, 0, None]):
+            record["tool_started_in_session"] = started
+        text = render_markdown(summarize(runs), runs, speed=None, warm_up=WARM_UP)
+        self.assertIn("- `jdtls`: median question time 40.0 s in 1 runs that started the tool, "
+                      "11.0 s in 2 runs that did not.", text)
 
 if __name__ == "__main__":
     unittest.main()

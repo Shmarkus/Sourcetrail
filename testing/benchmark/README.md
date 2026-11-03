@@ -14,7 +14,14 @@ file in `arms/`; nothing else differs between them:
 
 The prompt never names a tool, so each tool arm also measures whether agents pick its tool up on their own.
 Every arm's tools are allowed up front (`--tools`, `--allowedTools`, `--strict-mcp-config`); no arm skips permission
-checks.
+checks, and the report totals each arm's permission denials. The intellij arm allows each whitelisted MCP tool by
+name, and its warm-up fails if the server offers any other tool or lets `execute_tool` run one. The arms take turns
+going first: the order rotates by one arm per question.
+
+**No arm may see the answers.** Each run's Bash commands and Read, Grep and Glob paths are checked for the question
+file's name and folder, `/questions/`, `.superpowers` and the results folder; a run that names one is flagged in its
+record (`leaks`) and listed in the report. Keep `--work` free of question files and results (the run refuses a work
+folder that holds either, or one inside this repository).
 
 **Measured, not estimated.** Tokens, cost, tool calls and tool output come from Claude Code's `stream-json` log.
 Wall time is measured around each run. Total tokens add up the full context on every turn, so a large fixed context
@@ -32,8 +39,9 @@ calls by tool name.
 
 **Warm-up is not question time.** Before the first question each arm runs its warm-up command once (timed; a tool may
 also report its own measure, such as the IDE's uptime when it left dumb mode) and its per-session startup probe a few
-times. jdtls starts with every agent session, so its startup is also inside each of its question times; the report
-shows it apart so it can be taken out. After the last question each arm's shut-down command runs, also on failure.
+times. jdtls starts with every agent session that calls LSP, so its startup is also inside those question times; the
+report shows the startup apart and, from the wrapper's start log (`session_log` in the arm file), each run's
+`tool_started_in_session` and the median question time with and without a start. After the last question each arm's shut-down command runs, also on failure.
 `warmup.jsonl` holds the entries, and `meta.json` the tool versions (each arm's `version` command), the Claude Code
 version and the models seen in the runs.
 
@@ -87,7 +95,10 @@ applies to every arm. The run warns if it mentions `st`.
 - `note`: the project note, a file path relative to the arm file (`note_readme_section` adds the README's `st` section);
 - `adoption`: the arm's own tool by `tools` name, `tool_prefixes` (an MCP server) or `programs` run through Bash;
 - `warm_up`, `startup` (`startup_repeats` times), `shut_down` and `version`: shell commands, run in the arm's working
-  directory with its environment. A command may end its output with a JSON object line: its own measurements.
+  directory with its environment. A command may end its stdout with a JSON object line: its own measurements;
+  `warm_up_s` there (the IDE's ready time) is reported as the warm-up instead of the command's wall time, and
+  `startup_s` as the startup;
+- `session_log`: a file the tool appends `<epoch seconds> start` lines to, to count starts inside each run.
 
 Strings may hold placeholders: `{work}`, `{workdir}`, `{project}`, `{st}`, `{st_dir}`, `{python}`, `{arms}` (the arm
 file's folder), `{repo}`, and the arm's `vars`, which the environment overrides (`BENCH_INTELLIJ_PORT=64902 bench.py

@@ -23,7 +23,7 @@ _KEPT_METRICS = ("tool_calls", "st_calls", "st_invocations", "text_tool_calls", 
                  "input_tokens", "cache_creation_tokens", "cache_read_tokens", "output_tokens", "total_tokens",
                  "cost_usd", "turns", "is_error", "error", "commands",
                  "api_calls", "initial_context_tokens", "final_context_tokens", "context_growth_tokens",
-                 "tool_names", "model")
+                 "tool_names", "model", "permission_denials")
 
 
 class BuildChanged(RuntimeError):
@@ -56,6 +56,8 @@ class RunConfig:
     notes: dict = field(default_factory=dict)
     skip_warm_up: bool = False
     startup_repeats: int | None = None
+    # Strings that must not show up in an agent's commands or paths (question files); see config_markers.
+    leak_markers: list = field(default_factory=list)
 
 
 @dataclass
@@ -175,6 +177,50 @@ def _shut_down(config: RunConfig, arms: dict, progress) -> None:
                 progress(f"shut-down {arm.name} exited {entry['exit']}: {entry['output'][-500:]}")
 
 
+def config_markers(config: RunConfig) -> list[str]:
+    """What a run must not touch: question folders, private notes and the results folder, plus the run's own."""
+    out = [os.path.abspath(config.out_dir), os.path.realpath(config.out_dir)]
+    return list(dict.fromkeys(["/questions/", ".superpowers"] + out + list(config.leak_markers)))
+
+
+def _inside(path: str, folder: str) -> bool:
+    path, folder = os.path.realpath(path), os.path.realpath(folder)
+    return path == folder or path.startswith(folder + os.sep)
+
+
+def work_problems(work: str, out_dir: str, questions: str, repo: str) -> list[str]:
+    """The arms' copies live in the work folder, so the agents can reach whatever else it holds."""
+    problems = []
+    if _inside(out_dir, work):
+        problems.append(f"the results folder {out_dir} is inside the work folder {work}")
+    if _inside(questions, work):
+        problems.append(f"the question file {questions} is inside the work folder {work}")
+    if _inside(work, repo):
+        problems.append(f"the work folder {work} is inside the repository, next to the question files")
+    return problems
+
+
+def leaks(targets: list[str], markers: list[str]) -> list[str]:
+    return [marker for marker in markers if any(marker in target for target in targets)]
+
+
+def starts_between(session_log: str | None, started: float, ended: float) -> int | None:
+    """How often the tool started during one agent run, from its "<epoch> start" log; None without a log."""
+    if not session_log:
+        return None
+    if not os.path.isfile(session_log):
+        return 0
+    count = 0
+    with open(session_log, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            try:
+                stamp = float(line.split()[0])
+            except (IndexError, ValueError):
+                continue
+            count += started <= stamp <= ended
+    return count
+
+
 def arm_tool_calls(metrics: dict, adoption: dict) -> int | None:
     """Calls of the arm's own tool: by tool name, tool-name prefix (an MCP server) or program run through Bash.
     None for an arm without a tool of its own."""
@@ -220,7 +266,9 @@ def run_one(config: RunConfig, arm: Arm, question: dict, repeat: int) -> dict:
     args = claude_args(build_prompt(question), config.model, arm.note, config.bare, config.max_turns,
                        tools=spec.tools if spec else None, allowed_tools=spec.allowed_tools if spec else None,
                        mcp_config=arm.mcp_config, settings=arm.settings)
+    started = time.time()
     wall_s, failure = _run_claude(arm, args, log, config.timeout_s)
+    ended = time.time()
     with open(log, encoding="utf-8") as handle:
         metrics = parse_stream(handle)
     if failure:
@@ -234,12 +282,15 @@ def run_one(config: RunConfig, arm: Arm, question: dict, repeat: int) -> dict:
     calls = arm_tool_calls(metrics, spec.adoption if spec else {})
     record["arm_tool_calls"] = calls
     record["used_arm_tool"] = None if calls is None else calls > 0
+    record["leaks"] = leaks(metrics["tool_targets"], config_markers(config))
+    record["tool_started_in_session"] = starts_between(spec.session_log if spec else None, started, ended)
     return record
 
 
 def _arm_order(arms: list[str], position: int) -> list[str]:
-    """Alternates which arm goes first, so neither always runs on a cold or warm cache."""
-    return list(arms) if position % 2 == 0 else list(reversed(arms))
+    """Rotates which arm goes first, so no arm always runs on a cold or warm cache. With two arms this alternates."""
+    shift = position % len(arms) if arms else 0
+    return list(arms[shift:]) + list(arms[:shift])
 
 
 def run_benchmark(config: RunConfig, resume: bool = False, progress=print) -> list[dict]:

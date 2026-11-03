@@ -22,6 +22,7 @@ def _empty_metrics() -> dict:
     return {
         "tool_calls": 0, "st_calls": 0, "st_invocations": 0, "text_tool_calls": 0, "used_st": False,
         "tool_output_chars": 0, "commands": [], "tool_names": {}, "model": None,
+        "permission_denials": 0, "tool_targets": [],
         "input_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0, "output_tokens": 0,
         "total_tokens": 0, "cost_usd": 0.0, "duration_s": 0.0, "turns": 0,
         "final_text": "", "is_error": True, "error": "no result message (the run was cut off)",
@@ -44,10 +45,23 @@ def _apply_context(metrics: dict, calls: list) -> None:
     metrics["context_growth_tokens"] = metrics["final_context_tokens"] - metrics["initial_context_tokens"]
 
 
+# What a tool call touched, for the leak check. Grep's pattern is search text, not a place, so it doesn't count.
+_TARGET_KEYS = {"Bash": ("command",), "Read": ("file_path",), "Grep": ("path", "glob"), "Glob": ("pattern", "path")}
+_PATH_KEYS = ("file_path", "filePath", "path", "projectPath")
+
+
+def _target(name: str, tool_input: dict) -> str:
+    keys = _TARGET_KEYS.get(name, _PATH_KEYS)
+    return " ".join(tool_input[key] for key in keys if isinstance(tool_input.get(key), str))
+
+
 def _count_tool_use(metrics: dict, block: dict) -> None:
     metrics["tool_calls"] += 1
     name = block.get("name", "")
     metrics["tool_names"][name] = metrics["tool_names"].get(name, 0) + 1
+    target = _target(name, block.get("input") or {})
+    if target:
+        metrics["tool_targets"].append(target)
     if name in _TEXT_TOOL_NAMES:
         metrics["text_tool_calls"] += 1
         return
@@ -75,6 +89,7 @@ def _apply_result(metrics: dict, message: dict) -> None:
     metrics["cost_usd"] = float(message.get("total_cost_usd") or 0.0)
     metrics["duration_s"] = (message.get("duration_ms") or 0) / 1000.0
     metrics["turns"] = message.get("num_turns", 0) or 0
+    metrics["permission_denials"] = len(message.get("permission_denials") or [])
     metrics["final_text"] = message.get("result") or metrics["final_text"]
     metrics["is_error"] = bool(message.get("is_error"))
     if metrics["is_error"]:

@@ -13,7 +13,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(ARMS_DIR)))
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _KEYS = {"name", "description", "workdir", "copy_name", "st", "path_prepend", "env", "vars", "tools", "allowed_tools",
          "mcp_servers", "settings", "note", "note_readme_section", "adoption", "warm_up", "startup",
-         "startup_repeats", "shut_down", "version"}
+         "startup_repeats", "shut_down", "version", "session_log"}
 
 
 class ArmError(ValueError):
@@ -43,6 +43,8 @@ class ArmSpec:
     startup_repeats: int = 3
     shut_down: str | None = None
     version: str | None = None
+    # A file the tool appends "<epoch seconds> start ..." to each time it starts: counts starts inside each agent run.
+    session_log: str | None = None
 
 
 def _path(name_or_path: str, arms_dir: str) -> str:
@@ -111,5 +113,5 @@ def resolve(spec: ArmSpec, run_values: dict, environ: dict | None = None) -> Arm
     values.update(run_values)
     resolved = replace(spec, **{key: _walk(copy.deepcopy(getattr(spec, key)), values, f"arm {spec.name}")
                                 for key in ("path_prepend", "env", "mcp_servers", "settings", "warm_up", "startup",
-                                            "shut_down", "version")})
+                                            "shut_down", "version", "session_log")})
     return resolved

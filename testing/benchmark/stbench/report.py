@@ -36,6 +36,8 @@ def _arm_summary(runs: list[dict]) -> dict:
         "total_tool_calls": sum(values("tool_calls")),
         "total_tool_output_chars": sum(values("tool_output_chars")),
         "total_cost_usd": sum(values("cost_usd")),
+        "permission_denials": sum(run.get("permission_denials") or 0 for run in runs),
+        "leak_runs": sum(bool(run.get("leaks")) for run in runs),
     }
 
 
@@ -172,6 +174,10 @@ def _criteria_table(summary: dict) -> list[str]:
     lines.append(f"| Cost, USD (total, as the CLI reports it) | {grep.get('total_cost_usd', 0):.2f} | "
                  f"{st.get('total_cost_usd', 0):.2f} | | | |")
     lines.append(f"| Failed runs (left out above) | {grep.get('errors', 0)} | {st.get('errors', 0)} | | 0 | |")
+    lines.append(f"| Permission denials (total) | {grep.get('permission_denials', 0)} | "
+                 f"{st.get('permission_denials', 0)} | | 0 | |")
+    lines.append(f"| Runs that touched question or result files | {grep.get('leak_runs', 0)} | "
+                 f"{st.get('leak_runs', 0)} | | 0 | |")
     return lines
 
 
@@ -209,6 +215,8 @@ def _multi_criteria_table(summary: dict) -> list[str]:
          for a in names])
     row("Cost, USD (total, as the CLI reports it)", [f"{arms[a]['total_cost_usd']:.2f}" for a in names])
     row("Failed runs (left out above)", [str(arms[a]["errors"]) for a in names], "0")
+    row("Permission denials (total)", [str(arms[a]["permission_denials"]) for a in names], "0")
+    row("Runs that touched question or result files", [str(arms[a]["leak_runs"]) for a in names], "0")
     return lines
 
 
@@ -238,8 +246,8 @@ def _multi_question_table(runs: list[dict], names: list[str]) -> list[str]:
 
 
 def _warm_up_lines(entries: list[dict]) -> list[str]:
-    lines = ["| Arm | Warm-up (once per run) | Tool's own measure | Per-session startup (paid inside every run) |",
-             "|---|---|---|---|"]
+    lines = ["| Arm | Warm-up (once per run) | Wall time of the warm-up command | Tool's own measures "
+             "| Per-session startup (paid inside every run) |", "|---|---|---|---|---|"]
     for arm in dict.fromkeys(entry["arm"] for entry in entries):
         mine = [entry for entry in entries if entry["arm"] == arm]
         warm = [entry for entry in mine if entry["phase"] == "warm_up"]
@@ -248,19 +256,44 @@ def _warm_up_lines(entries: list[dict]) -> list[str]:
             continue
         if warm:
             last = warm[-1]
-            shown = f"{last['seconds']:.1f} s" if not last["exit"] else f"failed (exit {last['exit']})"
-            own = ", ".join(f"{key} {value}" for key, value in last.get("details", {}).items()
-                            if key.endswith("_s") and isinstance(value, (int, float)))
+            details = last.get("details", {})
+            # A tool that knows when it was ready (the IDE's last dumb-mode exit) reports that as warm_up_s; the
+            # command's wall time also holds its own checks and waits.
+            wall = f"{last['seconds']:.1f} s"
+            shown = (f"{details.get('warm_up_s', last['seconds']):.1f} s" if not last["exit"]
+                     else f"failed (exit {last['exit']})")
+            own = ", ".join(f"{key} {value}" for key, value in details.items()
+                            if key.endswith("_s") and key != "warm_up_s" and isinstance(value, (int, float)))
         else:
-            shown, own = "none", ""
+            shown, wall, own = "none", "", ""
         # A probe that also waits for its tool to exit reports the startup itself as startup_s.
         good = [entry.get("details", {}).get("startup_s", entry["seconds"]) for entry in startup if not entry["exit"]]
         if good:
             start = f"{median(good):.1f} s ({min(good):.1f}–{max(good):.1f} s, {len(good)} runs)"
         else:
             start = "none" if not startup else "failed"
-        lines.append(f"| {arm} | {shown} | {own} | {start} |")
+        lines.append(f"| {arm} | {shown} | {wall} | {own} | {start} |")
     return lines
+
+
+def _session_start_lines(runs: list[dict], names: list[str]) -> list[str]:
+    """Question time with and without the tool starting inside the run (jdtls starts with the first LSP call)."""
+    lines = []
+    for arm in names:
+        mine = [run for run in runs if run["arm"] == arm and not run.get("is_error")
+                and run.get("tool_started_in_session") is not None]
+        if not mine:
+            continue
+        started = [run["duration_s"] for run in mine if run["tool_started_in_session"]]
+        cold = [run["duration_s"] for run in mine if not run["tool_started_in_session"]]
+        lines.append(f"- `{arm}`: median question time {_seconds(median(started))} in {len(started)} runs that "
+                     f"started the tool, {_seconds(median(cold))} in {len(cold)} runs that did not.")
+    return lines
+
+
+def _leak_lines(runs: list[dict]) -> list[str]:
+    return [f"- {run['question']} {run['arm']} #{run.get('repeat', '?')}: "
+            + ", ".join(f"`{marker}`" for marker in run["leaks"]) for run in runs if run.get("leaks")]
 
 
 _MARKS = {"correct": "✓", "partial": "½", "wrong": "✗", "no answer": "∅"}
@@ -343,9 +376,17 @@ def render_markdown(summary: dict, runs: list[dict], speed: dict | None, title: 
                   "jdtls import and build, starting the st server); per-session startup is measured apart, and an "
                   "arm whose tool starts with every agent session pays it inside each question's time.", ""]
         parts += _warm_up_lines(warm_up)
+        starts = _session_start_lines(runs, list(summary["arms"]))
+        if starts:
+            parts += [""] + starts
     parts += ["", "## Per question", "", "✓ correct, ½ partial, ✗ wrong, ∅ no answer block, E failed run; "
               "calls and tokens are medians over repeats.", ""]
     parts += _multi_question_table(runs, list(summary["arms"])) if multi else _question_table(runs)
+    leaked = _leak_lines(runs)
+    if leaked:
+        parts += ["", "## Runs that touched question or result files", "",
+                  "Their commands or paths named a question file, a question or notes folder, or the results "
+                  "folder. Check the log; such a run may have seen the answer.", ""] + leaked
     suspects = suspect_ground_truth(runs)
     if suspects:
         parts += ["", "## Check the ground truth", "",

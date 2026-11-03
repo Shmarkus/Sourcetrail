@@ -72,6 +72,14 @@ void SqliteIndexStorage::setSourceGroupInputs(const std::string& sourceGroupId, 
   insertOrUpdateMetaValue("source_group_inputs_" + sourceGroupId, inputs);
 }
 
+std::string SqliteIndexStorage::getSourceGroupFailure(const std::string& sourceGroupId) const {
+  return getMetaValue("source_group_failure_" + sourceGroupId);
+}
+
+void SqliteIndexStorage::setSourceGroupFailure(const std::string& sourceGroupId, const std::string& failure) {
+  insertOrUpdateMetaValue("source_group_failure_" + sourceGroupId, failure);
+}
+
 Id SqliteIndexStorage::addNode(const StorageNodeData& data) {
   std::vector<Id> ids = addNodes({StorageNode(0, data)});
   return ids.empty() ? 0 : ids.front();

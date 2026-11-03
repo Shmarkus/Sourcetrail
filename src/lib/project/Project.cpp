@@ -405,6 +405,11 @@ void Project::buildIndex(RefreshInfo info, std::shared_ptr<DialogView> dialogVie
     return;
   }
 
+  // Groups indexed as a whole whose last run failed are not run again until their inputs change; their error stays.
+  for(const std::wstring& failure : info.wholeGroupFailures) {
+    MessageStatus(failure, true, false, true).dispatch();
+  }
+
   if(checkIfNothingToRefresh(info, dialogView)) {
     return;
   }
@@ -521,6 +526,17 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
                                                              std::shared_ptr<PersistentStorage> tempStorage,
                                                              size_t& sourceFileCount) {
   auto taskSequential = std::make_shared<TaskGroupSequence>();
+
+  // A group indexed as a whole loses its data before its command runs: until that command records its inputs again,
+  // the index must not claim the group is current, in case the refresh stops in between and its index is kept.
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
+    if(SOURCE_GROUP_STATUS_ENABLED == sourceGroup->getStatus() && sourceGroup->isIndexedAsWhole() &&
+       ranges::any_of(
+           sourceGroup->getAllSourceFilePaths(), [&info](const FilePath& path) { return info.filesToIndex.contains(path); })) {
+      tempStorage->setSourceGroupInputs(sourceGroup->getId(), {});
+      tempStorage->setSourceGroupFailure(sourceGroup->getId(), {});
+    }
+  }
 
   // Add task to clear the storage in case of refresh all
   if(RefreshMode::AllFiles != info.mode && (!info.filesToClear.empty() || !info.nonIndexedFilesToClear.empty())) {

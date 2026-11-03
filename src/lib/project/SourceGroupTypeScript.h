@@ -21,6 +21,7 @@ public:
 
   explicit SourceGroupTypeScript(std::shared_ptr<SourceGroupSettingsTypeScript> settings);
 
+  bool isIndexedAsWhole() const override;
   std::string getInputsRecord() const override;
 
   std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const override;

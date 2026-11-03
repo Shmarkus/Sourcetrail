@@ -43,14 +43,17 @@ public:
 
   // A command that exits with one of `exitCodes`, or cannot be started, did not apply to the project (a missing
   // prerequisite, an unsupported layout): it is reported as "<label> skipped: <message>", not as a failed command.
+  // Its other failures are reported as "<label> failed (exit code <n>): <its output>".
   void setSkippedOn(const std::wstring& label, const std::set<int>& exitCodes);
   bool isSkippedOn(int exitCode, bool started) const;
-  const std::wstring& getSkippedLabel() const;
+  const std::wstring& getLabel() const;
 
-  // Called once the command ran, with whether it succeeded and the storage it wrote to.
-  using FinishedHandler = std::function<void(bool succeeded, PersistentStorage& storage)>;
+  enum class Result { Succeeded, Skipped, Failed };
+  // Called once the command ran, with its result, the status message shown for it (empty if it succeeded) and the
+  // storage it wrote to.
+  using FinishedHandler = std::function<void(Result result, const std::wstring& status, PersistentStorage& storage)>;
   void setFinishedHandler(FinishedHandler handler);
-  void finished(bool succeeded, PersistentStorage& storage) const;
+  void finished(Result result, const std::wstring& status, PersistentStorage& storage) const;
 
 protected:
   QJsonObject doSerialize() const override;

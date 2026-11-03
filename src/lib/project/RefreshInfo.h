@@ -1,8 +1,11 @@
 #pragma once
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <ostream>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "FilePath.h"
 #include "to_underlying.hpp"
@@ -63,4 +66,9 @@ struct RefreshInfo final {
   std::set<FilePath> filesToCompareDeclarations;
   std::set<FilePath> dependentFilesToClear;
   std::set<FilePath> dependentFilesToIndex;
+
+  // Groups indexed as a whole (see SourceGroup::isIndexedAsWhole): the record of each one's inputs by group id, taken
+  // once for this refresh, and the stored failures of those left alone although their last run failed.
+  std::map<std::string, std::string> wholeGroupInputs;
+  std::vector<std::wstring> wholeGroupFailures;
 };

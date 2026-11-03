@@ -84,6 +84,8 @@ public:
   void setProjectSettingsText(std::string text);
   std::string getSourceGroupInputs(const std::string& sourceGroupId) const;
   void setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs);
+  std::string getSourceGroupFailure(const std::string& sourceGroupId) const;
+  void setSourceGroupFailure(const std::string& sourceGroupId, const std::string& failure);
 
   void setup();
   void updateVersion();

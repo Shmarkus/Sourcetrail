@@ -14,6 +14,7 @@
 #include "ResourcePaths.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SqliteIndexStorage.h"
+#include "utilityString.h"
 
 namespace fs = std::filesystem;
 
@@ -27,6 +28,10 @@ fs::path directory(const FilePath& path) {
 SourceGroupTypeScript::SourceGroupTypeScript(std::shared_ptr<SourceGroupSettingsTypeScript> settings)
     : m_settings(std::move(settings)) {}
 
+bool SourceGroupTypeScript::isIndexedAsWhole() const {
+  return true;
+}
+
 // Each trigger file below the TypeScript project with its size and modification time, hashed: any edit, new or
 // deleted file changes it.
 std::string SourceGroupTypeScript::getInputsRecord() const {
@@ -36,7 +41,7 @@ std::string SourceGroupTypeScript::getInputsRecord() const {
   for(fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
       it.increment(ec)) {
     if(it->is_directory(ec)) {
-      if(SourceGroupSettingsTypeScript::isExcludedDirectory(it->path().filename().wstring())) {
+      if(SourceGroupSettingsTypeScript::isUnwalkedDirectory(it->path().filename().wstring())) {
         it.disable_recursion_pending();
       }
     } else if(it->is_regular_file(ec) && SourceGroupSettingsTypeScript::isTriggerFile(FilePath(it->path().wstring()))) {
@@ -106,9 +111,14 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCo
       tsconfig,
       false);
   command->setSkippedOn(L"TypeScript", {NodeModulesMissingExitCode, UnsupportedLayoutExitCode});
-  // Recorded before the run, so that an edit during it is seen by the next refresh.
-  command->setFinishedHandler([id = getId(), inputs = getInputsRecord()](bool succeeded, PersistentStorage& storage) {
-    storage.setSourceGroupInputs(id, succeeded ? inputs : std::string());
+  // Taken before the run, so that an edit during it is seen by the next refresh. A skipped run (a missing
+  // prerequisite) is retried on every refresh, a failed one only once its inputs changed.
+  const auto inputs = info.wholeGroupInputs.find(getId());
+  command->setFinishedHandler([id = getId(), inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord()](
+                                  IndexerCommandCustom::Result result, const std::wstring& status, PersistentStorage& storage) {
+    storage.setSourceGroupInputs(id, result == IndexerCommandCustom::Result::Skipped ? std::string() : inputs);
+    storage.setSourceGroupFailure(
+        id, result == IndexerCommandCustom::Result::Failed ? utility::encodeToUtf8(status) : std::string());
   });
   return {command};
 }

@@ -274,6 +274,14 @@ void PersistentStorage::setSourceGroupInputs(const std::string& sourceGroupId, c
   m_sqliteIndexStorage.setSourceGroupInputs(sourceGroupId, inputs);
 }
 
+std::string PersistentStorage::getSourceGroupFailure(const std::string& sourceGroupId) const {
+  return m_sqliteIndexStorage.getSourceGroupFailure(sourceGroupId);
+}
+
+void PersistentStorage::setSourceGroupFailure(const std::string& sourceGroupId, const std::string& failure) {
+  m_sqliteIndexStorage.setSourceGroupFailure(sourceGroupId, failure);
+}
+
 void PersistentStorage::setup() {
   m_sqliteIndexStorage.setup();
   m_sqliteBookmarkStorage.setup();

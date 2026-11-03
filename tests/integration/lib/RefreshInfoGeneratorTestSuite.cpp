@@ -93,9 +93,16 @@ public:
   WholeSourceGroupTest(const FilePath& configFilePath, std::set<FilePath> filePaths, std::string inputs)
       : SourceGroupTest({configFilePath}, std::move(filePaths)), m_inputs(std::move(inputs)) {}
 
+  bool isIndexedAsWhole() const override {
+    return true;
+  }
+
   std::string getInputsRecord() const override {
+    ++m_inputsRecordCount;
     return m_inputs;
   }
+
+  mutable int m_inputsRecordCount = 0;
 
 private:
   const std::string m_inputs;
@@ -1022,6 +1029,35 @@ TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReimportsAWholeGroupWithAnE
     EXPECT_TRUE(refreshInfo.filesToCompareDeclarations.empty());
     EXPECT_TRUE(refreshInfo.dependentFilesToClear.empty());
     EXPECT_TRUE(refreshInfo.dependentFilesToIndex.empty());
+  }
+  cleanup();
+}
+
+// A whole group whose last run failed is left alone until its inputs change; the refresh repeats the failure. Its
+// inputs are walked once per refresh.
+TEST(RefreshInfoGenerator, refreshInfoForIncompleteFilesRepeatsTheFailureOfAnUnchangedWholeGroup) {
+  cleanup();
+  {
+    const FilePath configFilePath = m_sourceFolder.getConcatenated(L"tsconfig.json");
+    const FilePath moduleFilePath = m_sourceFolder.getConcatenated(L"module.ts");
+
+    const auto group = std::make_shared<WholeSourceGroupTest>(configFilePath, std::set<FilePath>{moduleFilePath}, "inputs");
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups{group};
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+    addFileToFileSystem(moduleFilePath);
+    addFileToFileSystem(configFilePath);
+    storage->setSourceGroupInputs("TEST_ID", "inputs");
+    storage->setSourceGroupFailure("TEST_ID", "TypeScript failed (exit code 1): broken");
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForIncompleteFiles(sourceGroups, storage);
+
+    EXPECT_TRUE(refreshInfo.filesToIndex.empty());
+    EXPECT_EQ(std::vector<std::wstring>({L"TypeScript failed (exit code 1): broken"}), refreshInfo.wholeGroupFailures);
+    EXPECT_EQ(1, group->m_inputsRecordCount);
+    EXPECT_EQ("inputs", refreshInfo.wholeGroupInputs.at("TEST_ID"));
   }
   cleanup();
 }

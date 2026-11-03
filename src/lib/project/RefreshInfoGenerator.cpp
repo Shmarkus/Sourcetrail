@@ -10,6 +10,7 @@
 #include "SourceGroupStatusType.h"
 #include "TextAccess.h"
 #include "utility.h"
+#include "utilityString.h"
 
 namespace {
 std::set<FilePath> subtract(std::set<FilePath> paths, const std::set<FilePath>& removedPaths) {
@@ -22,27 +23,43 @@ std::set<FilePath> subtract(std::set<FilePath> paths, const std::set<FilePath>& 
 // A group indexed as a whole (see SourceGroup::getInputsRecord) is cleared and indexed in full when its inputs changed
 // or any of its files is to be cleared, and left alone otherwise. Its files never take part in the second pass that
 // compares declarations: they are not indexed one by one.
+std::vector<std::shared_ptr<SourceGroup>> getEnabledGroupsIndexedAsWhole(
+    const std::vector<std::shared_ptr<SourceGroup>>& sourceGroups) {
+  std::vector<std::shared_ptr<SourceGroup>> wholeGroups;
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : sourceGroups) {
+    if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED && sourceGroup->isIndexedAsWhole()) {
+      wholeGroups.push_back(sourceGroup);
+    }
+  }
+  return wholeGroups;
+}
+
+// Walks each group's inputs once per refresh.
+void takeInputsRecords(RefreshInfo& info, const std::vector<std::shared_ptr<SourceGroup>>& wholeGroups) {
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : wholeGroups) {
+    if(!info.wholeGroupInputs.contains(sourceGroup->getId())) {
+      info.wholeGroupInputs[sourceGroup->getId()] = sourceGroup->getInputsRecord();
+    }
+  }
+}
+
 void applyGroupsIndexedAsWhole(RefreshInfo& info,
                                const std::vector<std::shared_ptr<SourceGroup>>& sourceGroups,
                                const std::shared_ptr<const PersistentStorage>& storage) {
-  std::vector<std::pair<std::shared_ptr<SourceGroup>, std::string>> wholeGroups;
-  for(const std::shared_ptr<SourceGroup>& sourceGroup : sourceGroups) {
-    if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED) {
-      if(std::string inputs = sourceGroup->getInputsRecord(); !inputs.empty()) {
-        wholeGroups.emplace_back(sourceGroup, std::move(inputs));
-      }
-    }
-  }
+  const std::vector<std::shared_ptr<SourceGroup>> wholeGroups = getEnabledGroupsIndexedAsWhole(sourceGroups);
   if(wholeGroups.empty()) {
     return;
   }
+  takeInputsRecords(info, wholeGroups);
 
   std::set<FilePath> storedFilePaths;
   for(const FileInfo& fileInfo : storage->getFileInfoForAllFiles()) {
     storedFilePaths.insert(fileInfo.path);
   }
 
-  for(const auto& [sourceGroup, inputs] : wholeGroups) {
+  info.wholeGroupFailures.clear();
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : wholeGroups) {
+    const std::string& inputs = info.wholeGroupInputs.at(sourceGroup->getId());
     const std::set<FilePath> groupFilePaths = sourceGroup->filterToContainedFilePaths(storedFilePaths);
     const std::set<FilePath> sourceFilePaths = sourceGroup->getAllSourceFilePaths();
     const auto toClear = [&info](const FilePath& path) {
@@ -71,6 +88,9 @@ void applyGroupsIndexedAsWhole(RefreshInfo& info,
       info.filesToClear = subtract(info.filesToClear, groupFilePaths);
       info.nonIndexedFilesToClear = subtract(info.nonIndexedFilesToClear, groupFilePaths);
       info.filesToIndex = subtract(info.filesToIndex, sourceFilePaths);
+      if(const std::string failure = storage->getSourceGroupFailure(sourceGroup->getId()); !failure.empty()) {
+        info.wholeGroupFailures.push_back(utility::decodeFromUtf8(failure));
+      }
     }
   }
 
@@ -260,6 +280,7 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForAllFiles(const std::vector<st
   RefreshInfo info;
   info.mode = RefreshMode::AllFiles;
   info.filesToIndex = getAllSourceFilePaths(sourceGroups);
+  takeInputsRecords(info, getEnabledGroupsIndexedAsWhole(sourceGroups));
   return info;
 }
 

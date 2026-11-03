@@ -20,6 +20,20 @@
 #include "utilityString.h"
 
 namespace {
+// The end of a command's output, which is where its error is.
+std::wstring lastLines(const std::wstring& output) {
+  constexpr size_t MaxLines = 20;
+  size_t start = output.size();
+  for(size_t lines = 0; lines < MaxLines; ++lines) {
+    const size_t newline = start == 0 ? std::wstring::npos : output.rfind(L'\n', start - 1);
+    if(newline == std::wstring::npos) {
+      return output;
+    }
+    start = newline;
+  }
+  return output.substr(start + 1);
+}
+
 size_t toPercent(size_t value, size_t maxValue) {
   constexpr size_t Percent = 100;
   return value * Percent / maxValue;
@@ -221,20 +235,28 @@ void TaskExecuteCustomCommands::runIndexerCommand(const std::shared_ptr<IndexerC
       }
     }
 
-    const bool succeeded = out.exitCode == 0 && out.error.empty();
-    if(succeeded) {
+    IndexerCommandCustom::Result result = IndexerCommandCustom::Result::Succeeded;
+    std::wstring statusText;
+    if(out.exitCode == 0 && out.error.empty()) {
       LOG_INFO(L"Process returned successfully.");
     } else if(indexerCommand->isSkippedOn(out.exitCode, out.error.empty())) {
       // The command's own message: its output, or why it could not be started.
       const std::wstring message = out.error.empty() ?
           out.output :
           std::format(L"cannot run \"{}\": {}", indexerCommand->getCommand(), out.error);
-      const std::wstring statusText = std::format(L"{} skipped: {}", indexerCommand->getSkippedLabel(), message);
+      result = IndexerCommandCustom::Result::Skipped;
+      statusText = std::format(L"{} skipped: {}", indexerCommand->getLabel(), message);
       LOG_WARNING(statusText);
       MessageStatus(statusText).dispatch();
+    } else if(!indexerCommand->getLabel().empty()) {
+      result = IndexerCommandCustom::Result::Failed;
+      statusText = std::format(L"{} failed (exit code {}): {}", indexerCommand->getLabel(), out.exitCode, lastLines(out.output));
+      LOG_ERROR(statusText);
+      MessageShowStatus().dispatch();
+      MessageStatus(statusText, true, false, true).dispatch();
     } else {
-      std::wstring statusText = std::format(
-          L"command \"{} {}\" returned", indexerCommand->getCommand(), utility::join(arguments, L" "));
+      result = IndexerCommandCustom::Result::Failed;
+      statusText = std::format(L"command \"{} {}\" returned", indexerCommand->getCommand(), utility::join(arguments, L" "));
       if(out.exitCode != 0) {
         statusText += std::format(L" code \"{}\"", out.exitCode);
       }
@@ -248,7 +270,7 @@ void TaskExecuteCustomCommands::runIndexerCommand(const std::shared_ptr<IndexerC
       MessageStatus(statusText, true, false, true).dispatch();
     }
     if(storage) {
-      indexerCommand->finished(succeeded, *storage);
+      indexerCommand->finished(result, statusText, *storage);
     }
 
     indexedSourceFileCount++;

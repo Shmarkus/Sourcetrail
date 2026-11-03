@@ -66,6 +66,9 @@ protected:
   }
 
   void SetUp() override {
+    if(!QFile::exists(QFileInfo(QStringLiteral(SOURCETRAIL_APP_PATH)).absolutePath() + "/data/ts-indexer/index.mjs")) {
+      GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
+    }
     const QByteArray javaHome = qgetenv("JAVA_HOME");
     ASSERT_FALSE(javaHome.isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
     ASSERT_TRUE(mDir.isValid());
@@ -211,6 +214,20 @@ protected:
   static void edit(const QString& path, const QString& text) {
     QThread::msleep(1100);
     write(path, text);
+  }
+
+  // A folder whose `node` runs `script` instead (a POSIX shell script), for PATH; empty when Sourcetrail would find a
+  // real node first.
+  QString fakeNode(const QString& script) {
+    for(const char* folder : {"/opt/local/bin", "/usr/local/bin"}) {
+      if(QFile::exists(QString(folder) + "/node")) {
+        return {};
+      }
+    }
+    const QString folder = mRoot + "/../fake-bin";
+    write(folder + "/node", "#!/bin/sh\n" + script + "\n");
+    QFile::setPermissions(folder + "/node", QFile::permissions(folder + "/node") | QFile::ExeOwner);
+    return folder + ":/usr/bin:/bin";
   }
 
   QString sidecar() const {
@@ -381,6 +398,70 @@ TEST_F(TypeScriptSourceGroup, missingNodeSkipsTypeScriptOnly) {
   EXPECT_FALSE(result.output.contains("ERROR")) << result.output.toStdString();
   EXPECT_EQ(16U, fileIds("mixed", ".java").size());
   EXPECT_TRUE(fileIds("mixed", ".ts").empty());
+}
+
+// A refresh that clears the TypeScript data and stops before re-importing it (interrupted, crashed), but whose index is
+// kept, must not leave the next refresh thinking the TypeScript part is current.
+TEST_F(TypeScriptSourceGroup, interruptedReimportIsRepairedByTheNextRefresh) {
+  const QString crashingNode = fakeNode(QStringLiteral("kill -9 $PPID"));
+  if(crashingNode.isEmpty()) {
+    GTEST_SKIP() << "a node in /opt/local/bin or /usr/local/bin comes before PATH";
+  }
+  writeProject("mixed", true, true);
+  ASSERT_EQ(0, index("mixed", true).exitCode);
+  const std::multiset<QString> typeScriptLocations = locations("mixed", ".ts");
+  const QString original = read(orderService());
+  const auto originalTime = std::filesystem::last_write_time(orderService().toStdString());
+
+  edit(orderService(), original + "\n");
+  index("mixed", false, crashingNode);
+  // Keep the index the crashed refresh left behind, as the GUI offers after a crash.
+  ASSERT_TRUE(QFile::exists(mRoot + "/mixed.srctrldb_tmp"));
+  ASSERT_TRUE(QFile::remove(mRoot + "/mixed.srctrldb"));
+  ASSERT_TRUE(QFile::rename(mRoot + "/mixed.srctrldb_tmp", mRoot + "/mixed.srctrldb"));
+  ASSERT_TRUE(fileIds("mixed", ".ts").empty()) << "the crashed refresh did not clear the TypeScript data";
+  // The TypeScript inputs are as they were when the TypeScript data was last imported.
+  write(orderService(), original);
+  std::filesystem::last_write_time(orderService().toStdString(), originalTime);
+
+  const RunResult result = index("mixed", false);
+  ASSERT_EQ(0, result.exitCode) << result.output.toStdString();
+  EXPECT_EQ(9U, fileIds("mixed", ".ts").size()) << result.output.toStdString();
+  EXPECT_TRUE(typeScriptLocations == locations("mixed", ".ts"));
+}
+
+// A TypeScript indexer that fails is not run again until its inputs change, but each refresh repeats its error.
+TEST_F(TypeScriptSourceGroup, failedTypeScriptRunIsRetriedOnlyAfterAnEdit) {
+  const QString runs = mRoot + "/../node-runs";
+  const QString failingNode = fakeNode("echo run >> '" + runs + "'\necho 'ts-indexer: converter broke' >&2\nexit 1");
+  if(failingNode.isEmpty()) {
+    GTEST_SKIP() << "a node in /opt/local/bin or /usr/local/bin comes before PATH";
+  }
+  writeProject("mixed", true, true);
+  const auto runCount = [&runs]() { return read(runs).count(QStringLiteral("run")); };
+
+  RunResult result = index("mixed", true, failingNode);
+  EXPECT_EQ(1, result.exitCode) << result.output.toStdString();
+  EXPECT_TRUE(result.output.contains("TypeScript failed")) << result.output.toStdString();
+  EXPECT_TRUE(result.output.contains("ts-indexer: converter broke")) << result.output.toStdString();
+  EXPECT_EQ(16U, fileIds("mixed", ".java").size());
+  EXPECT_EQ(1, runCount());
+
+  const QString javaFile = mRoot + "/src/main/java/com/acme/shop/OrderService.java";
+  edit(javaFile, read(javaFile) + "\n// edited\n");
+  result = index("mixed", false, failingNode);
+  EXPECT_EQ(1, runCount()) << result.output.toStdString();
+  EXPECT_TRUE(result.output.contains("TypeScript failed")) << result.output.toStdString();
+  EXPECT_TRUE(result.output.contains("ts-indexer: converter broke")) << result.output.toStdString();
+
+  result = index("mixed", false, failingNode);
+  EXPECT_EQ(1, runCount()) << result.output.toStdString();
+  EXPECT_TRUE(result.output.contains("TypeScript failed")) << result.output.toStdString();
+
+  edit(orderService(), read(orderService()) + "\n");
+  result = index("mixed", false);
+  EXPECT_EQ(0, result.exitCode) << result.output.toStdString();
+  EXPECT_EQ(9U, fileIds("mixed", ".ts").size()) << result.output.toStdString();
 }
 
 // What the Java half indexes to must not change because a TypeScript group sits next to it: every node, edge and

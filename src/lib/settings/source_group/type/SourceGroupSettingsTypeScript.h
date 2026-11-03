@@ -27,7 +27,13 @@ public:
 
   // Folders below the TypeScript project that hold no sources of it.
   static bool isExcludedDirectory(const std::wstring& name) {
-    return name == L"node_modules" || name == L".sourcetrail" || name == L".git";
+    return name == L"node_modules" || name == L".sourcetrail";
+  }
+
+  // Folders the search for trigger files leaves out: the excluded ones, and version control, build output and caches.
+  static bool isUnwalkedDirectory(const std::wstring& name) {
+    return isExcludedDirectory(name) || name == L".git" || name == L"build" || name == L"target" || name == L"dist" ||
+        name == L".angular" || name == L"coverage";
   }
 
   FilePath getTsconfigPath() const {

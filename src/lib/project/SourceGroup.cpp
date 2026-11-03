@@ -46,6 +46,10 @@ bool SourceGroup::allowsShallowIndexing() const {
   return false;
 }
 
+bool SourceGroup::isIndexedAsWhole() const {
+  return false;
+}
+
 std::string SourceGroup::getInputsRecord() const {
   return {};
 }

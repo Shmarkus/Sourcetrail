@@ -149,6 +149,20 @@ public:
   void setSourceGroupInputs(const std::string& sourceGroupId, const std::string& inputs);
 
   /**
+   * @brief Returns why the last indexing of a source group indexed as a whole failed
+   * @param sourceGroupId The source group's id
+   * @return The failure's status message, empty if that indexing succeeded
+   */
+  std::string getSourceGroupFailure(const std::string& sourceGroupId) const;
+
+  /**
+   * @brief Sets why the indexing of a source group indexed as a whole failed
+   * @param sourceGroupId The source group's id
+   * @param failure The failure's status message, empty if it succeeded
+   */
+  void setSourceGroupFailure(const std::string& sourceGroupId, const std::string& failure);
+
+  /**
    * @brief Adds a node to the storage
    * @param data The data to add
    * @return The ID of the added node

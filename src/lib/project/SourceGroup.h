@@ -28,10 +28,11 @@ public:
   virtual bool allowsPartialClearing() const;
   virtual bool allowsShallowIndexing() const;
 
-  // A group indexed by one command over all of its files at once, the TypeScript group, returns a record of the inputs
-  // that command reads; the index stores it once the command succeeded. A refresh clears and re-imports the whole group
-  // when the record differs from the stored one or the refresh clears any of the group's files, and touches none of
-  // its files otherwise. Empty for groups indexed file by file.
+  // A group indexed by one command over all of its files at once, the TypeScript group, has a record of the inputs that
+  // command reads; the index stores it once the command ran (with the failure, if it failed). A refresh clears and
+  // re-imports the whole group when the record differs from the stored one or the refresh clears any of the group's
+  // files, and touches none of its files otherwise. Groups indexed file by file have none.
+  virtual bool isIndexedAsWhole() const;
   virtual std::string getInputsRecord() const;
 
   virtual std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const = 0;

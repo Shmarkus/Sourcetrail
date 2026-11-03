@@ -85,7 +85,7 @@ bool IndexerCommandCustom::isSkippedOn(int exitCode, bool started) const {
   return !m_skippedLabel.empty() && (!started || m_skippedExitCodes.contains(exitCode));
 }
 
-const std::wstring& IndexerCommandCustom::getSkippedLabel() const {
+const std::wstring& IndexerCommandCustom::getLabel() const {
   return m_skippedLabel;
 }
 
@@ -93,9 +93,9 @@ void IndexerCommandCustom::setFinishedHandler(FinishedHandler handler) {
   m_finishedHandler = std::move(handler);
 }
 
-void IndexerCommandCustom::finished(bool succeeded, PersistentStorage& storage) const {
+void IndexerCommandCustom::finished(Result result, const std::wstring& status, PersistentStorage& storage) const {
   if(m_finishedHandler) {
-    m_finishedHandler(succeeded, storage);
+    m_finishedHandler(result, status, storage);
   }
 }
 

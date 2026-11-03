@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 
 #include "FilePath.h"
+#include "FileSystem.h"
 #include "PersistentStorage.h"
+#include "SqliteIndexStorage.h"
 
 namespace {
 
@@ -39,6 +41,28 @@ TEST_F(TaskClearStorageScenario, goodCase) {
   mStorage->clearAllErrors();
   // Then:
   ASSERT_THAT(mStorage->getErrors(), IsEmpty());
+}
+
+TEST(StorageVersion, version26DatabaseIsReportedIncompatible) {
+  // Version 26 is what master's fork wrote; this build's index is version 27 and must be rebuilt from scratch.
+  const FilePath databasePath(L"data/StorageVersionTestSuite/version26.sqlite");
+  std::ignore = FileSystem::remove(databasePath);
+  {
+    SqliteIndexStorage oldStorage(databasePath);
+    oldStorage.setup();
+    oldStorage.setVersion(26);
+  }
+
+  bool incompatible = false;
+  {
+    const PersistentStorage storage(databasePath, FilePath{L"data/StorageVersionTestSuite/version26Bookmarks.sqlite"});
+    incompatible = storage.isIncompatible();
+  }
+  std::ignore = FileSystem::remove(databasePath);
+  std::ignore = FileSystem::remove(FilePath{L"data/StorageVersionTestSuite/version26Bookmarks.sqlite"});
+
+  EXPECT_EQ(27U, SqliteIndexStorage::getStorageVersion());
+  EXPECT_TRUE(incompatible);
 }
 
 }    // namespace

@@ -40,9 +40,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
-          # The default **/pom.xml glob walks into the self-referencing symlinks under bin/test/data.
-          cache-dependency-path: java_indexer/pom.xml
+
+      # Not setup-java's own Maven cache: it globs the whole checkout and fails (ELOOP) on the self-referencing
+      # symlinks under bin/test/data, even with cache-dependency-path set.
+      - name: Cache the Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ hashFiles('java_indexer/pom.xml') }}
 
       - name: Cache the toolchain (Qt, Conan packages)
         id: toolchain-cache

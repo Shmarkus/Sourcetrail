@@ -58,6 +58,10 @@ class RunConfig:
     startup_repeats: int | None = None
     # Strings that must not show up in an agent's commands or paths (question files); see config_markers.
     leak_markers: list = field(default_factory=list)
+    # Batches: leave the tools running after the questions (a later batch runs with skip_warm_up), and the question
+    # id to its position in the full question file, so the arm order is the one a single run would use.
+    skip_shut_down: bool = False
+    positions: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -304,7 +308,7 @@ def run_benchmark(config: RunConfig, resume: bool = False, progress=print) -> li
             _warm_up(config, arms, progress)
         _run_questions(config, arms, done, progress)
     finally:
-        if not config.skip_warm_up:
+        if not config.skip_warm_up and not config.skip_shut_down:
             _shut_down(config, arms, progress)
     return read_records(config.out_dir)
 
@@ -315,7 +319,7 @@ def _run_questions(config: RunConfig, arms: dict, done: set, progress) -> None:
     count = len(done)
     for repeat in range(1, config.repeats + 1):
         for position, question in enumerate(config.questions):
-            for name in _arm_order(config.arms, position + repeat):
+            for name in _arm_order(config.arms, config.positions.get(question["id"], position) + repeat):
                 if (question["id"], name, repeat) in done:
                     continue
                 if fingerprint:

@@ -179,6 +179,12 @@ def _load(args) -> dict:
         _fail(str(error))
 
 
+def _positions(path: str) -> dict:
+    """Question id to its place in the full file, so --only batches keep a full run's arm order."""
+    with open(path, encoding="utf-8") as handle:
+        return {question["id"]: index for index, question in enumerate(json.load(handle).get("questions", []))}
+
+
 def cmd_run(args) -> None:
     data = _load(args)
     try:
@@ -202,6 +208,7 @@ def cmd_run(args) -> None:
         specs=specs, notes={name: _note(spec, work) for name, spec in specs.items() if spec.note},
         skip_warm_up=args.no_warm_up, startup_repeats=args.startup_repeats,
         leak_markers=[os.path.basename(args.questions), os.path.dirname(os.path.abspath(args.questions))],
+        skip_shut_down=args.no_shut_down, positions=_positions(args.questions),
     )
     if not args.resume or not os.path.isfile(os.path.join(out_dir, "meta.json")):
         _write_meta(out_dir, args, arms, data.get("project", {}).get("name", ""),
@@ -286,6 +293,9 @@ def main(argv=None) -> None:
                                     "or results, the agents can reach it")
     run.add_argument("--no-warm-up", action="store_true",
                      help="skip the arms' warm-up, startup and shut-down commands (the tools are already warm)")
+    run.add_argument("--no-shut-down", action="store_true",
+                     help="leave the arms' tools running after the questions, for later --resume --no-warm-up "
+                          "batches into the same --out and --work")
     run.add_argument("--startup-repeats", type=int, help="per-session startup probes per arm (default: the arm's)")
     run.add_argument("--repeats", type=int, default=3, help="runs per question and arm (default 3)")
     run.add_argument("--model", help="model for every arm (default: the CLI's default)")

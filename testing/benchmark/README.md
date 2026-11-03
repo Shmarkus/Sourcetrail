@@ -78,7 +78,8 @@ it). `run` stops when `st` or a binary beside it changes during the run, keeping
 
 Useful options: `--model` (the same for every arm), `--st /path/to/st`, `--arms st` (one arm only), `--timeout`,
 `--max-turns`, `--bare` (no CLAUDE.md discovery at all; needs `ANTHROPIC_API_KEY`), `--work DIR` (keep the arms'
-copies and tool state), `--no-warm-up` (the tools are already warm). Without `--bare`, your `~/.claude/CLAUDE.md`
+copies and tool state), `--no-warm-up` (the tools are already warm), `--no-shut-down` (leave them running for later batches: run
+`--only` batches with `--resume --no-warm-up` into the same `--out` and `--work`; the arm order stays the full run's). Without `--bare`, your `~/.claude/CLAUDE.md`
 applies to every arm. The run warns if it mentions `st`.
 
 ## Arms

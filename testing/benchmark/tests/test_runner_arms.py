@@ -175,6 +175,20 @@ class ConfiguredArmTest(unittest.TestCase):
         run_benchmark(self.config(self.spec()), progress=lambda _: None)
         self.assertIsNone(read_records(self.out)[0]["tool_started_in_session"])
 
+    def test_batches_keep_the_tools_running_and_the_arm_order_of_the_full_set(self):
+        spec = self.spec(warm_up=f"echo warm >> {self.marks}", shut_down=f"echo stop >> {self.marks}")
+        config = self.config(spec, load_arm(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                         "arms", "grep.json")))
+        config.questions = QUESTIONS[1:]
+        config.positions = {"Q1": 0, "Q2": 1}
+        config.skip_shut_down = True
+        run_benchmark(config, progress=lambda _: None)
+        with open(self.marks) as handle:
+            self.assertEqual(handle.read().split(), ["warm"])
+        first = self.seen_runs()[0]["args"]
+        # Q2 sits at position 1 of the full set: (1 + repeat 1) % 2 = 0, so the arm listed first goes first.
+        self.assertEqual(first[first.index("--tools") + 1], "Bash,Read,Grep,Glob,LSP")
+
     def test_a_failed_warm_up_stops_before_any_agent_run_and_still_shuts_down(self):
         spec = self.spec(warm_up="echo broken >&2; exit 4", shut_down=f"echo stop >> {self.marks}")
         with self.assertRaisesRegex(WarmUpFailed, "tool.*exit 4"):

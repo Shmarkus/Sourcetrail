@@ -82,7 +82,8 @@ std::shared_ptr<SourceGroupSettings> createSourceGroup(const fs::path& folder,
   case JavaBuildKind::None: {
     auto settings = std::make_shared<SourceGroupSettingsJavaEmpty>(id, projectSettings);
     settings->setName("Java");
-    settings->setSourcePaths({relativeToProject(folder, projectDirectory)});
+    // absolute: the settings page checks it before .sourcetrail/ exists, which a relative ".." needs
+    settings->setSourcePaths({FilePath{folder.wstring()}});
     settings->setExcludeFilterStrings({L"**/" + std::wstring{ProjectFolderName} + L"/**"});
     settings->setJavaStandard(JavaStandard);
     return settings;
@@ -129,47 +130,60 @@ FilePath existingProjectFile(const FilePath& folder) {
 }
 
 FilePath createJavaProject(const FilePath& folder, JavaBuildKind kind) {
+  if(!prepareProjectFolder(folder)) {
+    return {};
+  }
+
+  const auto settings = javaProjectSettings(folder, kind);
+  if(!settings->save(settings->getFilePath())) {
+    LOG_ERROR("Cannot write {}", settings->getFilePath().str());
+    return {};
+  }
+  return settings->getFilePath();
+}
+
+std::shared_ptr<ProjectSettings> javaProjectSettings(const FilePath& folder, JavaBuildKind kind) {
   const fs::path path = folderPath(folder);
-  const fs::path projectDirectory = path / ProjectFolderName;
+  auto settings = std::make_shared<ProjectSettings>();
+  settings->setProjectFilePath(path.filename().wstring(), FilePath{(path / ProjectFolderName).wstring()});
+  settings->setVersion(ProjectSettings::VERSION);
+  settings->setAllSourceGroupSettings({createSourceGroup(path, kind, settings.get())});
+  return settings;
+}
+
+bool prepareProjectFolder(const FilePath& folder) {
+  const fs::path projectDirectory = folderPath(folder) / ProjectFolderName;
 
   std::error_code error;
   fs::create_directories(projectDirectory, error);
   if(error) {
     LOG_ERROR("Cannot create {}: {}", projectDirectory.string(), error.message());
-    return {};
+    return false;
   }
 
-  {
-    std::ofstream gitignore{projectDirectory / ".gitignore", std::ios::binary | std::ios::trunc};
-    gitignore << "*\n";
-    if(!gitignore) {
-      LOG_ERROR("Cannot write {}", (projectDirectory / ".gitignore").string());
-      return {};
-    }
+  std::ofstream gitignore{projectDirectory / ".gitignore", std::ios::binary | std::ios::trunc};
+  gitignore << "*\n";
+  if(!gitignore) {
+    LOG_ERROR("Cannot write {}", (projectDirectory / ".gitignore").string());
+    return false;
   }
-
-  const FilePath projectFile = projectFileFor(folder);
-  ProjectSettings settings;
-  settings.setVersion(ProjectSettings::VERSION);
-  settings.setAllSourceGroupSettings({createSourceGroup(path, kind, &settings)});
-  if(!settings.save(projectFile)) {
-    LOG_ERROR("Cannot write {}", projectFile.str());
-    return {};
-  }
-  return projectFile;
+  return true;
 }
 
 JavaProjectChoice openOrCreateJavaProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava) {
   if(FilePath existing = existingProjectFile(folder); !existing.empty()) {
-    return {existing, false, detectJavaBuild(folder)};
+    return {.projectFile = existing, .kind = detectJavaBuild(folder)};
   }
 
   const JavaBuildKind kind = detectJavaBuild(folder);
-  if(kind == JavaBuildKind::None && !acceptPlainJava()) {
-    return {};
+  if(kind == JavaBuildKind::None) {
+    if(!acceptPlainJava()) {
+      return {};
+    }
+    return {.projectFile = projectFileFor(folder), .needsSetup = true, .kind = kind};
   }
 
   FilePath projectFile = createJavaProject(folder, kind);
   const bool created = !projectFile.empty();
-  return {std::move(projectFile), created, kind};
+  return {.projectFile = std::move(projectFile), .created = created, .kind = kind};
 }

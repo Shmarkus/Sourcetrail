@@ -315,6 +315,10 @@ void QtProjectWizard::editProject(std::shared_ptr<ProjectSettings> settings) {
   setup();
 }
 
+void QtProjectWizard::setBeforeSave(std::function<bool()> beforeSave) {
+  m_beforeSave = std::move(beforeSave);
+}
+
 void QtProjectWizard::populateWindow(QWidget* widget) {
   QHBoxLayout* layout = new QHBoxLayout();
   layout->setContentsMargins(0, 0, 0, 0);
@@ -806,7 +810,7 @@ void QtProjectWizard::createProject() {
 
   m_projectSettings->setVersion(ProjectSettings::VERSION);
   m_projectSettings->setAllSourceGroupSettings(m_allSourceGroupSettings);
-  if(!m_projectSettings->save(path)) {
+  if((m_beforeSave && !m_beforeSave()) || !m_projectSettings->save(path)) {
     MessageStatus(L"Unable to save project to location: " + path.wstr()).dispatch();
 
     QMessageBox msgBox(this);

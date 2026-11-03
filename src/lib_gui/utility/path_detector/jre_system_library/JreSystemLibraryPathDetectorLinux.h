@@ -4,5 +4,5 @@
 
 class JreSystemLibraryPathDetectorLinux : public JreSystemLibraryPathDetector {
 public:
-  explicit JreSystemLibraryPathDetectorLinux(const std::string& javaVersion);
+  explicit JreSystemLibraryPathDetectorLinux(int minimumMajorVersion);
 };

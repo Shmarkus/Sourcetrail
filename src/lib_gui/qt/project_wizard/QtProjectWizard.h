@@ -32,6 +32,9 @@ public:
   void editProject(const FilePath& settingsPath);
   void editProject(std::shared_ptr<ProjectSettings> settings);
 
+  // Runs before the project file is saved; false keeps the wizard open as a failed save does.
+  void setBeforeSave(std::function<bool()> beforeSave);
+
 protected:
   void populateWindow(QWidget* widget) override;
   void windowReady() override;
@@ -48,6 +51,7 @@ private:
 
   // TODO: They should be moved to `ProjectWizardModel`
   std::shared_ptr<ProjectSettings> m_projectSettings;
+  std::function<bool()> m_beforeSave;
   std::vector<std::shared_ptr<SourceGroupSettings>> m_allSourceGroupSettings;
   ApplicationSettings m_appSettings;
 

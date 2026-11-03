@@ -16,8 +16,8 @@ constexpr std::array JvmLibPathsRelativeToJavaExecutable = {L"/../lib/server/lib
 #endif
 }    // namespace
 
-JavaPathDetectorLinux::JavaPathDetectorLinux(const std::string& javaVersion)
-    : JavaPathDetector(javaVersion.empty() ? "Java for Linux" : "Java " + javaVersion + " for Linux", javaVersion) {}
+JavaPathDetectorLinux::JavaPathDetectorLinux(int minimumMajorVersion)
+    : JavaPathDetector("Java " + std::to_string(minimumMajorVersion) + " or later for Linux", minimumMajorVersion) {}
 
 std::vector<FilePath> JavaPathDetectorLinux::doGetPaths() const {
   std::vector<FilePath> paths;
@@ -95,6 +95,5 @@ FilePath JavaPathDetectorLinux::getJavaInJavaHome() const {
 bool JavaPathDetectorLinux::checkVersion(const FilePath& path) const {
   const utility::ProcessOutput out = utility::executeProcess(path.wstr(), {L"-version"});
 
-  return out.exitCode == 0 &&
-      (m_javaVersion.empty() || out.output.find(utility::decodeFromUtf8(m_javaVersion)) != std::wstring::npos);
+  return out.exitCode == 0 && majorVersion(out.output) >= m_minimumMajorVersion;
 }

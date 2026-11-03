@@ -23,6 +23,21 @@ add_sourcetrail_test(
   WORKING_DIRECTORY
   "${CMAKE_BINARY_DIR}/test/")
 
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  add_sourcetrail_test(
+    NAME
+    JavaPathDetectorTestSuite
+    SOURCES
+    JavaPathDetectorTestSuite.cpp
+    DEPS
+    Sourcetrail::lib_gui
+    Sourcetrail::lib_gui::utility
+    TEST_PREFIX
+    "unittests.lib_gui."
+    WORKING_DIRECTORY
+    "${CMAKE_BINARY_DIR}/test/")
+endif()
+
 # Check the following https://gist.github.com/seyhajin/77f5143b8be7d2120c3646b61765476d
 if(MSVC AND MSVC_VERSION GREATER_EQUAL 1910)
   add_sourcetrail_test(

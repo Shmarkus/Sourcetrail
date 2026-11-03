@@ -189,17 +189,43 @@ TEST_F(JavaProjectSetupTest, openOrCreateCreatesAProjectForTheDetectedBuild) {
 
   EXPECT_FALSE(asked);
   EXPECT_TRUE(choice.created);
+  EXPECT_FALSE(choice.needsSetup);
   EXPECT_EQ(JavaBuildKind::Maven, choice.kind);
   EXPECT_EQ(projectFileFor(folder()), choice.projectFile);
   EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(onlySourceGroup(choice.projectFile)));
 }
 
-TEST_F(JavaProjectSetupTest, openOrCreateWithoutABuildCreatesAPlainJavaProjectWhenAccepted) {
+TEST_F(JavaProjectSetupTest, openOrCreateWithoutABuildLeavesThePlainJavaProjectToTheEditorWhenAccepted) {
   const JavaProjectChoice choice = openOrCreateJavaProject(folder(), [] { return true; });
 
-  EXPECT_TRUE(choice.created);
+  EXPECT_EQ(projectFileFor(folder()), choice.projectFile);
+  EXPECT_FALSE(choice.created);
+  EXPECT_TRUE(choice.needsSetup);
   EXPECT_EQ(JavaBuildKind::None, choice.kind);
-  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(onlySourceGroup(choice.projectFile)));
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+
+TEST_F(JavaProjectSetupTest, plainJavaSettingsAreWrittenOnlyWhenSaved) {
+  const auto settings = javaProjectSettings(folder(), JavaBuildKind::None);
+
+  ASSERT_TRUE(settings);
+  EXPECT_EQ(projectFileFor(folder()), settings->getFilePath());
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+  // the settings page checks the source paths before anything is written
+  auto unsaved = std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(settings->getAllSourceGroupSettings().front());
+  ASSERT_TRUE(unsaved);
+  EXPECT_TRUE(unsaved->getSourcePathsExpandedAndAbsolute().front().exists());
+
+  ASSERT_TRUE(prepareProjectFolder(folder()));
+  std::ifstream gitignore{mRoot / ".sourcetrail" / ".gitignore", std::ios::binary};
+  std::stringstream content;
+  content << gitignore.rdbuf();
+  EXPECT_EQ("*\n", content.str());
+
+  ASSERT_TRUE(settings->save(settings->getFilePath()));
+  auto plain = std::dynamic_pointer_cast<SourceGroupSettingsJavaEmpty>(onlySourceGroup(projectFileFor(folder())));
+  ASSERT_TRUE(plain);
+  EXPECT_EQ(folder(), plain->getSourcePathsExpandedAndAbsolute().front());
 }
 
 TEST_F(JavaProjectSetupTest, openOrCreateWithoutABuildWritesNothingWhenDeclined) {

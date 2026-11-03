@@ -530,7 +530,7 @@ void QtMainWindow::newProject() {
     if(!declined) {
       QMessageBox::warning(this,
                            tr("Could not create Project"),
-                           tr("Sourcetrail was unable to write the project into %1/.sourcetrail.").arg(folder));
+                           tr("Sourcetrail was unable to write the project into %1/.sourcetrail.").arg(folder.toHtmlEscaped()));
     }
     return;
   }
@@ -539,10 +539,12 @@ void QtMainWindow::newProject() {
     MessageStatus(L"Created project: " + choice.projectFile.wstr()).dispatch();
   }
 
-  if(choice.created && choice.kind == JavaBuildKind::None) {
-    // the class path is still to be filled in; finishing the wizard loads the project
+  if(choice.needsSetup) {
+    // the class path is still to be filled in; saving writes the project and loads it, cancelling leaves nothing
     auto* wizard = createWindow<QtProjectWizard>();
-    wizard->editProject(choice.projectFile);
+    const FilePath projectFolder(folder.toStdWString());
+    wizard->setBeforeSave([projectFolder]() { return prepareProjectFolder(projectFolder); });
+    wizard->editProject(javaProjectSettings(projectFolder, choice.kind));
     return;
   }
 

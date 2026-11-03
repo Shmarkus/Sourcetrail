@@ -1,8 +1,11 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 
 #include "FilePath.h"
+
+class ProjectSettings;
 
 // Creating a Java project from nothing but a source folder. Everything Sourcetrail writes for the project goes into
 // <folder>/.sourcetrail/, which ignores itself in git.
@@ -24,12 +27,20 @@ FilePath existingProjectFile(const FilePath& folder);
 // empty path when it could not be written.
 FilePath createJavaProject(const FilePath& folder, JavaBuildKind kind);
 
+// The settings createJavaProject writes, in memory only; their file is projectFileFor(folder).
+std::shared_ptr<ProjectSettings> javaProjectSettings(const FilePath& folder, JavaBuildKind kind);
+
+// Creates <folder>/.sourcetrail/ with its .gitignore; false when either cannot be written.
+bool prepareProjectFolder(const FilePath& folder);
+
 struct JavaProjectChoice {
   FilePath projectFile;    // empty when nothing is to be opened
   bool created = false;
+  // A plain Java project (no build found) is not written yet: edit javaProjectSettings(folder, None) and save it.
+  bool needsSetup = false;
   JavaBuildKind kind = JavaBuildKind::None;
 };
 
 // What New Project does with the picked folder: the project already in its .sourcetrail/, else a new one for the
-// detected build. Without a build, acceptPlainJava decides between a plain Java project and nothing.
+// detected build. Without a build, acceptPlainJava decides between a plain Java project (left to set up) and nothing.
 JavaProjectChoice openOrCreateJavaProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava);

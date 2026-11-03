@@ -2,10 +2,11 @@
 
 #include "JavaPathDetector.h"
 
-// Finds libjvm.so of the java on PATH, in JAVA_HOME or in the usual install places. An empty version accepts any.
+// Finds libjvm.so of the first java on PATH, in JAVA_HOME or in the usual install places whose major version is at
+// least the given one.
 class JavaPathDetectorLinux : public JavaPathDetector {
 public:
-  explicit JavaPathDetectorLinux(const std::string& javaVersion);
+  explicit JavaPathDetectorLinux(int minimumMajorVersion);
 
 private:
   std::vector<FilePath> doGetPaths() const override;

@@ -85,12 +85,17 @@ std::shared_ptr<CombinedPathDetector> utility::getCxxFrameworkPathDetector() {
   return combinedDetector;
 }
 
-// Linux only: the fork builds no Windows or macOS package. Any JDK version is accepted.
+namespace {
+// The Java indexer jar is built for Java 21 (java_indexer/pom.xml); an older JVM cannot load it.
+constexpr int MinimumJavaMajorVersion = 21;
+}    // namespace
+
+// Linux only: the fork builds no Windows or macOS package.
 std::shared_ptr<CombinedPathDetector> utility::getJavaRuntimePathDetector() {
   std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
 #if BUILD_JAVA_LANGUAGE_PACKAGE
   if(utility::getOsType() == OsType::Linux) {
-    combinedDetector->addDetector(std::make_shared<JavaPathDetectorLinux>(""));
+    combinedDetector->addDetector(std::make_shared<JavaPathDetectorLinux>(MinimumJavaMajorVersion));
   } else {
     LOG_WARNING("No suitable Java Runtime path detector found");
   }
@@ -102,7 +107,7 @@ std::shared_ptr<CombinedPathDetector> utility::getJreSystemLibraryPathsDetector(
   std::shared_ptr<CombinedPathDetector> combinedDetector = std::make_shared<CombinedPathDetector>();
 #if BUILD_JAVA_LANGUAGE_PACKAGE
   if(utility::getOsType() == OsType::Linux) {
-    combinedDetector->addDetector(std::make_shared<JreSystemLibraryPathDetectorLinux>(""));
+    combinedDetector->addDetector(std::make_shared<JreSystemLibraryPathDetectorLinux>(MinimumJavaMajorVersion));
   } else {
     LOG_WARNING("No suitable JRE system library path detector found");
   }

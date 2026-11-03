@@ -2,5 +2,5 @@
 
 #include "JavaPathDetectorLinux.h"
 
-JreSystemLibraryPathDetectorLinux::JreSystemLibraryPathDetectorLinux(const std::string& javaVersion)
-    : JreSystemLibraryPathDetector(std::make_shared<JavaPathDetectorLinux>(javaVersion)) {}
+JreSystemLibraryPathDetectorLinux::JreSystemLibraryPathDetectorLinux(int minimumMajorVersion)
+    : JreSystemLibraryPathDetector(std::make_shared<JavaPathDetectorLinux>(minimumMajorVersion)) {}

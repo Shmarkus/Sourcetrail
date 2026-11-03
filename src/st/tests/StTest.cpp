@@ -1754,4 +1754,6 @@ TEST(StIndex, fullIndexReportsFileCount) {
   EXPECT_EQ(0, st.exitCode()) << verboseErr.toStdString();
   EXPECT_EQ("indexed 9 files, 0 errors\n", verboseOut.toStdString()) << verboseErr.toStdString();
   EXPECT_EQ(9, verboseErr.count("indexing source file: ")) << verboseErr.toStdString();
+  // Listeners unregistering at shutdown is no error.
+  EXPECT_FALSE(verboseErr.contains("Listener was not found")) << verboseErr.toStdString();
 }

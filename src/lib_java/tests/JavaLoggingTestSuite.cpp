@@ -115,4 +115,6 @@ TEST(JavaIndexing, headlessIndexLogsEachSourceFileOnlyWhenVerbose) {
   EXPECT_EQ(0, verbose.exitCode) << log;
   EXPECT_TRUE(verbose.output.contains(QStringLiteral("9/9 source files indexed"))) << log;
   EXPECT_EQ(9, verbose.output.count(QStringLiteral("indexing source file: "))) << log;
+  // Listeners unregistering at shutdown is no error.
+  EXPECT_FALSE((verbose.output + verbose.errors).contains(QStringLiteral("Listener was not found"))) << log;
 }

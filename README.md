@@ -209,7 +209,7 @@ After building, run the `bundle_install.sh` script within the build directory wh
 
 ### Linux
 
-After building with the `fork_release` preset, run `./setup/Linux/createPackages.sh` from the main directory. It creates `Sourcetrail_Linux_64bit.tar.gz` in the main directory, with the Qt libraries and plugins of the Qt the build linked against bundled. Packaging needs `patchelf`, `file` and ImageMagick's `convert`, and `libxcb-cursor0` installed so it can be bundled.
+After building with the `fork_release` preset, run `./setup/Linux/createPackages.sh` from the main directory. It creates `Sourcetrail_Linux_64bit.tar.gz` in the main directory, with the Qt libraries and plugins of the Qt the build linked against bundled. Packaging needs `patchelf`, `file`, `objdump` and ImageMagick's `convert`, and `libxcb-cursor0` installed so it can be bundled. Build and package on Ubuntu 22.04 (as CI does): the script rejects binaries that need a newer glibc than 2.35.
 
 
 # How to Run the Tests

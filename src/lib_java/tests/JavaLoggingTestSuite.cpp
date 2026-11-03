@@ -120,3 +120,28 @@ TEST(JavaIndexing, headlessIndexLogsEachSourceFileOnlyWhenVerbose) {
   // Listeners unregistering at shutdown is no error.
   EXPECT_FALSE((verbose.output + verbose.errors).contains(QStringLiteral("Listener was not found"))) << log;
 }
+
+// Headless indexing whose Gradle build fails reports the Gradle error and exits with a failure code, so that callers
+// such as st see the failure.
+TEST(JavaIndexing, headlessIndexOfABrokenGradleBuildFails) {
+  ASSERT_FALSE(IApplicationSettings::getInstance()->getJavaPath().empty()) << "no JVM configured for the Java tests";
+
+  QTemporaryDir scratch;
+  ASSERT_TRUE(scratch.isValid());
+  const std::filesystem::path root = scratch.path().toStdString();
+  const std::filesystem::path project = root / "lombok";
+  std::filesystem::copy(SOURCETRAIL_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  std::ofstream(project / "build.gradle", std::ios::app) << "\nthis is not valid gradle {\n";
+  writeApplicationSettings(root / "home");
+
+  const RunResult result = runSourcetrail(
+      QString::fromStdString((root / "home").string()),
+      {QStringLiteral("index"), QStringLiteral("--full"), QString::fromStdString((project / "project.srctrlprj").string())});
+
+  const std::string log = result.output.toStdString() + result.errors.toStdString();
+  ASSERT_TRUE(result.finished) << log;
+  EXPECT_EQ(QProcess::NormalExit, result.exitStatus) << log;
+  EXPECT_EQ(1, result.exitCode) << log;
+  EXPECT_TRUE(result.output.contains(QStringLiteral("ERROR: The following error occurred while executing a Gradle command")))
+      << log;
+}

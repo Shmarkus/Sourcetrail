@@ -244,8 +244,8 @@ private:
     m_process = new QProcess();
     cli::prepareIndexer(*m_process, QString::fromStdWString(m_project.wstr()), false);
     m_process->setStandardInputFile(QProcess::nullDevice());
-    m_process->setProcessChannelMode(QProcess::MergedChannels);
     m_process->setStandardOutputFile(logFile(), QIODevice::Truncate);
+    m_process->setStandardErrorFile(logFile(".verbose"), QIODevice::Truncate);
     QObject::connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), [this]() { end(); });
     m_err << "st: refreshing " << m_changed << " changed files in the background" << std::endl;
     m_process->start();
@@ -280,11 +280,12 @@ private:
       m_err << "st: background refresh of " << m_changed << " files finished in " << seconds(m_running.elapsed())
             << (read ? "" : "; project busy, recording it later") << std::endl;
     } else {
-      QFile log(logFile());
-      if(log.open(QIODevice::ReadOnly)) {
-        m_err << cli::lastLines(log.readAll(), cli::INDEXER_TAIL_LINES).toStdString();
-      }
-      m_err << "st: background refresh failed; see " << logFile().toStdString() << std::endl;
+      const auto read = [](const QString& path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+      };
+      m_err << cli::failureReport(read(logFile()), read(logFile(".verbose"))).toStdString() << "st: background refresh failed; see "
+            << logFile().toStdString() << " and " << logFile(".verbose").toStdString() << std::endl;
     }
     m_scheduler.finished();
   }
@@ -299,8 +300,9 @@ private:
     }
   }
 
-  QString logFile() const {
-    return QFileInfo(QString::fromStdWString(m_project.wstr())).absoluteDir().absoluteFilePath(".st-refresh.log");
+  // The indexer's status lines; its log lines go to the `.verbose` one.
+  QString logFile(const QString& suffix = {}) const {
+    return QFileInfo(QString::fromStdWString(m_project.wstr())).absoluteDir().absoluteFilePath(".st-refresh.log" + suffix);
   }
 
   const FilePath m_project;

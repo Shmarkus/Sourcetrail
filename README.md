@@ -455,7 +455,7 @@ more.
 about 100-150 ms instead of 0.4-0.6 s on a large project.
 - `st serve` runs in the foreground; `st serve --detach` starts it in the background (output in `<project dir>/.st-serve.log`);
   `st serve --stop` stops it. `st status` ends with `server<TAB>running` or `server<TAB>off`.
-- While it runs it watches the sources and re-indexes in the background after edits (log: `<project dir>/.st-refresh.log`), so
+- While it runs it watches the sources and re-indexes in the background after edits (logs: `<project dir>/.st-refresh.log` and `.st-refresh.log.verbose`), so
   the next query does not wait for the indexer. `--no-watch` turns this off. Add both logs to `.gitignore`.
 - It is never started automatically, and there is one server per project. A client that finds no usable server answers itself.
 - `--no-server` (or `ST_NO_SERVER=1`) answers in the calling process even when a server runs.

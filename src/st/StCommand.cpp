@@ -618,10 +618,11 @@ int refreshIfStale(const st::Io& io,
   // On disk before the indexer starts: should this process end first, the index it leaves is not taken as current.
   st::recordRefreshStart(settings, started, io.err);
   const size_t changedFiles = freshness->changedFiles;
+  QByteArray status;
   QByteArray log;
   std::string failure;
   try {
-    cli::reindex(project, false, 600000, [&log](const QByteArray& text, bool /*log*/) { log += text; });
+    cli::reindex(project, false, 600000, [&](const QByteArray& text, bool isLog) { (isLog ? log : status) += text; });
   } catch(const std::exception& error) {
     failure = error.what();
   }
@@ -634,7 +635,7 @@ int refreshIfStale(const st::Io& io,
     io.err << "refreshed " << changedFiles << " files in " << std::fixed << std::setprecision(1) << timer.elapsed() / 1000.0
            << "s\n";
   } else if(freshness->stale) {
-    io.err << cli::lastLines(log, cli::INDEXER_TAIL_LINES).toStdString() << "st: refresh failed: " << failure << '\n';
+    io.err << cli::failureReport(status, log).toStdString() << "st: refresh failed: " << failure << '\n';
     return st::EXIT_STALE;
   } else {
     io.err << "st: index was refreshed by another process\n";
@@ -645,8 +646,8 @@ int refreshIfStale(const st::Io& io,
 
 // st index: re-indexes the project as a refresh does (--full: every file), the indexer's status lines on stderr
 // (--verbose: its log lines too, such as each file it indexes), then `indexed <n> files, <m> errors` on stdout; n
-// counts the files this run indexed, m the errors in the index. When indexing fails, the end of the indexer's output,
-// log lines included, follows on stderr.
+// counts the files this run indexed, m the errors in the index. When indexing fails, the indexer's last log lines
+// follow on stderr.
 int index(const st::Io& io, const FilePath& projectFile, bool full, bool verbose, size_t wait) {
   constexpr int INDEX_FAILED = 1;
   ProjectSettings settings;
@@ -656,22 +657,19 @@ int index(const st::Io& io, const FilePath& projectFile, bool full, bool verbose
   const TimeStamp started = st::refreshStart();
   st::recordRefreshStart(settings, started, io.err);
   QByteArray status;
-  QByteArray captured;
+  QByteArray log;
+  // The status lines are on stderr already.
   const auto failed = [&]() {
     if(!verbose) {
-      io.err << "st: the last " << cli::INDEXER_TAIL_LINES << " lines of the indexer's output:\n"
-             << cli::lastLines(captured, cli::INDEXER_TAIL_LINES).toStdString();
+      io.err << cli::failureReport({}, log).toStdString();
     }
     return INDEX_FAILED;
   };
   try {
     cli::reindex(
-        QString::fromStdWString(projectFile.wstr()), full, std::numeric_limits<int>::max(), [&](const QByteArray& text, bool log) {
-          captured += text;
-          if(!log) {
-            status += text;
-          }
-          if(!log || verbose) {
+        QString::fromStdWString(projectFile.wstr()), full, std::numeric_limits<int>::max(), [&](const QByteArray& text, bool isLog) {
+          (isLog ? log : status) += text;
+          if(!isLog || verbose) {
             io.err.write(text.constData(), text.size());
             io.err.flush();
           }

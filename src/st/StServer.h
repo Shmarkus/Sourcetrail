@@ -70,9 +70,9 @@ int detachServer(const FilePath& projectFile, const ServeOptions& options, std::
 // 0700 and refuses one that is not private (EXIT_INTERNAL). Holds <socket>.lock while it runs: another server for the
 // project is "already running" (0), or of another build (EXIT_INTERNAL).
 // With options.watch it watches the sources and, 500 ms after the last change, refreshes a stale index in the
-// background as a request would (indexer output in <project dir>/.st-refresh.log). A request arriving meanwhile
-// waits for that refresh first. A refresh still running when the server stops is left to finish; its start, recorded
-// before it began (recordRefreshStart), keeps the edits made during it from counting as indexed.
+// background as a request would (indexer status lines in <project dir>/.st-refresh.log, its log lines in .st-refresh.log.verbose).
+// A request arriving meanwhile waits for that refresh first. A refresh still running when the server stops is left to finish; its
+// start, recorded before it began (recordRefreshStart), keeps the edits made during it from counting as indexed.
 int serve(const FilePath& projectFile, const ServeOptions& options, std::ostream& err);
 }    // namespace st
 

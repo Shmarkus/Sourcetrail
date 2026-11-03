@@ -69,4 +69,16 @@ QByteArray lastLines(const QByteArray& text, int count) {
   }
   return text.mid(from + 1);
 }
+
+QByteArray failureReport(const QByteArray& status, const QByteArray& log) {
+  QByteArray report;
+  const auto add = [&report](const QByteArray& header, const QByteArray& text) {
+    if(!text.isEmpty()) {
+      report += header + text + (text.endsWith('\n') ? "" : "\n");
+    }
+  };
+  add("st: the indexer's last " + QByteArray::number(INDEXER_TAIL_LINES) + " log lines:\n", lastLines(log, INDEXER_TAIL_LINES));
+  add("st: the indexer's status lines:\n", status);
+  return report;
+}
 }    // namespace cli

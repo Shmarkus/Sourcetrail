@@ -15,8 +15,11 @@ void reindex(const QString& project, bool full, int timeoutMs, const std::functi
 // Sets up `process` to run the adjacent Sourcetrail indexer on the project with --verbose, so that its log lines are
 // there to show when it fails; start() runs it.
 void prepareIndexer(QProcess& process, const QString& project, bool full);
-// How much of a failed indexer's output st shows.
+// How many of a failed indexer's log lines st shows.
 constexpr int INDEXER_TAIL_LINES = 50;
+// What st shows of a failed indexer's output: its last log lines, then its status lines in full (they hold the errors
+// it reported, such as a failed Gradle command, and are short); a part left empty is left out.
+QByteArray failureReport(const QByteArray& status, const QByteArray& log);
 // The last `count` lines of `text`.
 QByteArray lastLines(const QByteArray& text, int count);
 }    // namespace cli

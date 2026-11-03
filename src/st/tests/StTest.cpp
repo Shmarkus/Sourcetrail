@@ -1756,6 +1756,62 @@ TEST(StIndex, failedIndexingShowsTheEndOfTheIndexerOutput) {
   EXPECT_TRUE(args.readAll().contains("--verbose"));
 }
 
+// A Gradle build broken after indexing fails both the refresh before a query and `st index`, each with the Gradle
+// error on stderr: the indexer's status lines in full, then its last log lines.
+TEST(StIndex, brokenGradleBuildFailsWithTheGradleError) {
+  const QByteArray javaHome = qgetenv("JAVA_HOME");
+  ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const std::filesystem::path project = (base + "/lombok").toStdString();
+  std::filesystem::copy(ST_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  write(base + "/home/.config/sourcetrail/ApplicationSettings.xml",
+        "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
+        "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
+            javaHome + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
+
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  if(!environment.contains("GRADLE_USER_HOME")) {
+    environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
+  }
+  environment.insert("HOME", base + "/home");
+  environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
+  environment.remove("DISPLAY");
+  QProcess st;
+  st.setProcessEnvironment(environment);
+  st.setWorkingDirectory(QString::fromStdString((project / "src").string()));
+  st.start(ST_APP_PATH, {"index", "--full", "--no-server"});
+  ASSERT_TRUE(st.waitForFinished(300000));
+  ASSERT_EQ(0, st.exitCode()) << st.readAllStandardError().toStdString();
+
+  // Modification times are compared in whole seconds.
+  QThread::sleep(2);
+  QFile build(QString::fromStdString((project / "build.gradle").string()));
+  ASSERT_TRUE(build.open(QIODevice::Append));
+  build.write("\nthis is not valid gradle {\n");
+  build.close();
+
+  st.start(ST_APP_PATH, {"find", "getName", "--no-server"});
+  ASSERT_TRUE(st.waitForFinished(300000));
+  QByteArray err = st.readAllStandardError();
+  EXPECT_EQ(5, st.exitCode()) << err.toStdString();
+  EXPECT_TRUE(err.contains("st: refresh failed")) << err.toStdString();
+  // All of the indexer's status lines, not only those among its last log lines.
+  EXPECT_TRUE(err.contains("Loading Project: ")) << err.toStdString();
+  EXPECT_TRUE(err.contains("error occurred while executing a Gradle command")) << err.toStdString();
+  EXPECT_TRUE(err.contains("startup failed")) << err.toStdString();
+
+  st.start(ST_APP_PATH, {"index", "--no-server"});
+  ASSERT_TRUE(st.waitForFinished(300000));
+  const QByteArray out = st.readAllStandardOutput();
+  err = st.readAllStandardError();
+  EXPECT_EQ(1, st.exitCode()) << err.toStdString();
+  EXPECT_FALSE(out.contains("indexed ")) << out.toStdString();
+  EXPECT_TRUE(err.contains("error occurred while executing a Gradle command")) << err.toStdString();
+  EXPECT_TRUE(err.contains("startup failed")) << err.toStdString();
+}
+
 TEST(StIndex, fullIndexReportsFileCount) {
   const QByteArray javaHome = qgetenv("JAVA_HOME");
   ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";

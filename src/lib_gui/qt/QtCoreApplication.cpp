@@ -1,5 +1,7 @@
 #include "QtCoreApplication.h"
 // STL
+#include <atomic>
+#include <cstdlib>
 #include <iostream>
 // internal
 #include "MessageListener.h"
@@ -13,9 +15,11 @@ class QtCoreApplication::ConsoleListener final
     , public MessageListener<MessageIndexingStatus>
     , public MessageListener<MessageStatus> {
 private:
+  // A run that reported an error status (a failed Gradle or Maven command, no JVM, a project that does not load, ...)
+  // exits with 1, so that callers such as st see the failure.
   void handleMessage([[maybe_unused]] MessageQuitApplication* message) override {
     std::cout << "Quitting" << std::endl;
-    QCoreApplication::quit();
+    QCoreApplication::exit(mErrorReported ? EXIT_FAILURE : EXIT_SUCCESS);
   }
 
   void handleMessage(MessageIndexingStatus* message) override {
@@ -28,6 +32,7 @@ private:
   // command line help is printed with std::cout.
   void handleMessage(MessageStatus* message) override {
     if(message->isError) {
+      mErrorReported = true;
       std::cout << "ERROR: ";
     }
 
@@ -35,6 +40,8 @@ private:
       std::cout << utility::encodeToUtf8(status) << std::endl;
     }
   }
+
+  std::atomic<bool> mErrorReported = false;
 };
 
 QtCoreApplication::QtCoreApplication(int& argc, char** argv) : QCoreApplication(argc, argv) {}

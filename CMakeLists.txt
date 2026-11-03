@@ -91,6 +91,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compile_options(-fdiagnostics-color=always)
+  if(UNIX AND NOT APPLE)
+    # The Linux package runs on distributions whose libstdc++ is older than the compiler's (Ubuntu 22.04, Debian 12).
+    add_link_options(-static-libstdc++ -static-libgcc)
+  endif()
 endif()
 #---------------------------------------------------------------------------------------------------------------------------------
 include(cmake/set_alternate_linker.cmake)

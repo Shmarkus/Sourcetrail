@@ -5,7 +5,7 @@
 # desktop Linux provides (glibc, libstdc++, OpenGL, X11/xcb core, fontconfig, freetype, zlib) stay with the system:
 # bundled copies of those clash with the system's graphics drivers.
 #
-# Usage: bundleLibraries.sh <package dir>   (needs ldd, file and patchelf on PATH)
+# Usage: bundleLibraries.sh <package dir>   (needs ldd, file, objdump and patchelf on PATH)
 #
 # The Qt plugins come from the Qt the binaries are linked against (the aqt install), never from a system Qt.
 
@@ -93,5 +93,19 @@ done | sort -u)
 if [ -n "$MISSING" ]; then
 	echo "bundleLibraries.sh: libraries missing, or Qt from outside the package:" >&2
 	echo "$MISSING" >&2
+	exit 1
+fi
+
+# The package targets Ubuntu 22.04 and Debian 12: glibc 2.35 and libstdc++ 3.4.30 (gcc 12). A newer symbol version
+# comes from building on a newer distribution, or from libstdc++ not being linked statically.
+TOO_NEW=$(for FILE in bin/* lib/* $(find plugins -name '*.so'); do
+	if file -L "$FILE" | grep -q ELF; then
+		objdump -T "$FILE" | grep -oE 'GLIBCXX_3\.4\.(3[1-9]|[4-9][0-9])|GLIBC_2\.(3[6-9]|[4-9][0-9])' | sort -u |
+			sed "s|^|$FILE needs |"
+	fi
+done)
+if [ -n "$TOO_NEW" ]; then
+	echo "bundleLibraries.sh: symbol versions newer than glibc 2.35 / GLIBCXX_3.4.30:" >&2
+	echo "$TOO_NEW" >&2
 	exit 1
 fi

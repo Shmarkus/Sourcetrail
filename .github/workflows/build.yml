@@ -4,6 +4,9 @@ name: Build and Test
 # a pushed `v*` tag publishes a release of that version. Other branches only keep the run artifact.
 on: [push]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     # The oldest supported runner: the package needs the glibc it was built against.
@@ -25,6 +28,8 @@ jobs:
             libwayland-client0 libwayland-cursor0 libwayland-egl1
           # The presets and the Conan profile call plain gcc/g++.
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 130 --slave /usr/bin/g++ g++ /usr/bin/g++-13
+          case "$(gcc -dumpversion)" in 13*) ;; *) echo "gcc is $(gcc -dumpversion), not 13" >&2; exit 1 ;; esac
+          case "$(g++ -dumpversion)" in 13*) ;; *) echo "g++ is $(g++ -dumpversion), not 13" >&2; exit 1 ;; esac
           # The runner image ships a current Maven; the distribution's is older.
           command -v mvn > /dev/null || sudo apt-get install -y --no-install-recommends maven
           gcc --version

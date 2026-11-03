@@ -34,17 +34,25 @@ struct ImpactResult {
 // (override hops are free, every other hop costs 1; `depth` 0 = unlimited). A type stands for itself and
 // all its members, a package for every type and member in it and its sub-packages. Each line shows the
 // site of the link that first reached the symbol; Group::File and Group::Package print one line per file
-// or package instead, keyed by its path or name.
-ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, size_t depth, Edge::TypeMask types, Group group);
+// or package instead, keyed by its path or name. Only the symbols on `options.side` count; each line of Group::None
+// carries its symbol.
+ImpactResult impact(PersistentStorage& storage,
+                    const std::vector<Id>& symbols,
+                    size_t depth,
+                    Edge::TypeMask types,
+                    Group group,
+                    const QueryOptions& options = {});
 
 // Dependencies of `symbols` (Outgoing) or on them (Incoming), rolled up to one line per top-level type, or per
 // package when the input is a package. A type stands for itself and its members; links inside the input and
 // links of kind member, import and include don't count. The kind column counts link sites ("class, N links" /
-// "package, N links"); the location is the first of them by path and line.
+// "package, N links"); the location is the first of them by path and line. With `library`, symbols without a definition
+// count too, a library member rolled up to its type.
 std::vector<ResultLine> deps(PersistentStorage& storage,
                              const std::vector<Id>& symbols,
                              Direction direction,
-                             Walked* walked = nullptr);
+                             Walked* walked = nullptr,
+                             bool library = false);
 }    // namespace st
 
 #endif

@@ -1,5 +1,6 @@
 #include "StFreshness.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -13,8 +14,11 @@
 #include <QFileInfo>
 #include <QSaveFile>
 
+#include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
+#include "SourceGroupSettingsTypeScript.h"
+#include "SourceGroupTypeScript.h"
 #include "utilityGradleCache.h"
 #include "utilityString.h"
 
@@ -87,13 +91,67 @@ size_t changesBelow(const FilePath& root, const std::set<std::wstring>& extensio
   }
   return changedFiles;
 }
+
+// The TypeScript group's trigger files changed at or after `indexedAt`, the walk leaving out what the group's own does.
+size_t triggerFileChanges(const FilePath& root, const TimeStamp& indexedAt) {
+  size_t changedFiles = 0;
+  std::error_code ec;
+  for(std::filesystem::recursive_directory_iterator it(root.str(), std::filesystem::directory_options::skip_permission_denied, ec),
+      end;
+      !ec && it != end;
+      it.increment(ec)) {
+    if(it->is_directory(ec)) {
+      if(SourceGroupSettingsTypeScript::isUnwalkedDirectory(it->path().filename().wstring())) {
+        it.disable_recursion_pending();
+      }
+    } else if(SourceGroupSettingsTypeScript::isTriggerFile(FilePath(it->path().wstring())) &&
+              changedSince(FilePath(it->path().wstring()), indexedAt)) {
+      changedFiles++;
+    }
+  }
+  return changedFiles;
+}
+
+// A TypeScript group is re-indexed as a whole when its inputs record changed, as the refresh decides; the changed
+// trigger files are what st reports, at least one for a record that differs (a deleted file).
+size_t typeScriptChanges(const std::shared_ptr<SourceGroupSettingsTypeScript>& group,
+                         const TimeStamp& indexedAt,
+                         const GroupInputs& inputs) {
+  const SourceGroupTypeScript sourceGroup(group);
+  const auto stored = inputs.find(group->getId());
+  if(stored != inputs.end() && !stored->second.empty()) {
+    return sourceGroup.getInputsRecord() == stored->second ?
+        0 :
+        std::max<size_t>(1, triggerFileChanges(sourceGroup.getTypeScriptProjectPath(), indexedAt));
+  }
+  return triggerFileChanges(sourceGroup.getTypeScriptProjectPath(), indexedAt);
+}
 }    // namespace
 
-Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& indexedAt, const std::vector<FilePath>& indexedFiles) {
+GroupInputs storedGroupInputs(const ProjectSettings& settings, const PersistentStorage& storage) {
+  GroupInputs inputs;
+  for(const auto& group : settings.getAllSourceGroupSettings()) {
+    if(std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
+      inputs[group->getId()] = storage.getSourceGroupInputs(group->getId());
+    }
+  }
+  return inputs;
+}
+
+Freshness checkFreshness(const ProjectSettings& settings,
+                         const TimeStamp& indexedAt,
+                         const std::vector<FilePath>& indexedFiles,
+                         const GroupInputs& inputs) {
   Freshness freshness;
   bool fallback = false;
+  std::vector<FilePath> typeScriptRoots;
   for(const auto& group : settings.getAllSourceGroupSettings()) {
     if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED) {
+      continue;
+    }
+    if(const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
+      freshness.changedFiles += typeScriptChanges(typeScript, indexedAt, inputs);
+      typeScriptRoots.push_back(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory());
       continue;
     }
     const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);
@@ -134,7 +192,10 @@ Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& index
       freshness.reason = "no Gradle source roots cached; checked indexed files only";
     }
     for(const FilePath& file : indexedFiles) {
-      if(!file.recheckExists() || changedSince(file, indexedAt)) {
+      // counted with their TypeScript group
+      const bool typeScript = SourceGroupSettingsTypeScript::isTriggerFile(file) &&
+          std::ranges::any_of(typeScriptRoots, [&](const FilePath& root) { return root.contains(file); });
+      if(!typeScript && (!file.recheckExists() || changedSince(file, indexedAt))) {
         freshness.changedFiles++;
       }
     }

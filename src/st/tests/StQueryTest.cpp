@@ -11,6 +11,7 @@
 
 #include "ProjectSettings.h"
 #include "StArchitecture.h"
+#include "StBoundaries.h"
 #include "StCommand.h"
 #include "StFiles.h"
 #include "StFilter.h"
@@ -1544,4 +1545,198 @@ TEST(StQuery, memoizedResolutionReturnsTheSameIdsAsAFreshOne) {
   // the kinds are part of the key
   EXPECT_TRUE(cache.resolve(storage, L"p.A", NODE_METHOD).status == st::Resolution::NotFound);
   EXPECT_TRUE(cache.resolve(storage, L"p.A", ~NodeKindMask(0)).status == st::Resolution::Found);
+}
+
+namespace {
+// A Spring backend: OrderRepository and CustomerRepository extend the library's JpaRepository, AuditDao carries
+// @Repository, PaymentClient @FeignClient; Facade.run reaches each through a service.
+struct Backend {
+  Backend() {
+    jpa = undefined(
+        code.storage, typeName({L"org", L"springframework", L"data", L"jpa", L"repository", L"JpaRepository<T, ID>"}), NODE_SYMBOL);
+    findAll = undefined(code.storage,
+                        method({L"org", L"springframework", L"data", L"jpa", L"repository", L"JpaRepository<T, ID>"},
+                               L"findAll",
+                               L"java.util.List",
+                               L"()"),
+                        NODE_METHOD);
+    orders = code.type(L"shop", L"OrderRepository", NODE_INTERFACE);
+    customers = code.type(L"shop", L"CustomerRepository", NODE_INTERFACE);
+    code.link(Edge::EDGE_INHERITANCE, orders, jpa, L"OrderRepository", {3});
+    code.link(Edge::EDGE_INHERITANCE, customers, jpa, L"CustomerRepository", {3});
+
+    const Id feign = undefined(
+        code.storage, typeName({L"org", L"springframework", L"cloud", L"openfeign", L"FeignClient"}), NODE_ANNOTATION);
+    payments = code.type(L"shop", L"PaymentClient", NODE_INTERFACE);
+    code.annotate(payments, feign);
+    authorize = code.member(payments, L"PaymentClient", L"authorize");
+
+    const Id stereotype = undefined(
+        code.storage, typeName({L"org", L"springframework", L"stereotype", L"Repository"}), NODE_ANNOTATION);
+    const Id audit = code.type(L"shop", L"AuditDao");
+    code.annotate(audit, stereotype);
+    write = code.member(audit, L"AuditDao", L"write");
+
+    const Id orderService = code.type(L"shop", L"OrderService");
+    const Id orderField = code.member(orderService, L"OrderService", L"orderRepository", NODE_FIELD);
+    code.link(Edge::EDGE_TYPE_USAGE, orderField, orders, L"OrderService", {4});
+    list = code.member(orderService, L"OrderService", L"list");
+    code.link(Edge::EDGE_USAGE, list, orderField, L"OrderService", {7});
+    code.link(Edge::EDGE_CALL, list, findAll, L"OrderService", {7});
+    code.link(Edge::EDGE_CALL, list, authorize, L"OrderService", {8});
+
+    const Id customerService = code.type(L"shop", L"CustomerService");
+    all = code.member(customerService, L"CustomerService", L"all");
+    // a local of the repository's type
+    code.link(Edge::EDGE_TYPE_USAGE, all, customers, L"CustomerService", {5});
+    code.link(Edge::EDGE_CALL, all, findAll, L"CustomerService", {6});
+    code.link(Edge::EDGE_CALL, all, write, L"CustomerService", {7});
+
+    run = code.member(code.type(L"shop", L"Facade"), L"Facade", L"run");
+    code.link(Edge::EDGE_CALL, run, list, L"Facade", {4});
+    code.link(Edge::EDGE_CALL, run, all, L"Facade", {5});
+    code.storage.buildCaches();
+  }
+
+  Code code;
+  Id jpa, findAll, orders, customers, payments, authorize, write, list, all, run;
+};
+
+std::vector<std::wstring> printedKeys(const std::vector<st::ResultLine>& lines) {
+  std::vector<std::wstring> result;
+  for(const auto& line : lines) {
+    result.push_back(line.key + L"\t" + line.kind + L"\t" + std::to_wstring(line.line));
+  }
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
+// A TypeScript method calling a Java handler through an endpoint, a spec calling the TypeScript method, and a Java
+// caller of the handler.
+struct Mixed {
+  Mixed() {
+    handler = code.member(code.type(L"shop", L"OrderResource"), L"OrderResource", L"list");
+    javaCaller = code.member(code.type(L"shop", L"Scheduler"), L"Scheduler", L"tick");
+    code.link(Edge::EDGE_CALL, javaCaller, handler, L"Scheduler", {4});
+    endpoint = add(code.storage, typeName({L"HTTP", L"GET /api/orders"}), NODE_FUNCTION);
+    addLocation(code.storage, endpoint, code.file(L"OrderResource"), 2);
+    code.link(Edge::EDGE_CALL, endpoint, handler, L"OrderResource", {2});
+
+    const Id serviceFile = addFile(code.storage, L"/r/web/order.service.ts");
+    service = add(code.storage, method({L"web", L"order.service", L"OrderService"}, L"list", L"", L"()"));
+    addLocation(code.storage, service, serviceFile, 3);
+    const Id toEndpoint = code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_CALL), service, endpoint));
+    addLocation(code.storage, toEndpoint, serviceFile, 4);
+
+    const Id specFile = addFile(code.storage, L"/r/web/order.service.spec.ts");
+    spec = add(code.storage, method({L"web", L"order.service.spec"}, L"toplevel", L"", L"()"), NODE_FUNCTION);
+    addLocation(code.storage, spec, specFile, 1);
+    const Id toService = code.storage.addEdge(StorageEdgeData(Edge::typeToInt(Edge::EDGE_CALL), spec, service));
+    addLocation(code.storage, toService, specFile, 5);
+    code.storage.buildCaches();
+  }
+
+  std::set<std::wstring> callers(st::Side side, bool tests = false) {
+    st::QueryOptions options;
+    options.side = side;
+    options.tests = tests;
+    return keys(st::calls(code.storage, {handler}, st::Direction::Incoming, 0, nullptr, options));
+  }
+
+  Code code;
+  Id handler, javaCaller, endpoint, service, spec;
+};
+}    // namespace
+
+TEST(StQuery, boundariesNameALibraryRepositoryMethodAfterTheRepositoryItIsCalledOn) {
+  Backend backend;
+  st::QueryOptions options;
+  options.library = true;
+  st::Walked walked;
+  const auto lines = st::calls(backend.code.storage, {backend.run}, st::Direction::Outgoing, 0, &walked, options);
+  const st::Boundaries found = st::boundaries(backend.code.storage, lines, &walked);
+
+  EXPECT_EQ((std::vector<std::wstring>{L"AuditDao.write\tmethod, depth 2\t7",
+                                       L"CustomerRepository.findAll (JpaRepository)\tmethod, depth 2\t6",
+                                       L"OrderRepository.findAll (JpaRepository)\tmethod, depth 2\t7"}),
+            printedKeys(found.repositories));
+  EXPECT_EQ((std::vector<std::wstring>{L"PaymentClient.authorize\tmethod, depth 2\t8"}), printedKeys(found.feignClients));
+}
+
+TEST(StQuery, boundariesOfAPathThroughOneRepositoryNameOnlyIt) {
+  Backend backend;
+  st::QueryOptions options;
+  options.library = true;
+  st::Walked walked;
+  const auto lines = st::calls(backend.code.storage, {backend.list}, st::Direction::Outgoing, 0, &walked, options);
+  const st::Boundaries found = st::boundaries(backend.code.storage, lines, &walked);
+  EXPECT_EQ((std::vector<std::wstring>{L"OrderRepository.findAll (JpaRepository)\tmethod, depth 1\t7"}),
+            printedKeys(found.repositories));
+}
+
+TEST(StQuery, libraryTargetsOnlyWhenAskedFor) {
+  Backend backend;
+  const std::wstring findAll = L"org.springframework.data.jpa.repository.JpaRepository<T, ID>.findAll()";
+  EXPECT_FALSE(keys(st::calls(backend.code.storage, {backend.list}, st::Direction::Outgoing, 1)).count(findAll));
+  st::QueryOptions options;
+  options.library = true;
+  EXPECT_TRUE(keys(st::calls(backend.code.storage, {backend.list}, st::Direction::Outgoing, 1, nullptr, options)).count(findAll));
+
+  const std::wstring jpa = L"org.springframework.data.jpa.repository.JpaRepository<T, ID>";
+  EXPECT_TRUE(keys(st::hierarchy(backend.code.storage, {backend.orders}, st::Direction::Outgoing)).empty());
+  const auto supers = st::hierarchy(backend.code.storage, {backend.orders}, st::Direction::Outgoing, nullptr, true);
+  ASSERT_TRUE(lineFor(supers, jpa));
+  // at the extends clause: the library type has no location of its own
+  EXPECT_EQ(3u, lineFor(supers, jpa)->line);
+
+  const std::vector<Id> service = {backend.code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService"}))};
+  EXPECT_FALSE(keys(st::deps(backend.code.storage, service, st::Direction::Outgoing)).count(jpa));
+  EXPECT_TRUE(keys(st::deps(backend.code.storage, service, st::Direction::Outgoing, nullptr, true)).count(jpa));
+}
+
+TEST(StQuery, sideKeepsTheTypeScriptOrTheJavaCallersAndNeverTheEndpoint) {
+  Mixed mixed;
+  EXPECT_EQ((std::set<std::wstring>{L"HTTP.GET /api/orders",
+                                    L"shop.Scheduler.tick()",
+                                    L"web.order.service.OrderService.list()",
+                                    L"web.order.service.spec.toplevel()"}),
+            mixed.callers(st::Side::Any));
+  EXPECT_EQ((std::set<std::wstring>{L"web.order.service.OrderService.list()"}), mixed.callers(st::Side::Frontend));
+  EXPECT_EQ((std::set<std::wstring>{L"web.order.service.OrderService.list()", L"web.order.service.spec.toplevel()"}),
+            mixed.callers(st::Side::Frontend, true));
+  EXPECT_EQ((std::set<std::wstring>{L"shop.Scheduler.tick()"}), mixed.callers(st::Side::Backend));
+
+  // An endpoint is a hop, labelled as such.
+  const auto lines = st::calls(mixed.code.storage, {mixed.handler}, st::Direction::Incoming, 1);
+  ASSERT_TRUE(lineFor(lines, L"HTTP.GET /api/orders"));
+  EXPECT_TRUE(lineFor(lines, L"HTTP.GET /api/orders")->kind == L"endpoint");
+
+  st::QueryOptions frontend;
+  frontend.side = st::Side::Frontend;
+  const auto impact = st::impact(mixed.code.storage, {mixed.handler}, 0, st::IMPACT_EDGES, st::Group::None, frontend);
+  EXPECT_EQ((std::set<std::wstring>{L"web.order.service.OrderService.list()"}), keys(impact.lines));
+  EXPECT_EQ(1u, impact.symbols);
+  EXPECT_EQ(1u, impact.files);
+}
+
+// The index holds no inheritance between a library's own types: JpaRepository's ListCrudRepository.findAll is named
+// after the one repository the caller refers to.
+TEST(StQuery, boundariesNameAMethodOfALibraryBaseTheIndexDoesNotLinkAfterTheCallersRepository) {
+  Backend backend;
+  const std::vector<std::wstring> crud = {L"org", L"springframework", L"data", L"repository", L"ListCrudRepository<T, ID>"};
+  undefined(backend.code.storage, typeName(crud), NODE_SYMBOL);
+  const Id findAll = undefined(backend.code.storage, method(crud, L"findAll", L"java.util.List", L"()"), NODE_METHOD);
+  const Id orderService = backend.code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService"}));
+  const Id page = backend.code.member(orderService, L"OrderService", L"page");
+  const Id field = backend.code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService", L"orderRepository"}));
+  backend.code.link(Edge::EDGE_USAGE, page, field, L"OrderService", {12});
+  backend.code.link(Edge::EDGE_CALL, page, findAll, L"OrderService", {12});
+  backend.code.storage.buildCaches();
+
+  st::QueryOptions options;
+  options.library = true;
+  st::Walked walked;
+  const auto lines = st::calls(backend.code.storage, {page}, st::Direction::Outgoing, 0, &walked, options);
+  EXPECT_EQ((std::vector<std::wstring>{L"OrderRepository.findAll (ListCrudRepository)\tmethod, depth 1\t12"}),
+            printedKeys(st::boundaries(backend.code.storage, lines, &walked).repositories));
 }

@@ -107,4 +107,16 @@ int printResults(std::vector<ResultLine> lines, const OutputOptions& options, st
   }
   return EXIT_RESULTS;
 }
+int printGroups(const std::vector<std::pair<std::string, std::vector<ResultLine>>>& groups,
+                const OutputOptions& options,
+                std::ostream& out) {
+  int code = EXIT_EMPTY;
+  for(const auto& [title, lines] : groups) {
+    if(!lines.empty()) {
+      out << title << ":\n";
+      code = printResults(lines, options, out) == EXIT_RESULTS ? EXIT_RESULTS : code;
+    }
+  }
+  return code;
+}
 }    // namespace st

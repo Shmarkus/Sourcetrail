@@ -1860,3 +1860,299 @@ TEST(StIndex, fullIndexReportsFileCount) {
   // Listeners unregistering at shutdown is no error.
   EXPECT_FALSE(verboseErr.contains("Listener was not found")) << verboseErr.toStdString();
 }
+
+namespace {
+struct StRun {
+  int exitCode = -1;
+  std::string out;
+  std::string err;
+};
+
+// A copy of a fixture under a temporary folder, indexed by the built st with its own HOME; queried with --no-server.
+class FixtureCopy {
+public:
+  // `project` names the .srctrlprj file to write, `groups` its source groups; empty keeps the fixture's own project.
+  FixtureCopy(const char* fixture, const QString& project, const QString& groups = QString()) {
+    if(!mDir.isValid()) {
+      throw std::runtime_error("no temporary folder");
+    }
+    const QString base = QDir(mDir.path()).canonicalPath();
+    mRoot = base + "/" + QFileInfo(QString::fromUtf8(fixture)).fileName();
+    mHome = base + "/home";
+    std::filesystem::copy(fixture, mRoot.toStdString(), std::filesystem::copy_options::recursive);
+    for(const char* generated : {"build", ".gradle", "node_modules", ".sourcetrail"}) {
+      std::filesystem::remove_all((mRoot + "/" + generated).toStdString());
+    }
+    // The copies are older than the start of the first refresh, give or take the clock's coarseness.
+    QThread::msleep(100);
+    if(!groups.isEmpty()) {
+      write(mRoot + "/" + project,
+            ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<config><source_groups>" + groups +
+             "</source_groups><version>8</version></config>\n")
+                .toUtf8());
+    }
+    write(mHome + "/.config/sourcetrail/ApplicationSettings.xml",
+          "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
+          "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
+              qgetenv("JAVA_HOME") + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
+  }
+
+  StRun st(const QStringList& arguments) const {
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    if(!environment.contains("GRADLE_USER_HOME")) {
+      environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
+    }
+    environment.insert("HOME", mHome);
+    environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
+    environment.remove("DISPLAY");
+    QProcess process;
+    process.setProcessEnvironment(environment);
+    process.setWorkingDirectory(mRoot);
+    process.start(ST_APP_PATH, QStringList(arguments) << "--no-server");
+    StRun run;
+    if(!process.waitForFinished(300000)) {
+      process.kill();
+      process.waitForFinished();
+      return run;
+    }
+    run.exitCode = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
+    run.out = process.readAllStandardOutput().toStdString();
+    run.err = process.readAllStandardError().toStdString();
+    return run;
+  }
+
+  QString root() const {
+    return mRoot;
+  }
+
+private:
+  QTemporaryDir mDir;
+  QString mRoot;
+  QString mHome;
+};
+
+const QString kMixedGroups = QStringLiteral(
+    "<source_group_java><name>Java</name><type>Java Source Group from Gradle</type><status>enabled</status>"
+    "<java_standard>21</java_standard><source_extensions><source_extension>.java</source_extension></source_extensions>"
+    "<gradle><project_file_path>build.gradle</project_file_path><should_index_tests>1</should_index_tests></gradle>"
+    "</source_group_java>"
+    "<source_group_ts><name>TypeScript</name><type>TypeScript Source Group</type><status>enabled</status>"
+    "<typescript><tsconfig_path>tsconfig.json</tsconfig_path></typescript></source_group_ts>");
+
+bool typeScriptIndexerStaged() {
+  return QFile::exists(QFileInfo(QStringLiteral(ST_APP_PATH)).absolutePath() + "/data/ts-indexer/index.mjs");
+}
+
+// The Angular + Spring fixture, indexed once for the suite: its TypeScript calls reach the Spring handlers through
+// the endpoint nodes.
+class StAcrossTheLink : public testing::Test {
+protected:
+  static void SetUpTestSuite() {
+    if(!typeScriptIndexerStaged() || qgetenv("JAVA_HOME").isEmpty()) {
+      return;
+    }
+    sFixture = new FixtureCopy(ST_TS_FIXTURE, "shop.srctrlprj", kMixedGroups);
+    sIndexed = sFixture->st({"index", "--full"});
+  }
+
+  static void TearDownTestSuite() {
+    delete sFixture;
+    sFixture = nullptr;
+  }
+
+  void SetUp() override {
+    if(!typeScriptIndexerStaged()) {
+      GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
+    }
+    ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
+    ASSERT_EQ(0, sIndexed.exitCode) << sIndexed.err;
+  }
+
+  static StRun st(const QStringList& arguments) {
+    return sFixture->st(arguments);
+  }
+
+  // The key column of each result line.
+  static std::vector<std::string> firstColumns(const std::string& out) {
+    std::vector<std::string> columns;
+    std::istringstream lines(out);
+    for(std::string line; std::getline(lines, line);) {
+      columns.push_back(line.substr(0, line.find('\t')));
+    }
+    return columns;
+  }
+
+  static FixtureCopy* sFixture;
+  static StRun sIndexed;
+};
+
+FixtureCopy* StAcrossTheLink::sFixture = nullptr;
+StRun StAcrossTheLink::sIndexed;
+}    // namespace
+
+// Question 1: from an Angular method down to the edges of the backend it reaches, a library-declared repository method
+// named after the repository it is called on.
+TEST_F(StAcrossTheLink, calleesBoundariesFromFrontend) {
+  StRun run = st({"callees", "OrderListComponent.load", "--depth", "0", "--boundaries", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_EQ(
+      "repositories:\n"
+      "OrderRepository.findAll (JpaRepository)\tmethod, depth 5\tsrc/main/java/com/acme/shop/OrderService.java:17\n",
+      run.out)
+      << run.err;
+
+  run = st({"callees", "app.orders.order.service.OrderService.create", "--depth", "0", "--boundaries", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_EQ(
+      "repositories:\n"
+      "OrderRepository.save (JpaRepository)\tmethod, depth 4\tsrc/main/java/com/acme/shop/OrderService.java:24\n"
+      "feign clients:\n"
+      "PaymentClient.authorize\tmethod, depth 4\tsrc/main/java/com/acme/shop/OrderService.java:21\n",
+      run.out)
+      << run.err;
+
+  // Without --boundaries the walk is the same as ever, the endpoint a hop on the way.
+  run = st({"callees", "OrderListComponent.load", "--depth", "0", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("HTTP.GET /api/orders\tendpoint, depth 2\t")) << run.out;
+  EXPECT_NE(std::string::npos, run.out.find("com.acme.shop.OrderService.list()\tmethod, depth 4\t")) << run.out;
+}
+
+// Question 2: from a Java service method up to the Angular code that reaches it, spec files left out unless asked for.
+TEST_F(StAcrossTheLink, callersFrontendSideOfBackend) {
+  StRun run = st({"callers", "com.acme.shop.OrderService.list", "--depth", "0", "--side", "frontend", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  const std::vector<std::string> frontend = {"app.home.home.component.HomeComponent.load()",
+                                             "app.home.home.component.HomeComponent.reload()",
+                                             "app.home.home.component.HomeComponent.refresh()",
+                                             "app.orders.order-list.component.OrderListComponent.load()",
+                                             "app.orders.order-list.component.OrderListComponent.refresh()",
+                                             "app.orders.order.service.OrderService.list()",
+                                             "app.orders.order.service.OrderService.find(number)",
+                                             "app.orders.order.service.OrderService.find(string)"};
+  EXPECT_EQ(frontend, firstColumns(run.out)) << run.out;
+  EXPECT_NE(std::string::npos, run.err.find("callers: 8 (project shop)")) << run.err;
+
+  run = st({"callers", "com.acme.shop.OrderService.list", "--depth", "0", "--side", "frontend", "--tests", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  std::vector<std::string> withTests = frontend;
+  withTests.insert(withTests.begin() + 5, "app.orders.order.service.spec.toplevel()");
+  EXPECT_EQ(withTests, firstColumns(run.out)) << run.out;
+
+  run = st({"callers", "com.acme.shop.OrderService.list", "--depth", "0", "--side", "backend", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_EQ(std::vector<std::string>{"com.acme.shop.OrderResource.list()"}, firstColumns(run.out)) << run.out;
+
+  run = st({"impact", "com.acme.shop.OrderService.list", "--side", "frontend", "--group", "file", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("impact: 8 symbols in 3 files, 3 packages (project shop)")) << run.err;
+
+  run = st({"callers", "com.acme.shop.OrderService.list", "--tests"});
+  EXPECT_EQ(64, run.exitCode) << run.err;
+}
+
+// A TypeScript edit makes the index stale; the next query refreshes it, the TypeScript part included.
+TEST(StIndex, stalenessSeesTsEdit) {
+  if(!typeScriptIndexerStaged()) {
+    GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
+  }
+  ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
+  const FixtureCopy fixture(ST_TS_FIXTURE, "shop.srctrlprj", kMixedGroups);
+  StRun run = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  run = fixture.st({"status"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t0\n")) << run.out;
+  EXPECT_NE(std::string::npos, run.out.find("\ntypescript\tindexed\n")) << run.out;
+  // Every source group's files are checked as such.
+  EXPECT_EQ(std::string::npos, run.err.find("checked indexed files only")) << run.err;
+
+  // Modification times are compared in whole seconds.
+  QThread::sleep(2);
+  const QString service = fixture.root() + "/src/main/webapp/app/orders/order.service.ts";
+  QFile file(service);
+  ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+  QString text = QString::fromUtf8(file.readAll());
+  file.close();
+  text.replace("  download(location", "  count(): Observable<Order[]> {\n    return this.list();\n  }\n\n  download(location");
+  write(service, text.toUtf8());
+  run = fixture.st({"status"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t1\n")) << run.out;
+
+  run = fixture.st({"callers", "app.orders.order.service.OrderService.list", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("refreshed 1 files")) << run.err;
+  // The refresh's TypeScript and linking status lines are shown.
+  EXPECT_NE(std::string::npos, run.err.find("link: 3 linked, 0 ambiguous, 1 unresolved\nrefreshed 1 files")) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("app.orders.order.service.OrderService.count()\tmethod\t")) << run.out;
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t0\n")) << run.out;
+
+  // A new file, a tsconfig and a deleted file are TypeScript inputs too.
+  QThread::sleep(2);
+  write(fixture.root() + "/src/main/webapp/app/orders/order-count.ts", "export const COUNT = 1;\n");
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t1\n")) << run.out;
+  run = fixture.st({"find", "COUNT"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  QThread::sleep(2);
+  QFile tsconfig(fixture.root() + "/tsconfig.json");
+  ASSERT_TRUE(tsconfig.open(QIODevice::Append));
+  tsconfig.write("\n");
+  tsconfig.close();
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t1\n")) << run.out;
+  run = fixture.st({"find", "OrderDetailComponent"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  ASSERT_TRUE(QFile::remove(fixture.root() + "/src/main/webapp/app/orders/order-detail.component.ts"));
+  run = fixture.st({"status"});
+  EXPECT_EQ(std::string::npos, run.out.find("stale_files\t0\n")) << run.out;
+  run = fixture.st({"find", "OrderDetailComponent"});
+  EXPECT_EQ(1, run.exitCode) << run.out << run.err;
+}
+
+// With no TypeScript in a project, callees, supers and deps print what they printed before st knew TypeScript.
+TEST(StIndex, javaOnlyOutputUnchanged) {
+  ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  const FixtureCopy fixture(ST_LOMBOK_FIXTURE, "project.srctrlprj");
+  const StRun indexed = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, indexed.exitCode) << indexed.err;
+  const std::vector<std::pair<QStringList, std::string>> golden = {
+      {{"callees", "example.Welcome.welcome"},
+       "example.Caller.greeting(example.Person)\tmethod via example.Greeter.greeting(example.Person)\t"
+       "src/main/java/example/Welcome.java:7\treturn greeter.greeting(p);\n"
+       "example.Greeter.greeting(example.Person)\tmethod\tsrc/main/java/example/Welcome.java:7\treturn greeter.greeting(p);\n"},
+      {{"callees", "example.Caller.greeting(example.Person,java.lang.String)"},
+       "example.Person.getName()\tmethod\tsrc/main/java/example/Caller.java:10\treturn salutation + "
+       "person.getName().length();\n"},
+      {{"callees", "example.CallerIntegrationTest", "--depth", "0"},
+       "example.Caller.greeting(example.Person)\tmethod, depth "
+       "1\tsrc/integrationTest/java/example/CallerIntegrationTest.java:10\t"
+       "return caller.greeting(new Person());\n"
+       "example.Person.getName()\tmethod, depth 2\tsrc/main/java/example/Caller.java:6\treturn person.getName();\n"},
+      {{"supers", "example.Caller"},
+       "example.Greeter\tinterface\tsrc/main/java/example/Greeter.java:3\tpublic interface Greeter {\n"},
+      {{"supers", "example.Caller.greeting(example.Person)"},
+       "example.Greeter.greeting(example.Person)\tmethod\tsrc/main/java/example/Greeter.java:4\tString greeting(Person "
+       "person);\n"},
+      {{"deps", "example.Caller"},
+       "example.Greeter\tclass, 2 links\tsrc/main/java/example/Caller.java:3\tpublic class Caller implements Greeter {\n"
+       "example.Person\tclass, 4 links\tsrc/main/java/example/Caller.java:5\tpublic String greeting(Person person) {\n"},
+      {{"deps", "example.web"},
+       "example\tpackage, 4 links\tsrc/main/java/example/web/GreetingController.java:8\tprivate final Caller caller = new "
+       "Caller();\n"},
+      {{"deps", "example.Caller", "--in"},
+       "example.CallerIntegrationTest\tclass, 3 links\tsrc/integrationTest/java/example/CallerIntegrationTest.java:7\t"
+       "private final Caller caller;\n"
+       "example.web.GreetingController\tclass, 3 links\tsrc/main/java/example/web/GreetingController.java:8\t"
+       "private final Caller caller = new Caller();\n"}};
+  const StRun status = fixture.st({"status"});
+  EXPECT_EQ(std::string::npos, status.out.find("typescript")) << status.out;
+  for(const auto& [arguments, out] : golden) {
+    const StRun run = fixture.st(arguments);
+    EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
+    EXPECT_EQ(out, run.out) << arguments.join(' ').toStdString() << '\n' << run.err;
+    EXPECT_EQ(std::string::npos, run.err.find("checked indexed files only")) << run.err;
+  }
+}

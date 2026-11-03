@@ -7,6 +7,7 @@
 
 #include "FilePath.h"
 #include "NodeKind.h"
+#include "StGraph.h"
 #include "StOutput.h"
 #include "types.h"
 
@@ -23,6 +24,13 @@ struct Site {
 };
 
 std::string sourceText(PersistentStorage& storage, const Site& site);
+
+// The node's readable kind; "endpoint" for an endpoint node.
+std::wstring kindLabel(PersistentStorage& storage, Id id);
+
+// Whether a symbol declared in `declared` is on the side `options` asks for; a symbol without a location (a library
+// one) is on the side of `reachedAt`, the file of the link that reached it.
+bool onSide(PersistentStorage& storage, Id id, const FilePath& declared, const FilePath& reachedAt, const QueryOptions& options);
 
 // A result line at `site`, with its source text.
 ResultLine resultLine(PersistentStorage& storage, const std::wstring& key, const std::wstring& kind, const Site& site);

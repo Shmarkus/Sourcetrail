@@ -11,6 +11,7 @@
 #include "PersistentStorage.h"
 #include "SourceLocation.h"
 #include "SourceLocationCollection.h"
+#include "SqliteIndexStorage.h"
 #include "StGraphInternal.h"
 #include "StKey.h"
 #include "TextAccess.h"
@@ -160,6 +161,33 @@ void collectPaths(const Graph& graph,
 }
 }    // namespace
 
+bool isEndpoint(PersistentStorage& storage, Id id) {
+  return SqliteIndexStorage::isEndpoint(utility::encodeToUtf8(NameHierarchy::serialize(storage.getNameHierarchyForNodeId(id))),
+                                        nodeKindToInt(storage.getNodeTypeForNodeWithId(id).getKind()));
+}
+
+std::wstring kindLabel(PersistentStorage& storage, Id id) {
+  const NodeType type = storage.getNodeTypeForNodeWithId(id);
+  return type.getKind() == NODE_FUNCTION && isEndpoint(storage, id) ? L"endpoint" : type.getReadableTypeWString();
+}
+
+bool onSide(PersistentStorage& storage, Id id, const FilePath& declared, const FilePath& reachedAt, const QueryOptions& options) {
+  if(options.side == Side::Any) {
+    return true;
+  }
+  if(isEndpoint(storage, id)) {
+    return false;
+  }
+  const FilePath& file = declared.empty() ? reachedAt : declared;
+  const std::wstring extension = file.extension();
+  const bool typeScript = extension == L".ts" || extension == L".tsx";
+  if(options.side == Side::Backend) {
+    return !typeScript;
+  }
+  const std::wstring name = file.fileName();
+  return typeScript && (options.tests || !(name.ends_with(L".spec.ts") || name.ends_with(L".spec.tsx")));
+}
+
 std::wstring linkKind(Edge::EdgeType type) {
   std::wstring kind = Edge::getReadableTypeString(type);
   if(utility::isPostfix<std::wstring>(L"use", kind)) {
@@ -290,7 +318,7 @@ std::vector<ResultLine> definitionLines(PersistentStorage& storage, Id id, const
   std::vector<ResultLine> lines;
   for(const Site& site : sites) {
     if(!files || files->count(site.file)) {
-      lines.push_back(resultLine(storage, key, type.getReadableTypeWString(), site));
+      lines.push_back(resultLine(storage, key, kindLabel(storage, id), site));
     }
   }
   return lines;
@@ -334,15 +362,21 @@ std::vector<ResultLine> references(PersistentStorage& storage, const std::vector
   return lines;
 }
 
-std::vector<ResultLine> calls(
-    PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, size_t depth, Walked* walked) {
+std::vector<ResultLine> calls(PersistentStorage& storage,
+                              const std::vector<Id>& symbols,
+                              Direction direction,
+                              size_t depth,
+                              Walked* walked,
+                              const QueryOptions& options) {
   const std::set<Id> inputs(symbols.begin(), symbols.end());
   std::map<Id, Reached> results;
   std::set<Id> expanded;
+  // Library methods are never callers.
+  const bool library = options.library && direction == Direction::Outgoing;
   for(const Id id : symbols) {
     const auto graph = direction == Direction::Incoming ?
         storage.getGraphForTrail(0, id, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true) :
-        storage.getGraphForTrail(id, 0, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true);
+        storage.getGraphForTrail(id, 0, ~NodeKindMask(0), CALL_EDGES, library, depth * 3, true);
     for(const auto& [node, reached] : walkCalls(*graph, id, direction, depth, &expanded)) {
       if(!inputs.count(node) && reached.cost < results[node].cost) {
         results[node] = reached;
@@ -358,15 +392,30 @@ std::vector<ResultLine> calls(
     walked->passed.insert(inputs.begin(), inputs.end());
     walked->passed.insert(expanded.begin(), expanded.end());
   }
+  std::map<Id, Site> declared;
+  if(options.side != Side::Any) {
+    std::vector<Id> ids;
+    for(const auto& entry : results) {
+      ids.push_back(entry.first);
+    }
+    declared = definitionSites(storage, ids);
+  }
   std::vector<ResultLine> lines;
   for(const auto& [node, reached] : results) {
     if(isUnsolvedSymbol(storage, node)) {
       continue;
     }
+    const Site site = reached.siteEdge ? linkSite(storage, reached.siteEdge) : Site();
+    if(options.side != Side::Any) {
+      const auto definition = declared.find(node);
+      if(!onSide(storage, node, definition == declared.end() ? FilePath() : definition->second.file, site.file, options)) {
+        continue;
+      }
+    }
     if(walked) {
       walked->nodes.insert(node);
     }
-    std::wstring kind = storage.getNodeTypeForNodeWithId(node).getReadableTypeWString();
+    std::wstring kind = kindLabel(storage, node);
     if(reached.via) {
       kind += L" via " + key(storage, reached.via);
     }
@@ -374,12 +423,14 @@ std::vector<ResultLine> calls(
       kind += L", depth " + std::to_wstring(reached.cost);
     }
     if(reached.siteEdge) {
-      lines.push_back(resultLine(storage, key(storage, node), kind, linkSite(storage, reached.siteEdge)));
+      lines.push_back(resultLine(storage, key(storage, node), kind, site));
       lines.back().tier = static_cast<int>(reached.cost);
+      lines.back().symbol = node;
     } else {
       for(ResultLine& line : definitionLines(storage, node, key(storage, node))) {
         line.kind = kind;
         line.tier = static_cast<int>(reached.cost);
+        line.symbol = node;
         lines.push_back(std::move(line));
       }
     }
@@ -387,9 +438,11 @@ std::vector<ResultLine> calls(
   return lines;
 }
 
-std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, Walked* walked) {
+std::vector<ResultLine> hierarchy(
+    PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, Walked* walked, bool library) {
   const std::set<Id> inputs(symbols.begin(), symbols.end());
   std::set<Id> results;
+  std::map<Id, Id> reachedBy;    // the link that first reached each result
   if(walked) {
     walked->nodes.insert(inputs.begin(), inputs.end());
   }
@@ -398,7 +451,7 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
                                                                                             Edge::EDGE_OVERRIDE;
     const auto graph = direction == Direction::Incoming ?
         storage.getGraphForTrail(id, 0, ~NodeKindMask(0), types, false, 0, true) :
-        storage.getGraphForTrail(0, id, ~NodeKindMask(0), types, false, 0, true);
+        storage.getGraphForTrail(0, id, ~NodeKindMask(0), types, library, 0, true);
     // Walking down means from supertype to subtype, i.e. against the stored link.
     const auto hops = adjacency(*graph, types, direction == Direction::Incoming ? Direction::Outgoing : Direction::Incoming);
     std::set<Id> seen = {id};
@@ -414,6 +467,7 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
           queue.push_back(hop.to);
           if(!inputs.count(hop.to)) {
             results.insert(hop.to);
+            reachedBy.emplace(hop.to, hop.edge->getId());
           }
         }
       }
@@ -432,7 +486,12 @@ std::vector<ResultLine> hierarchy(PersistentStorage& storage, const std::vector<
     if(walked) {
       walked->nodes.insert(id);
     }
-    for(ResultLine& line : definitionLines(storage, id, key(storage, id))) {
+    std::vector<ResultLine> own = definitionLines(storage, id, key(storage, id));
+    // A library type has no location of its own.
+    if(own.empty() && library && reachedBy.count(id)) {
+      own.push_back(resultLine(storage, key(storage, id), kindLabel(storage, id), linkSite(storage, reachedBy.at(id))));
+    }
+    for(ResultLine& line : own) {
       lines.push_back(std::move(line));
     }
   }

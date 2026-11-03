@@ -31,20 +31,20 @@ std::pair<std::wstring, std::wstring> splitLocalSymbolName(const std::wstring& n
 // because of it.
 const std::string EndpointNamePrefix = ".\tmHTTP\ts\tp\tn";
 
-bool isEndpoint(const std::string& serializedName, int type) {
-  if(type != nodeKindToInt(NODE_FUNCTION) || !serializedName.starts_with(EndpointNamePrefix)) {
-    return false;
-  }
-  const size_t verbEnd = serializedName.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", EndpointNamePrefix.size());
-  return verbEnd > EndpointNamePrefix.size() && serializedName.compare(verbEnd, 2, " /") == 0;
-}
-
 std::string isEndpointSql(const std::string& node) {
   return "(" + node + ".type == " + std::to_string(nodeKindToInt(NODE_FUNCTION)) + " AND substr(" + node +
       ".serialized_name, 1, " + std::to_string(EndpointNamePrefix.size()) + ") == '" + EndpointNamePrefix + "' AND substr(" +
       node + ".serialized_name, " + std::to_string(EndpointNamePrefix.size() + 1) + ") GLOB '[A-Z]* /*')";
 }
 }    // namespace
+
+bool SqliteIndexStorage::isEndpoint(const std::string& serializedName, int type) {
+  if(type != nodeKindToInt(NODE_FUNCTION) || !serializedName.starts_with(EndpointNamePrefix)) {
+    return false;
+  }
+  const size_t verbEnd = serializedName.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", EndpointNamePrefix.size());
+  return verbEnd > EndpointNamePrefix.size() && serializedName.compare(verbEnd, 2, " /") == 0;
+}
 
 size_t SqliteIndexStorage::getStorageVersion() {
   return sStorageVersion;

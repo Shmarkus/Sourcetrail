@@ -6,6 +6,7 @@
 
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithSourcePaths.h"
 #include "utilityGradleCache.h"
 #include "utilityString.h"
@@ -67,6 +68,25 @@ public:
       if(it.fileInfo().isDir()) {
         directory(path);
       } else if(extensions.count(utility::toLowerCase(FilePath(path.toStdWString()).extension()))) {
+        file(path);
+      }
+    }
+  }
+
+  // The root and every directory below it the TypeScript group walks, with its trigger files.
+  void typeScriptTree(const QString& root) {
+    if(!QFileInfo(root).isDir() || excluded(root)) {
+      return;
+    }
+    directory(root);
+    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
+    while(it.hasNext()) {
+      const QString path = it.next();
+      if(it.fileInfo().isDir()) {
+        if(!SourceGroupSettingsTypeScript::isUnwalkedDirectory(it.fileName().toStdWString())) {
+          typeScriptTree(path);
+        }
+      } else if(SourceGroupSettingsTypeScript::isTriggerFile(FilePath(path.toStdWString()))) {
         file(path);
       }
     }
@@ -158,6 +178,10 @@ std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vect
   }
   for(const auto& group : settings.getAllSourceGroupSettings()) {
     if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED) {
+      continue;
+    }
+    if(const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
+      paths.typeScriptTree(toQString(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory()));
       continue;
     }
     const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);

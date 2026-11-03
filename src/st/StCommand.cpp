@@ -22,7 +22,9 @@
 #include "NodeTypeSet.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
+#include "SourceGroupSettings.h"
 #include "StArchitecture.h"
+#include "StBoundaries.h"
 #include "StFiles.h"
 #include "StFilter.h"
 #include "StFreshness.h"
@@ -235,6 +237,22 @@ int path(const st::Io& io,
   return chains.empty() ? st::EXIT_EMPTY : st::EXIT_RESULTS;
 }
 
+// Prints the boundaries among `lines` under their group titles, then on stderr the gaps of the index they touch.
+int printBoundaries(const st::Io& io,
+                    PersistentStorage& storage,
+                    const QString& command,
+                    const std::vector<st::ResultLine>& lines,
+                    const st::Walked& walked,
+                    const st::OutputOptions& options) {
+  const st::Boundaries found = st::boundaries(storage, lines, &walked);
+  countLine(io, options, command.toStdString() + ": " + std::to_string(found.repositories.size() + found.feignClients.size()));
+  const int code = st::printGroups({{"repositories", found.repositories}, {"feign clients", found.feignClients}}, options, io.out);
+  std::vector<st::ResultLine> shown = found.repositories;
+  shown.insert(shown.end(), found.feignClients.begin(), found.feignClients.end());
+  printGaps(io, storage, walked, shown, options.gapInputs);
+  return code;
+}
+
 int impact(const st::Io& io,
            PersistentStorage& storage,
            const std::vector<Id>& ids,
@@ -242,8 +260,13 @@ int impact(const st::Io& io,
            Edge::TypeMask types,
            st::Group group,
            const st::LombokRoots& lombok,
+           const st::QueryOptions& query,
+           bool boundaries,
            const st::OutputOptions& options) {
-  st::ImpactResult result = st::impact(storage, ids, depth, types, group);
+  st::ImpactResult result = st::impact(storage, ids, depth, types, group, query);
+  if(boundaries) {
+    return printBoundaries(io, storage, "impact", result.lines, result.walked, options);
+  }
   countLine(io,
             options,
             "impact: " + std::to_string(result.symbols) + " symbols in " + std::to_string(result.files) + " files, " +
@@ -260,9 +283,10 @@ int deps(const st::Io& io,
          PersistentStorage& storage,
          const std::vector<Id>& ids,
          st::Direction direction,
+         bool library,
          const st::OutputOptions& options) {
   st::Walked walked;
-  std::vector<st::ResultLine> lines = st::deps(storage, ids, direction, &walked);
+  std::vector<st::ResultLine> lines = st::deps(storage, ids, direction, &walked, library);
   countLine(io, options, "deps: " + std::to_string(lines.size()));
   return printWithGaps(io, storage, lines, walked, options);
 }
@@ -272,6 +296,8 @@ int graph(const st::Io& io,
           const QString& command,
           const std::vector<Id>& ids,
           size_t depth,
+          const st::QueryOptions& query,
+          bool boundaries,
           const st::OutputOptions& options) {
   std::vector<st::ResultLine> lines;
   st::Walked walked;
@@ -282,9 +308,14 @@ int graph(const st::Io& io,
                       st::expandClasses(storage, ids),
                       command == "callers" ? st::Direction::Incoming : st::Direction::Outgoing,
                       depth,
-                      &walked);
+                      &walked,
+                      query);
+    if(boundaries) {
+      return printBoundaries(io, storage, command, lines, walked, options);
+    }
   } else {
-    lines = st::hierarchy(storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing, &walked);
+    lines = st::hierarchy(
+        storage, ids, command == "impls" ? st::Direction::Incoming : st::Direction::Outgoing, &walked, query.library);
   }
   countLine(io, options, command.toStdString() + ": " + std::to_string(lines.size()));
   return printWithGaps(io, storage, lines, walked, options);
@@ -535,7 +566,12 @@ int outlineInputs(const st::Io& io,
   return st::printResults(std::move(lines), options, io.out);
 }
 
-int status(const st::Io& io, PersistentStorage& storage, size_t unresolved, const st::Freshness& freshness, bool serverRunning) {
+int status(const st::Io& io,
+           const ProjectSettings& settings,
+           PersistentStorage& storage,
+           size_t unresolved,
+           const st::Freshness& freshness,
+           bool serverRunning) {
   const StorageStats stats = storage.getStorageStats();
   io.out << "indexed_at\t" << stats.timestamp.toString() << '\n'
          << "files\t" << stats.fileCount << '\n'
@@ -544,6 +580,18 @@ int status(const st::Io& io, PersistentStorage& storage, size_t unresolved, cons
          << "unresolved_symbols\t" << unresolved << '\n'
          << "stale_files\t" << freshness.changedFiles << '\n'
          << "server\t" << (serverRunning ? "running" : "off") << '\n';
+  // A TypeScript group's last run: indexed, failed with the indexer's message, or none in the index (skipped, e.g.
+  // without node_modules; `st index` shows why).
+  for(const auto& group : settings.getAllSourceGroupSettings()) {
+    if(group->getStatus() == SOURCE_GROUP_STATUS_ENABLED && group->getType() == SOURCE_GROUP_TYPESCRIPT) {
+      const std::string failure = storage.getSourceGroupFailure(group->getId());
+      io.out << "typescript\t"
+             << (!failure.empty() ? "failed: " + failure.substr(0, failure.find('\n')) :
+                     storage.getSourceGroupInputs(group->getId()).empty() ? "not indexed; st index shows why" :
+                                                                           "indexed")
+             << '\n';
+    }
+  }
   return st::EXIT_RESULTS;
 }
 
@@ -594,9 +642,21 @@ int inspect(const st::Io& io,
     indexedFiles.push_back(file.path);
   }
   *indexedAt = storage.getStorageStats().timestamp;
-  *freshness = st::checkFreshness(
-      settings, st::freshnessBaseline(*indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)), indexedFiles);
+  *freshness = st::checkFreshness(settings,
+                                  st::freshnessBaseline(*indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)),
+                                  indexedFiles,
+                                  st::storedGroupInputs(settings, storage));
   return st::EXIT_RESULTS;
+}
+
+// The indexer's TypeScript and endpoint linking status lines, which a refresh otherwise keeps to itself.
+void printTypeScriptStatus(const st::Io& io, const QByteArray& status) {
+  static const QRegularExpression lines(QStringLiteral(
+      "(TypeScript (?:skipped|failed)[^\\n]*|Endpoint linking (?:skipped|failed)[^\\n]*|link: \\d+ linked, \\d+ ambiguous, \\d+ "
+      "unresolved)"));
+  for(auto it = lines.globalMatch(QString::fromUtf8(status)); it.hasNext();) {
+    io.err << it.next().captured(1).toStdString() << '\n';
+  }
 }
 
 // Re-indexes a stale index: EXIT_RESULTS when the index is fresh afterwards, else the exit code to stop with.
@@ -632,6 +692,7 @@ int refreshIfStale(const st::Io& io,
   }
   if(failure.empty()) {
     st::recordRefresh(settings, {started, *indexedAt}, io.err);
+    printTypeScriptStatus(io, status);
     io.err << "refreshed " << changedFiles << " files in " << std::fixed << std::setprecision(1) << timer.elapsed() / 1000.0
            << "s\n";
   } else if(freshness->stale) {
@@ -744,6 +805,15 @@ void addOptions(QCommandLineParser& parser) {
   parser.addOption({"full", "index only: index every file again, not only the changed ones"});
   parser.addOption({"verbose", "index only: also print the indexer's log lines, such as each file it indexes"});
   parser.addOption({"no-server", "Answer in this process even when st serve runs for the project"});
+  parser.addOption({"boundaries",
+                    "callees and impact only: only the repository and Feign client methods reached, under "
+                    "`repositories:` and `feign clients:`"});
+  parser.addOption({"side",
+                    "callers, callees and impact only: only TypeScript symbols (frontend) or only the others (backend); "
+                    "endpoints are on neither side",
+                    "frontend|backend"});
+  parser.addOption({"tests", "with --side frontend: keep symbols of *.spec.ts files"});
+  parser.addOption({"library", "callees, supers and deps only: include library symbols, the ones without a definition"});
 }
 
 bool knownCommand(const QString& command) {
@@ -805,7 +875,8 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
         "[symbol|file[:line]] [target] "
         "[--project P] [--limit N] [--depth N] [--kind K] [--edges L] [--group file|package] [--in] [--package P] [--annotated "
         "A] "
-        "[--file G] [--not] [--no-source] [--no-generated] [--no-refresh]; see --help");
+        "[--file G] [--not] [--boundaries] [--side frontend|backend] [--tests] [--library] [--no-source] [--no-generated] "
+        "[--no-refresh]; see --help");
   }
   st::OutputOptions options;
   options.limit = number(parser, "limit", options.limit);
@@ -832,6 +903,32 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
   }
   if((isFiles || command == "outline") && parser.isSet("kind")) {
     throw UsageError("--kind does not apply to " + command.toStdString() + "; pipe into st filter --kind");
+  }
+  const bool boundaries = parser.isSet("boundaries");
+  if(boundaries && command != "callees" && command != "impact") {
+    throw UsageError("--boundaries applies to callees and impact only");
+  }
+  if(boundaries && (parser.isSet("group") || parser.isSet("side"))) {
+    throw UsageError("--boundaries does not combine with --group or --side");
+  }
+  st::QueryOptions query;
+  query.library = parser.isSet("library") || boundaries;
+  if(parser.isSet("library") && command != "callees" && command != "supers" && command != "deps") {
+    throw UsageError("--library applies to callees, supers and deps only");
+  }
+  if(parser.isSet("side")) {
+    const QString side = parser.value("side");
+    if(command != "callers" && command != "callees" && command != "impact") {
+      throw UsageError("--side applies to callers, callees and impact only");
+    }
+    if(side != "frontend" && side != "backend") {
+      throw UsageError("Unknown --side '" + side.toStdString() + "': expected frontend or backend");
+    }
+    query.side = side == "frontend" ? st::Side::Frontend : st::Side::Backend;
+  }
+  query.tests = parser.isSet("tests");
+  if(query.tests && query.side != st::Side::Frontend) {
+    throw UsageError("--tests applies with --side frontend only");
   }
   Edge::TypeMask edges = command == "path" ? st::PATH_EDGES : st::IMPACT_EDGES;
   if(parser.isSet("edges")) {
@@ -942,6 +1039,7 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
   }
   if(command == "status") {
     return status(io,
+                  settings,
                   storage,
                   cache.unresolved(storage),
                   freshness,
@@ -964,13 +1062,13 @@ int runImpl(const st::Request& request, const st::Io& io, st::IndexCache& cache)
     return code;
   }
   if(command == "impact") {
-    return impact(io, storage, ids, depth, edges, group, lombok, options);
+    return impact(io, storage, ids, depth, edges, group, lombok, query, boundaries, options);
   }
   if(command == "deps") {
-    return deps(io, storage, ids, parser.isSet("in") ? st::Direction::Incoming : st::Direction::Outgoing, options);
+    return deps(io, storage, ids, parser.isSet("in") ? st::Direction::Incoming : st::Direction::Outgoing, query.library, options);
   }
   if(command != "path") {
-    return graph(io, storage, command, ids, depth, options);
+    return graph(io, storage, command, ids, depth, query, boundaries, options);
   }
   std::vector<Id> targetIds;
   if(const int code = resolve(io, cache, storage, targets, ~0, options, &targetIds)) {

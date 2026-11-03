@@ -123,6 +123,8 @@ existing Sourcetrail index, as plain text lines that pipe into each other.
 | Members of a class or file; package or class dependencies | `st outline OrderService`, `st outline src/main/java/com/acme/shop/OrderService.java`; `st deps com.acme.shop.order` (`--in` for incoming) |
 | Files in a git diff to symbols | `git diff --name-only \| st symbols-in` |
 | What uses a library annotation or type (`@Scheduled`, `TaskScheduler`) | `st refs Scheduled`; a whole library package: `st impact org.springframework.scheduling --depth 1` |
+| Angular + Spring: which repositories and Feign clients does this Angular method reach? | `st callees OrderListComponent.load --depth 0 --boundaries` |
+| Angular + Spring: which Angular code reaches this Java method? | `st callers com.acme.shop.OrderService.list --depth 0 --side frontend` |
 | Narrow a result by annotation, kind or file | `... \| st filter --annotated Test`, `--kind method`, `--not --file '*Test*'` |
 | Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
 
@@ -218,6 +220,22 @@ st path com.acme.Controller.create com.acme.Repo.save
   the file name), `--not` negates the combination. Passing lines print unchanged, identical lines once. A key that is unknown or
   ambiguous, or a row that is not a symbol (an `impact --group` line), is named once on stderr (`st: symbol not found: <key>`), its
   lines are dropped, and the exit is 3 even when other lines pass; otherwise 0 with output, 1 without.
+
+**Across the frontend–backend link.** In a project with a TypeScript source group, each frontend HTTP call is linked to
+its Spring handler through an endpoint node, `HTTP.<VERB> <path>` (kind `endpoint`, located at the mapping
+annotation), so `callers`, `callees` and `impact` run from Angular methods into Java and back. Every Spring handler has
+its endpoint, called from the frontend or not.
+- `--boundaries` (`callees`, `impact`): only the repository and Feign client methods reached, under `repositories:` and
+  `feign clients:` title lines, each keyed `Type.method`. A repository is a type that is or extends a Spring Data
+  repository (`JpaRepository`, `CrudRepository`, ...) or carries `@Repository`; a Feign client carries `@FeignClient`.
+  A method the repository inherits from Spring Data is named after the repository the caller holds:
+  `OrderRepository.findAll (JpaRepository)`. Library methods count here even though `callees` hides them otherwise.
+- `--side frontend|backend` (`callers`, `callees`, `impact`): only TypeScript symbols, or only the others; endpoints are
+  on neither side. With `--side frontend`, symbols of `*.spec.ts` files are left out unless `--tests` is given.
+- `--library` (`callees`, `supers`, `deps`): include library symbols, the ones without a definition in the index
+  (`java.lang.String.length()`, `JpaRepository` from a jar). Without it the output is as it always was.
+- Freshness covers the TypeScript group: a changed, new or deleted `.ts`/`.tsx` file, `tsconfig*.json`, `package.json`
+  or lockfile makes the index stale, and the next query refreshes it as usual.
 
 `--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
 name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.

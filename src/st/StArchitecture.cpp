@@ -282,7 +282,12 @@ Edge::TypeMask parseEdges(const std::wstring& list) {
   return types;
 }
 
-ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, size_t depth, Edge::TypeMask types, Group group) {
+ImpactResult impact(PersistentStorage& storage,
+                    const std::vector<Id>& symbols,
+                    size_t depth,
+                    Edge::TypeMask types,
+                    Group group,
+                    const QueryOptions& options) {
   std::vector<Id> roots;
   for(const Id id : symbols) {
     const std::vector<Id> expanded = withSubPackages(storage, id);
@@ -317,13 +322,6 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
   result.walked.nodes = walk.walked();
   result.walked.passed = result.walked.nodes;
   result.walked.links = walk.links();
-  for(const Affected& symbol : affected) {
-    result.walked.nodes.insert(symbol.id);
-  }
-  std::set<std::wstring> files;
-  std::map<std::wstring, std::vector<const Affected*>> byFile;
-  std::map<std::wstring, std::vector<const Affected*>> byPackage;
-  Packages packages(storage);
   for(Affected& symbol : affected) {
     // Ties between links reaching a symbol at the same cost go to the first site by path and line.
     for(const Id edge : reached.at(symbol.id).edges) {
@@ -339,6 +337,18 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
     if(symbol.site.file.empty()) {
       symbol.site = symbol.definition;
     }
+  }
+  std::erase_if(affected, [&](const Affected& symbol) {
+    return !onSide(storage, symbol.id, symbol.definition.file, symbol.site.file, options);
+  });
+  for(const Affected& symbol : affected) {
+    result.walked.nodes.insert(symbol.id);
+  }
+  std::set<std::wstring> files;
+  std::map<std::wstring, std::vector<const Affected*>> byFile;
+  std::map<std::wstring, std::vector<const Affected*>> byPackage;
+  Packages packages(storage);
+  for(const Affected& symbol : affected) {
     const FilePath& file = symbol.definition.file.empty() ? symbol.site.file : symbol.definition.file;
     if(!file.empty()) {
       files.insert(file.wstr());
@@ -361,19 +371,18 @@ ImpactResult impact(PersistentStorage& storage, const std::vector<Id>& symbols, 
       }
       const size_t depth = reached.at(symbol.id).cost;
       ResultLine line = resultLine(
-          storage,
-          symbolKey(symbol.name),
-          storage.getNodeTypeForNodeWithId(symbol.id).getReadableTypeWString() + L", depth " + std::to_wstring(depth),
-          symbol.site);
+          storage, symbolKey(symbol.name), kindLabel(storage, symbol.id) + L", depth " + std::to_wstring(depth), symbol.site);
       // Under --limit the nearest rows stay.
       line.tier = static_cast<int>(depth);
+      line.symbol = symbol.id;
       result.lines.push_back(std::move(line));
     }
   }
   return result;
 }
 
-std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, Walked* walked) {
+std::vector<ResultLine> deps(
+    PersistentStorage& storage, const std::vector<Id>& symbols, Direction direction, Walked* walked, bool library) {
   const Edge::TypeMask counted = ~Edge::TypeMask(Edge::EDGE_MEMBER | Edge::EDGE_IMPORT | Edge::EDGE_INCLUDE);
   Packages packages(storage);
 
@@ -421,9 +430,12 @@ std::vector<ResultLine> deps(PersistentStorage& storage, const std::vector<Id>& 
       if(it == keyById.end()) {
         std::wstring key;
         const NameHierarchy name = storage.getNameHierarchyForNodeId(other);
-        if(storage.getDefinitionKindForNodeId(other) != DEFINITION_NONE &&
-           !(storage.getNodeTypeForNodeWithId(other).getKind() & (NOT_RESULTS & ~NODE_TYPE_PARAMETER)) && !isUnsolvedSymbol(name)) {
-          key = rowKey(name);
+        const NodeKind kind = storage.getNodeTypeForNodeWithId(other).getKind();
+        const bool defined = storage.getDefinitionKindForNodeId(other) != DEFINITION_NONE;
+        if((defined || library) && !(kind & (NOT_RESULTS & ~NODE_TYPE_PARAMETER)) && !isUnsolvedSymbol(name)) {
+          // The index knows no kinds of a library's types: a library member rolls up to its parent.
+          const bool member = !defined && name.size() > 1 && (kind & (NODE_METHOD | NODE_FIELD | NODE_ENUM_CONSTANT));
+          key = rowKey(member ? name.getRange(0, name.size() - 1) : name);
         }
         it = keyById.emplace(other, key).first;
       }

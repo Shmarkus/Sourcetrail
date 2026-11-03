@@ -94,6 +94,14 @@ public:
   static size_t getStorageVersion();
 
   /**
+   * @brief Whether a node belongs to the endpoint layer: a function HTTP.<VERB> /<path> (see TaskLinkEndpoints)
+   * @param serializedName The node's serialized name hierarchy
+   * @param type The node's kind, as stored
+   * @return True for an endpoint node
+   */
+  static bool isEndpoint(const std::string& serializedName, int type);
+
+  /**
    * @brief Storage modes for the storage
    */
   enum StorageModeType { STORAGE_MODE_READ = 1, STORAGE_MODE_WRITE = 2, STORAGE_MODE_CLEAR = 4 };

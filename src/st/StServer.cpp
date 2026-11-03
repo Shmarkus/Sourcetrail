@@ -162,6 +162,7 @@ private:
       files->push_back(file.path);
     }
     *indexedAt = storage.getStorageStats().timestamp;
+    m_groupInputs = st::storedGroupInputs(settings, storage);
     if(m_pending.pending()) {
       if(const std::optional<st::RefreshRecord> record = m_pending.take(*indexedAt, st::lastRefresh(settings))) {
         st::recordRefresh(settings, *record, m_err);
@@ -231,7 +232,7 @@ private:
       watch(settings, files);
     }
     const st::Freshness freshness = st::checkFreshness(
-        settings, st::freshnessBaseline(indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)), files);
+        settings, st::freshnessBaseline(indexedAt, st::lastRefresh(settings), st::refreshInProgress(settings)), files, m_groupInputs);
     if(!freshness.stale) {
       m_scheduler.finished();
       return;
@@ -320,6 +321,8 @@ private:
   qint64 m_retryAt = 0;
   qint64 m_attempted = 0;
   st::PendingRecord m_pending;
+  // The TypeScript groups' inputs records of the index last read.
+  st::GroupInputs m_groupInputs;
 };
 
 // The reply to one request, or nullopt to close the connection without one.

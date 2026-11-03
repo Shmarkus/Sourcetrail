@@ -2,6 +2,7 @@
 #define ST_FRESHNESS_H
 
 #include <iostream>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "FilePath.h"
 #include "TimeStamp.h"
 
+class PersistentStorage;
 class ProjectSettings;
 
 namespace st {
@@ -18,9 +20,19 @@ struct Freshness {
   std::string reason;
 };
 
-// Stale when a source file, source directory or Gradle build file changed at or after `indexedAt`.
-// Source groups without a Gradle preparation cache fall back to the indexed files.
-Freshness checkFreshness(const ProjectSettings& settings, const TimeStamp& indexedAt, const std::vector<FilePath>& indexedFiles);
+// The inputs record of each TypeScript source group as the index keeps it, by group id: what the group was last
+// indexed from; empty when its last run was skipped.
+using GroupInputs = std::map<std::string, std::string>;
+GroupInputs storedGroupInputs(const ProjectSettings& settings, const PersistentStorage& storage);
+
+// Stale when a source file, source directory or Gradle build file changed at or after `indexedAt`, or when a
+// TypeScript group's inputs (its trigger files) differ from the ones in `inputs`; a TypeScript group without a stored
+// record counts the trigger files changed at or after `indexedAt`. Other source groups without a Gradle preparation
+// cache fall back to the indexed files.
+Freshness checkFreshness(const ProjectSettings& settings,
+                         const TimeStamp& indexedAt,
+                         const std::vector<FilePath>& indexedFiles,
+                         const GroupInputs& inputs = {});
 
 // st's last successful refresh: when it started and the index time it left behind.
 struct RefreshRecord {

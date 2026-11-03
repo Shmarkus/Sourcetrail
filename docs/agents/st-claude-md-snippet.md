@@ -1,6 +1,6 @@
 ## Code navigation with `st`
 
-Use `st` (Sourcetrail CLI) for Java structure. Use grep for text, config, strings and log messages.
+Use `st` (Sourcetrail CLI) for Java structure, and for TypeScript in an Angular + Spring project. Use grep for text, config, strings and log messages.
 
 | Question | Command |
 |---|---|
@@ -13,6 +13,8 @@ Use `st` (Sourcetrail CLI) for Java structure. Use grep for text, config, string
 | Files of a git diff as symbols | `git diff --name-only \| st symbols-in` |
 | Package or class dependencies | `st deps com.acme.order` (`--in` for incoming) |
 | What uses a library annotation or type (`@Scheduled`, `TaskScheduler`) | `st refs Scheduled`; a library package: `st impact org.springframework.scheduling --depth 1` |
+| Angular + Spring: repositories and Feign clients an Angular method reaches | `st callees Cmp.load --depth 0 --boundaries` |
+| Angular + Spring: the Angular code that reaches a Java method | `st callers pkg.Svc.method --depth 0 --side frontend` (`--tests` keeps `*.spec.ts`) |
 | Narrow any result | `... \| st filter --annotated Test` (also `--kind`, `--package`, `--file`, `--not`) |
 
 - **Names** are a short name (`Cls.method`) or a full key. Parameters take simple type names: `'Cls.method(Order, int)'`.

@@ -4,9 +4,11 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "FilePath.h"
+#include "types.h"
 
 namespace st {
 enum ExitCode {
@@ -33,6 +35,8 @@ struct ResultLine {
   bool generated = false;
   // 1-based column of the location on `line`; 0 when unknown.
   size_t column = 0;
+  // The symbol the line is about, where a query sets it; 0 otherwise.
+  Id symbol = 0;
 };
 
 class GapInputs;
@@ -56,6 +60,12 @@ struct OutputOptions {
 // Keeps the best tiers (then path/line order) under the limit and prints those sorted by path then line; returns EXIT_RESULTS or
 // EXIT_EMPTY.
 int printResults(std::vector<ResultLine> lines, const OutputOptions& options, std::ostream& out);
+
+// Each group that has lines: its title on a line of its own (`repositories:`), then its lines as printResults prints them,
+// the limit applying to each group; returns EXIT_RESULTS or EXIT_EMPTY.
+int printGroups(const std::vector<std::pair<std::string, std::vector<ResultLine>>>& groups,
+                const OutputOptions& options,
+                std::ostream& out);
 
 // Relative to cwd when the file is below it, otherwise absolute.
 std::wstring displayPath(const FilePath& file, const FilePath& cwd);

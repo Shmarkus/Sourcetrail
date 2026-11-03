@@ -6,6 +6,7 @@ add_library(Sourcetrail::st_core ALIAS Sourcetrail_st_core)
 target_sources(
   Sourcetrail_st_core
   PRIVATE StArchitecture.cpp
+          StBoundaries.cpp
           StClient.cpp
           StCommand.cpp
           StFiles.cpp
@@ -62,8 +63,10 @@ if(ENABLE_UNIT_TEST)
     WORKING_DIRECTORY
     "${CMAKE_BINARY_DIR}/test/")
   target_include_directories(st_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/tests)
-  # StIndex runs the built st, which runs the Sourcetrail beside it, on a copy of the Lombok fixture.
-  target_compile_definitions(st_test PRIVATE ST_APP_PATH="$<TARGET_FILE:st>"
-                                             ST_LOMBOK_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/lombok")
+  # StIndex runs the built st, which runs the Sourcetrail beside it, on copies of the Lombok and the Angular + Spring
+  # fixtures.
+  target_compile_definitions(
+    st_test PRIVATE ST_APP_PATH="$<TARGET_FILE:st>" ST_LOMBOK_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/lombok"
+                    ST_TS_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring")
   add_dependencies(st_test st)
 endif()

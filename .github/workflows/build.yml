@@ -36,11 +36,13 @@ jobs:
           mvn --version
 
       - name: Configure Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
+          # The default **/pom.xml glob walks into the self-referencing symlinks under bin/test/data.
+          cache-dependency-path: java_indexer/pom.xml
 
       - name: Cache the toolchain (Qt, Conan packages)
         id: toolchain-cache

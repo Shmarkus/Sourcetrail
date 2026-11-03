@@ -209,7 +209,7 @@ After building, run the `bundle_install.sh` script within the build directory wh
 
 ### Linux
 
-Run `./setup/Linux/createPackages.sh` from the main directory, which creates both a `.tar.gz` and a `.AppImage` package in the main directory. Packaging depends on [linuxdeployqt](https://github.com/probonopd/linuxdeployqt).
+After building with the `fork_release` preset, run `./setup/Linux/createPackages.sh` from the main directory. It creates `Sourcetrail_Linux_64bit.tar.gz` in the main directory, with the Qt libraries and plugins of the Qt the build linked against bundled. Packaging needs `patchelf`, `file` and ImageMagick's `convert`, and `libxcb-cursor0` installed so it can be bundled.
 
 
 # How to Run the Tests

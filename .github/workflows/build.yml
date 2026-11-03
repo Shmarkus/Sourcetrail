@@ -1,305 +1,121 @@
-name: Build
+name: Build and Test
 
-on:
-  push:
-    branches: ["main"]
-    paths:
-      - "**/*.h"
-      - "**/*.hpp"
-      - "**/*.cpp"
-      - "**/*.cmake"
-      - .github/workflows/*.yml
-  pull_request:
-    branches: ["main"]
-    paths:
-      - "**/*.h"
-      - "**/*.hpp"
-      - "**/*.cpp"
-      - "**/*.cmake"
-      - .github/workflows/*.yml
+# Every push builds, tests and packages. Pushes to master refresh the rolling `latest` prerelease;
+# a pushed `v*` tag publishes a release of that version. Other branches only keep the run artifact.
+on: [push]
 
 jobs:
-  clang-format:
-    runs-on: ubuntu-24.04
+  build:
+    # The oldest supported runner: the package needs the glibc it was built against.
+    runs-on: ubuntu-22.04
+    env:
+      ST_TOOLCHAIN: /home/runner/.cache/sourcetrail-toolchain
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          # The xcb and wayland libraries are what the bundled Qt plugins link against; bundleLibraries.sh copies them.
+          sudo apt-get install -y --no-install-recommends gcc-13 g++-13 lld ninja-build patchelf imagemagick file \
+            libgl1-mesa-dev libegl1 libfontconfig1 libdbus-1-3 libglib2.0-0 libgssapi-krb5-2 \
+            libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1
+          # The presets and the Conan profile call plain gcc/g++.
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 130 --slave /usr/bin/g++ g++ /usr/bin/g++-13
+          # The runner image ships a current Maven; the distribution's is older.
+          command -v mvn > /dev/null || sudo apt-get install -y --no-install-recommends maven
+          gcc --version
+          mvn --version
+
+      - name: Configure Java
+        uses: actions/setup-java@v4
         with:
-          fetch-depth: 0 # Fetch full history to ensure base SHA is available
+          distribution: temurin
+          java-version: "21"
+          cache: maven
 
-      - name: Install clang-format
-        run: |
-          sudo apt-get install clang-format-18 -y
+      - name: Cache the toolchain (Qt, Conan packages)
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ST_TOOLCHAIN }}
+          # bootstrap.sh pins the Qt, Conan and aqt versions.
+          key: st-toolchain-ubuntu-22.04-gcc13-${{ hashFiles('conan.lock', '.conan/gcc/profile', 'scripts/fork/bootstrap.sh') }}
 
-      - name: Run clang-format style check for modified .cpp|.h|.hpp files
+      - name: Install the toolchain
         run: |
-          CHANGED_FILES=$(git diff --name-only --diff-filter=M ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E '\.(cpp|h|hpp)$' || true)
-          echo
-          if [ -n "$CHANGED_FILES" ]; then
-            clang-format --dry-run --Werror $CHANGED_FILES
-          else
-            echo "No C++ files to check with clang-format."
+          scripts/fork/bootstrap.sh > /dev/null
+          if [ "${{ steps.toolchain-cache.outputs.cache-hit }}" != "true" ]; then
+            # Keep the cache to the built packages; their build trees are large.
+            eval "$(scripts/fork/bootstrap.sh --env)"
+            conan cache clean "*" --build --source --download --temp
           fi
 
-  cmake-format:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Format CMake files
-        id: cmake-format
-        uses: PuneetMatharu/cmake-format-lint-action@v1.0.4
-        with:
-          args: --config-files .cmake-format.yaml --check
-
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - {
-              name: "Windows Latest MSVC",
-              os: windows-latest,
-              tag: msvc,
-              cc: "cl",
-              cxx: "cl",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
-              "with_cxx": "",
-            }
-          - {
-              name: "Windows Latest MSVC with cxx_build",
-              os: windows-latest,
-              tag: msvc,
-              cc: "cl",
-              cxx: "cl",
-              environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
-              "with_cxx": "_build_cxx",
-            }
-          - {
-              name: "Ubuntu Latest GCC",
-              os: ubuntu-24.04,
-              tag: gnu,
-              cc: "gcc",
-              cxx: "g++",
-              "with_cxx": "",
-            }
-          - {
-              name: "Ubuntu Latest GCC with cxx_build",
-              os: ubuntu-24.04,
-              tag: gnu,
-              cc: "gcc",
-              cxx: "g++",
-              "with_cxx": "_build_cxx",
-            }
-          - {
-              name: "Ubuntu Latest CLang",
-              os: ubuntu-24.04,
-              tag: "clang",
-              cc: "clang",
-              cxx: "clang++",
-              "with_cxx": "",
-            }
-          - {
-              name: "Ubuntu Latest CLang cxx_build",
-              os: ubuntu-24.04,
-              tag: "clang",
-              cc: "clang",
-              cxx: "clang++",
-              "with_cxx": "_build_cxx",
-            }
-
-    name: ${{ matrix.config.name }}
-    needs: [clang-format, cmake-format]
-    runs-on: ${{ matrix.config.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: "true"
-
-      - name: Get tags
-        run: git fetch --tags origin
-
-      - name: Install dependencies (Ubuntu)
-        if: runner.os == 'Linux'
-        run: sudo apt install -y gcc g++ clang ninja-build python3-pip grep
-
-      - name: Install Qt (Ubuntu)
-        if: runner.os == 'Linux'
-        uses: jurplel/install-qt-action@v3
-        with:
-          aqtversion: "==3.2.*"
-          dir: "${{github.workspace}}/Qt/"
-          install-deps: "true"
-          version: "6.8.2"
-          host: "linux"
-          target: "desktop"
-          arch: "linux_gcc_64"
-          modules: "qt5compat"
-          archives: "icu qtbase qtdeclarative qtsvg"
-          cache: "true"
-          cache-key-prefix: "install-qt-action-linux"
-
-      - name: Install Qt (Windows)
-        if: runner.os == 'Windows'
-        uses: jurplel/install-qt-action@v3
-        with:
-          aqtversion: "==3.2.*"
-          dir: "${{github.workspace}}/Qt/"
-          install-deps: "true"
-          version: "6.8.2"
-          host: "windows"
-          target: "desktop"
-          arch: "win64_msvc2022_64"
-          modules: "qt5compat"
-          archives: "qtbase qtdeclarative qtsvg"
-          cache: "true"
-          cache-key-prefix: "install-qt-action-windows"
-
-      - name: Install conan & gcovr (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Configure CMake
         run: |
-          python3 -m venv venv
-          source venv/bin/activate
-          pip install conan gcovr
+          eval "$(scripts/fork/bootstrap.sh --env)"
+          cmake --preset fork_release
 
-      - name: Install conan (Windows)
-        if: runner.os == 'Windows'
-        run: python -m pip install conan && conan profile detect
-        shell: bash
-
-      - name: Cache Conan packages (Ubuntu)
-        if: runner.os == 'Linux'
-        uses: actions/cache@v4
-        with:
-          path: ~/.conan2
-          key: conan-${{ runner.os }}-${{ matrix.config.tag }}-${{ hashFiles('**/conanfile.txt') }}
-
-      - name: Cache Conan packages (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: "C:\\Users\\runneradmin\\.conan2\\"
-          key: conan-${{ runner.os }}-${{ matrix.config.tag }}-${{ hashFiles('**/conanfile.txt') }}
-
-      - name: Install conan dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Build
         run: |
-          source venv/bin/activate
-          conan install . -s build_type=Release -of .conan/${{ matrix.config.cc }} --build=missing -pr:a .conan/${{ matrix.config.cc }}/profile
+          eval "$(scripts/fork/bootstrap.sh --env)"
+          cmake --build --preset fork_release -j "$(nproc)"
 
-      - name: Install conan dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: conan install . --build missing -s build_type=Release -s compiler.cppstd=20 -c tools.cmake.cmaketoolchain:generator=Ninja -of .conan/msvc/
-        shell: bash
-
-      - name: Download llvm build cache (Ubuntu)
-        if: runner.os == 'Linux' && matrix.config.with_cxx == '_build_cxx'
-        uses: robinraju/release-downloader@v1.12
-        with:
-          tag: "2.0.0"
-          fileName: "clang-19.1.7-linux.zip"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          out-file-path: ${{github.workspace}}/external
-          extract: true
-
-      - name: Download llvm build cache (Windows)
-        if: runner.os == 'Windows' && matrix.config.with_cxx == '_build_cxx'
-        uses: robinraju/release-downloader@v1.12
-        with:
-          tag: "2.0.0"
-          fileName: "clang-19.1.7-windows.zip"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          out-file-path: ${{github.workspace}}/external
-          extract: true
-
-      - name: Install llvm (Ubuntu)
-        if: runner.os == 'Linux' && matrix.config.with_cxx == '_build_cxx'
-        run: tar -xvf ${{github.workspace}}/external/clang-19.1.7-linux.tar.gz -C ${{github.workspace}}/external
-
-      - name: Configure CMake (Ubuntu)
-        if: runner.os == 'Linux'
-        run: cmake --preset="ci_${{ matrix.config.tag }}_release${{ matrix.config.with_cxx }}"
-
-      - name: Configure CMake (Windows)
-        if: runner.os == 'Windows'
-        env:
-          CMAKE_PREFIX_PATH: ${{env.Qt5_DIR}}
+      - name: Test
         run: |
-          call "${{ matrix.config.environment_script }}"
-          cmake --preset="ci_${{ matrix.config.tag }}_release${{ matrix.config.with_cxx }}"
-        shell: cmd
+          eval "$(scripts/fork/bootstrap.sh --env)"
+          mkdir -p "$RUNNER_TEMP/home"
+          HOME="$RUNNER_TEMP/home" QT_QPA_PLATFORM=offscreen ctest --preset fork_release
 
-      - name: Build (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Package
+        run: ./setup/Linux/createPackages.sh
+
+      - name: Smoke test the packaged st
         run: |
-          set -eo pipefail  # Stop on first error
-          cmake --build ${{github.workspace}}/build | tee ${{github.workspace}}/build/build.log
-          exit ${PIPESTATUS[0]}
+          mkdir -p "$RUNNER_TEMP/package"
+          tar -xzf Sourcetrail_Linux_64bit.tar.gz -C "$RUNNER_TEMP/package"
+          testing/cli/st-smoke.sh "$RUNNER_TEMP/package/Sourcetrail/bin/st"
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          call "${{ matrix.config.environment_script }}"
-          cmake --build ${{github.workspace}}/build > ${{github.workspace}}/build/build.log 2>&1 || (type ${{github.workspace}}/build/build.log && exit /b %errorlevel%)
-        shell: cmd
-
-      - name: Upload build logs on failure
-        if: failure()
+      - name: Archive artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-${{ matrix.config.tag }}-${{ matrix.build_type }}
-          path: ${{github.workspace}}/build/build.log
-          retention-days: 7
+          name: Sourcetrail_Linux_64bit
+          path: ./Sourcetrail_Linux_64bit.tar.gz
 
-      - name: Count warnings (Ubuntu)
-        if: runner.os == 'Linux'
-        run: grep -c "warning:" ${{github.workspace}}/build/build.log
-
-      - name: Test (Ubuntu)
-        if: runner.os == 'Linux'
-        run: ctest -Q --test-dir ${{github.workspace}}/build --output-junit ${{github.workspace}}/build/report.xml
-
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        run: ctest --test-dir ${{github.workspace}}/build --exclude-regex "unittests\.core\.GenerateRandomString\.goodCase|unittests\.core\.CommandlineCommandIndexFix\.projectIsAbsent|unittests\.core\.CommandlineCommandIndexFix\.projectIsInvalidProj|unittests\.core\.CommandLineParserConfig\.projectFileMissingExtention|unittests\.core\.CommandLineParserConfig\.emptyProjectFile|unittests\.lib\.BookmarkControllerFix\.displayBookmarksFor2|unittests\.lib\.FileHandler\.goodCaseEmptyFile|unittests\.lib\.FileHandler\.emptyFileCanNotCreated|unittests\.lib\.FileHandler\.goodCaseFromBuffer|unittests\.lib\.FileHandler\.PassZeroToFromBuffer|unittests\.lib\.FileHandler\.goodCaseRandomData|unittests\.lib\.FileHandler\.PassZeroToRandomData|unittests\.lib_gui\.utilityAppTestSuite\.searchPath|QtSelfRefreshIconButtonTestSuite" --output-junit ${{github.workspace}}/build/report.xml
-        shell: cmd
-
-      - name: Upload ctest logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ctest-logs-${{ matrix.config.tag }}-${{ matrix.build_type }}
-          path: ${{github.workspace}}/build/report.xml
-          retention-days: 7
-
-      - name: Publish Test Report for ${{ matrix.config.name }}
-        uses: mikepenz/action-junit-report@v4
-        if: runner.os == 'Linux'
-        with:
-          report_paths: ${{github.workspace}}/build/report.xml
-          include_passed: true
-          detailed_summary: true
-
-      - name: Upload build directory as artifact
-        if: runner.os == 'Linux' && matrix.config.tag == 'gnu' && matrix.config.with_cxx == '_build_cxx'
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifact-${{ github.event.number }}
-          path: |
-            ${{ github.workspace }}/build/compile_commands.json
-            ${{ github.workspace }}/build/Sourcetrail_lib_gui_autogen
-            ${{ github.workspace }}/build/src
-
-  clang_tidy:
+  release:
     needs: build
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/clang_tidy.yml
-    secrets: inherit
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Sourcetrail_Linux_64bit
 
-  cppcheck:
-    needs: build
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/cppcheck.yaml
-    secrets: inherit
+      - name: Refresh the latest prerelease
+        if: github.ref == 'refs/heads/master'
+        run: |
+          NOTES="Built from master at $GITHUB_SHA. Includes the GUI and st. Python support returns in a later release."
+          if gh release view latest > /dev/null 2>&1; then
+            # Update in place: move the tag, replace the package, rewrite the notes.
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release upload latest Sourcetrail_Linux_64bit.tar.gz --clobber
+            gh release edit latest --notes "$NOTES"
+          else
+            gh release create latest Sourcetrail_Linux_64bit.tar.gz --target "$GITHUB_SHA" --prerelease \
+              --title "Latest master build" --notes "$NOTES"
+          fi
+
+      - name: Publish the tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release create "$GITHUB_REF_NAME" Sourcetrail_Linux_64bit.tar.gz --verify-tag \
+            --title "Sourcetrail $GITHUB_REF_NAME" --generate-notes

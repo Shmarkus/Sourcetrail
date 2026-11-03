@@ -2,12 +2,19 @@
 if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
   find_package(Git)
 
+  # Only version tags: a release build checks out its `v1.2.3` tag, and the rolling `latest` tag is no version.
   execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --abbrev=0 --tags
+    COMMAND ${GIT_EXECUTABLE} describe --abbrev=0 --tags --match "[0-9]*" --match "v[0-9]*"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE VERSION_STRING
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE GIT_RESULT)
+  string(
+    REGEX
+    REPLACE "^v"
+            ""
+            VERSION_STRING
+            "${VERSION_STRING}")
 
   # Check if the Git command was successful
   if(NOT

@@ -214,14 +214,25 @@ TEST(Storage, keepsTheEdgesOfASymbolAClearedFileOnlyQualifies) {
   EXPECT_TRUE(storage.getEdgesForSourceIds({caller}).empty());
 }
 
-TEST(Storage, countsErrorsInjectedAfterClearingFilesWithErrors) {
-  auto messageQueue = std::make_shared<testing::NiceMock<MockedMessageQueue>>();
-  std::vector<std::shared_ptr<MessageBase>> messages;
-  ON_CALL(*messageQueue, pushMessage).WillByDefault([&messages](std::shared_ptr<MessageBase> message) {
-    messages.push_back(std::move(message));
-  });
-  IMessageQueue::setInstance(messageQueue);
+class StorageMessageFix : public testing::Test {
+protected:
+  void SetUp() override {
+    mMessageQueue = std::make_shared<testing::NiceMock<MockedMessageQueue>>();
+    ON_CALL(*mMessageQueue, pushMessage).WillByDefault([this](std::shared_ptr<MessageBase> message) {
+      mMessages.push_back(std::move(message));
+    });
+    IMessageQueue::setInstance(mMessageQueue);
+  }
 
+  void TearDown() override {
+    IMessageQueue::setInstance(nullptr);
+  }
+
+  std::shared_ptr<testing::NiceMock<MockedMessageQueue>> mMessageQueue;
+  std::vector<std::shared_ptr<MessageBase>> mMessages;
+};
+
+TEST_F(StorageMessageFix, countsErrorsInjectedAfterClearingFilesWithErrors) {
   PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
   storage.setup();
   const Id file = addJavaFile(storage, L"/project/p/B.java");
@@ -251,11 +262,10 @@ TEST(Storage, countsErrorsInjectedAfterClearingFilesWithErrors) {
   storage.inject(&secondPass);
 
   EXPECT_EQ(1U, storage.getErrorCount().total);
-  ASSERT_EQ(1U, messages.size());
-  const auto* update = dynamic_cast<const MessageErrorCountUpdate*>(messages.front().get());
+  ASSERT_EQ(1U, mMessages.size());
+  const auto* update = dynamic_cast<const MessageErrorCountUpdate*>(mMessages.front().get());
   ASSERT_NE(nullptr, update);
   EXPECT_EQ(1U, update->newErrors.size());
-  IMessageQueue::setInstance(nullptr);
 }
 
 TEST(Storage, removesASymbolOnceTheFilesDeclaringAndReferencingItAreClearedOneAfterTheOther) {

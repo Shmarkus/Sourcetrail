@@ -364,6 +364,10 @@ set_property(SOURCE ${CMAKE_BINARY_DIR}/src/lib_gui/productVersion.h PROPERTY SK
 add_subdirectory(src/indexer)
 # App ----------------------------------------------------------------------------------------------------------------------------
 add_subdirectory(src/app)
+# St -----------------------------------------------------------------------------------------------------------------------------
+if(BUILD_JAVA_LANGUAGE_PACKAGE)
+  add_subdirectory(src/st)
+endif()
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
   include(cmake/java_indexer.cmake)
   add_dependencies(Sourcetrail java_indexer_jar)

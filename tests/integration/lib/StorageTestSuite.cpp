@@ -1,14 +1,17 @@
 #include <memory>
 #include <utility>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "AccessKind.h"
 #include "DefinitionKind.h"
 #include "IntermediateStorage.h"
 #include "LocationType.h"
+#include "MockedMessageQueue.hpp"
 #include "ParseLocation.h"
 #include "PersistentStorage.h"
+#include "type/error/MessageErrorCountUpdate.h"
 #include "utilityString.h"
 
 namespace {
@@ -182,5 +185,124 @@ TEST(Storage, findsImportersByTheFileDeclaringTheImportedSymbol) {
 
   EXPECT_EQ(0U, storage.getReferencing({FilePath(L"/project/p/A.java")}).count(FilePath(L"/project/p/B.java")));
   EXPECT_EQ(0U, storage.getReferenced({FilePath(L"/project/p/B.java")}).count(FilePath(L"/project/p/A.java")));
+}
+
+TEST(Storage, keepsTheEdgesOfASymbolAClearedFileOnlyQualifies) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id declaring = addJavaFile(storage, L"/project/p/A.java");
+  const Id qualifying = addJavaFile(storage, L"/project/p/B.java");
+
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  const Id method = addJavaSymbol(storage, NODE_METHOD, L"p.A.size");
+  const Id caller = addJavaSymbol(storage, NODE_METHOD, L"p.B.run");
+  addTokenLocation(storage, classA, declaring, 2);
+  addTokenLocation(storage, method, declaring, 3);
+  addTokenLocation(storage, caller, qualifying, 3);
+  const Id member = storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, classA, method));
+
+  // B calls A.size(), naming the class as a qualifier.
+  addLocation(storage, classA, qualifying, 4, LOCATION_QUALIFIER);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, method)), qualifying, 4);
+  storage.buildCaches();
+
+  storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+
+  const std::vector<StorageEdge> edges = storage.getEdgesForSourceIds({classA});
+  ASSERT_EQ(1U, edges.size());
+  EXPECT_EQ(member, edges.front().id);
+  EXPECT_TRUE(storage.getEdgesForSourceIds({caller}).empty());
+}
+
+TEST(Storage, countsErrorsInjectedAfterClearingFilesWithErrors) {
+  auto messageQueue = std::make_shared<testing::NiceMock<MockedMessageQueue>>();
+  std::vector<std::shared_ptr<MessageBase>> messages;
+  ON_CALL(*messageQueue, pushMessage).WillByDefault([&messages](std::shared_ptr<MessageBase> message) {
+    messages.push_back(std::move(message));
+  });
+  IMessageQueue::setInstance(messageQueue);
+
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id file = addJavaFile(storage, L"/project/p/B.java");
+  for(const std::wstring& message : {L"first", L"second"}) {
+    addLocation(storage, storage.addError(StorageErrorData(message, L"/project/p/B.java", false, true)), file, 1, LOCATION_ERROR);
+  }
+  storage.buildCaches();
+
+  // A first pass injects no errors, then a second pass clears B.java and injects a new error.
+  EXPECT_EQ(2U, storage.getErrorCount().total);
+  IntermediateStorage firstPass;
+  storage.inject(&firstPass);
+  storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+  storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+  EXPECT_EQ(0U, storage.getErrorCount().total);
+  storage.setMode(SqliteIndexStorage::STORAGE_MODE_WRITE);
+  IntermediateStorage secondPass;
+  const Id injectedFile = secondPass
+                              .addNode(StorageNodeData(
+                                  nodeKindToInt(NODE_FILE),
+                                  NameHierarchy::serialize(NameHierarchy(L"/project/p/B.java", NAME_DELIMITER_FILE))))
+                              .first;
+  secondPass.addFile(StorageFile(injectedFile, L"/project/p/B.java", L"java", "2026-10-30 12:00:00", true, true));
+  secondPass.addOccurrence(StorageOccurrence(
+      secondPass.addError(StorageErrorData(L"third", L"/project/p/B.java", false, true)),
+      secondPass.addSourceLocation(StorageSourceLocationData(injectedFile, 1, 1, 1, 5, locationTypeToInt(LOCATION_ERROR)))));
+  storage.inject(&secondPass);
+
+  EXPECT_EQ(1U, storage.getErrorCount().total);
+  ASSERT_EQ(1U, messages.size());
+  const auto* update = dynamic_cast<const MessageErrorCountUpdate*>(messages.front().get());
+  ASSERT_NE(nullptr, update);
+  EXPECT_EQ(1U, update->newErrors.size());
+  IMessageQueue::setInstance(nullptr);
+}
+
+TEST(Storage, removesASymbolOnceTheFilesDeclaringAndReferencingItAreClearedOneAfterTheOther) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id declaring = addJavaFile(storage, L"/project/p/A.java");
+  const Id referencing = addJavaFile(storage, L"/project/p/B.java");
+
+  const Id method = addJavaSymbol(storage, NODE_METHOD, L"p.A.size");
+  const Id caller = addJavaSymbol(storage, NODE_METHOD, L"p.B.run");
+  addTokenLocation(storage, method, declaring, 3);
+  addTokenLocation(storage, caller, referencing, 3);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, method)), referencing, 4);
+  storage.buildCaches();
+
+  storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+  storage.clearFileElements({FilePath(L"/project/p/A.java")}, [](int) {});
+  EXPECT_EQ(method, storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A.size", kJavaDelimiter)));
+
+  storage.clearFileElements({FilePath(L"/project/p/B.java")}, [](int) {});
+  EXPECT_EQ(0U, storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A.size", kJavaDelimiter)));
+}
+
+TEST(Storage, keepsTheMembersASymbolDeclaredInSeveralFilesHasOutsideAClearedFile) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id fileA = addJavaFile(storage, L"/project/p/A.java");
+  const Id fileB = addJavaFile(storage, L"/project/p/B.java");
+
+  // Both files declare package p, each with its class.
+  const Id package = addJavaSymbol(storage, NODE_PACKAGE, L"p");
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  const Id classB = addJavaSymbol(storage, NODE_CLASS, L"p.B");
+  addTokenLocation(storage, package, fileA, 1);
+  addTokenLocation(storage, package, fileB, 1);
+  addTokenLocation(storage, classA, fileA, 2);
+  addTokenLocation(storage, classB, fileB, 2);
+  storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, classA));
+  const Id memberB = storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, package, classB));
+  storage.buildCaches();
+
+  storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+  storage.clearFileElements({FilePath(L"/project/p/A.java")}, [](int) {});
+
+  const std::vector<StorageEdge> members = storage.getEdgesForSourceIds({package});
+  ASSERT_EQ(1U, members.size());
+  EXPECT_EQ(memberB, members.front().id);
+  EXPECT_EQ(0U, storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A", kJavaDelimiter)));
 }
 }    // namespace

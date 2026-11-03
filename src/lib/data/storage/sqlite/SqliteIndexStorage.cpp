@@ -1,5 +1,6 @@
 #include "SqliteIndexStorage.h"
 
+#include "Edge.h"
 #include "FileSystem.h"
 #include "GlobalId.hpp"
 #include "LocationType.h"
@@ -436,6 +437,14 @@ void SqliteIndexStorage::removeElementsWithLocationInFiles(const std::vector<Id>
       ")"
       "	GROUP BY (occurrence.element_id)");
 
+  // add the targets of edges located in fileIds: a symbol whose declaring file was cleared before
+  // survives as long as these edges point to it, and is removed below if nothing else does
+  executeStatement(
+      "INSERT OR IGNORE INTO element_id_to_clear "
+      "	SELECT edge.target_node_id "
+      "	FROM edge "
+      "	INNER JOIN element_id_to_clear ON (element_id_to_clear.id = edge.id)");
+
   if(updateStatusCallback != nullptr) {
     updateStatusCallback(4);
   }
@@ -450,10 +459,28 @@ void SqliteIndexStorage::removeElementsWithLocationInFiles(const std::vector<Id>
     updateStatusCallback(30);
   }
 
-  // delete all edges originating from element_id_to_clear
+  // delete all edges originating from symbols declared in fileIds only, and the member edges leading
+  // to them. Symbols also declared elsewhere, like packages, keep their other members, and symbols the
+  // files only use as qualifiers keep their members and bases.
+  const std::string files = utility::join(utility::toStrings(fileIds), ',');
+  const std::string qualifier = std::to_string(locationTypeToInt(LOCATION_QUALIFIER));
+  executeStatement("CREATE TEMP TABLE IF NOT EXISTS declared_only_in_files(id INTEGER NOT NULL, PRIMARY KEY(id));");
+  executeStatement("DELETE FROM declared_only_in_files;");
+  executeStatement(
+      "INSERT OR IGNORE INTO declared_only_in_files "
+      "	SELECT occurrence.element_id FROM occurrence "
+      "	INNER JOIN source_location ON (occurrence.source_location_id = source_location.id) "
+      "	WHERE source_location.file_node_id IN (" +
+      files + ") AND source_location.type != " + qualifier +
+      "	AND NOT EXISTS (SELECT * FROM occurrence AS other "
+      "		INNER JOIN source_location AS other_location ON (other.source_location_id = other_location.id) "
+      "		WHERE other.element_id = occurrence.element_id AND other_location.file_node_id NOT IN (" +
+      files + ") AND other_location.type != " + qualifier + ")");
   executeStatement(
       "DELETE FROM element WHERE element.id IN (SELECT id FROM edge WHERE source_node_id IN "
-      "(SELECT id FROM element_id_to_clear))");
+      "(SELECT id FROM declared_only_in_files) OR (type == " +
+      std::to_string(Edge::typeToInt(Edge::EDGE_MEMBER)) + " AND target_node_id IN (SELECT id FROM declared_only_in_files)))");
+  executeStatement("DROP TABLE IF EXISTS temp.declared_only_in_files;");
 
   if(updateStatusCallback != nullptr) {
     updateStatusCallback(31);

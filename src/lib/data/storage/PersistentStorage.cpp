@@ -1,5 +1,6 @@
 #include "PersistentStorage.h"
 
+#include <algorithm>
 #include <queue>
 
 #include <QVector2D>
@@ -221,6 +222,8 @@ void PersistentStorage::beforeErrorRecording() {
     m_preIndexingErrorCount = m_preInjectionErrorCount;
     m_preIndexingErrorCountSet = true;
   }
+  // Files cleared since indexing started may have taken errors counted before it with them.
+  m_preIndexingErrorCount = std::min(m_preIndexingErrorCount, m_preInjectionErrorCount);
 }
 
 void PersistentStorage::afterErrorRecording() {

@@ -367,6 +367,7 @@ add_subdirectory(src/app)
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
   include(cmake/java_indexer.cmake)
   add_dependencies(Sourcetrail java_indexer_jar)
+  add_dependencies(Sourcetrail_indexer java_indexer_jar)
 endif()
 # Tests --------------------------------------------------------------------------------------------------------------------------
 if(ENABLE_UNIT_TEST

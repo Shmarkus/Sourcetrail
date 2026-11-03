@@ -14,7 +14,7 @@ file(
 add_custom_command(
   OUTPUT "${JAVA_INDEXER_JAR}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${JAVA_INDEXER_SOURCE_DIR}/target/lib"
-  COMMAND "${MAVEN_EXECUTABLE}" -q -f "${JAVA_INDEXER_SOURCE_DIR}/pom.xml" package
+  COMMAND "${MAVEN_EXECUTABLE}" -q -f "${JAVA_INDEXER_SOURCE_DIR}/pom.xml" -DskipTests package
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${JAVA_INDEXER_LIB_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E copy_directory "${JAVA_INDEXER_SOURCE_DIR}/target/lib" "${JAVA_INDEXER_LIB_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E copy "${JAVA_INDEXER_SOURCE_DIR}/target/java-indexer-1.0.jar" "${JAVA_INDEXER_JAR}"

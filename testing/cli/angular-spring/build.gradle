@@ -1,0 +1,9 @@
+plugins { id 'java' }
+repositories { mavenCentral() }
+sourceSets {
+    main {
+        // minimal stand-ins for the Spring, Spring Data, OpenFeign and Jakarta Persistence annotations and types,
+        // so the fixture compiles and indexes without downloading dependencies
+        java { srcDir 'src/stubs/java' }
+    }
+}

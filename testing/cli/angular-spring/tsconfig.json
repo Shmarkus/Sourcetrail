@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "baseUrl": "src/main/webapp",
+    "paths": {
+      "@angular/core": ["types/@angular/core"],
+      "@angular/common/http": ["types/@angular/common/http"],
+      "rxjs": ["types/rxjs"]
+    },
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "experimentalDecorators": true,
+    "types": []
+  },
+  "include": ["src/main/webapp/**/*.ts"]
+}

@@ -1,0 +1,10 @@
+.gradle/
+build/
+node_modules/
+*.srctrldb*
+*.srctrlbm*
+*.srctrltmp*
+.sourcetrail/
+*.lock
+*.scip
+ts-http-calls.json

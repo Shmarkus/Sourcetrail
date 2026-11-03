@@ -23,6 +23,8 @@ out/*
 
 /java_indexer/target/
 
+/tools/ts-indexer/node_modules/
+
 /setup/Linux/lib/
 
 .DS_Store

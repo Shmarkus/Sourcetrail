@@ -298,6 +298,8 @@ add_files(
   data/TaskCleanStorage.h
   data/TaskFinishParsing.cpp
   data/TaskFinishParsing.h
+  data/TaskIndexIfDeclarationsChanged.cpp
+  data/TaskIndexIfDeclarationsChanged.h
   data/TaskInjectStorage.cpp
   data/TaskInjectStorage.h
   data/TaskMergeStorages.cpp

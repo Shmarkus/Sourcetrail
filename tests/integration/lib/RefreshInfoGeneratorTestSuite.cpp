@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "FileSystem.h"
+#include "LocationType.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "RefreshInfo.h"
@@ -125,6 +126,20 @@ Id addVeryOldFileToStorage(const FilePath& filePath, bool indexed, bool complete
 Id addVeryNewFileToStorage(const FilePath& filePath, bool indexed, bool complete, std::shared_ptr<PersistentStorage> storage) {
   return addFileToStorage(
       filePath, QDateTime::currentDateTime().addDays(1).toString("yyyy-MM-dd hh:mm:ss").toStdString(), indexed, complete, storage);
+}
+
+void addTokenLocation(Id elementId, Id fileId, std::shared_ptr<PersistentStorage> storage) {
+  const Id locationId = storage->addSourceLocation(StorageSourceLocationData(fileId, 1, 1, 1, 5, locationTypeToInt(LOCATION_TOKEN)));
+  storage->addOccurrence(StorageOccurrence(elementId, locationId));
+}
+
+// The referencing file calls a method the referenced file declares.
+void addSymbolReference(Id referencingFileId, Id referencedFileId, std::shared_ptr<PersistentStorage> storage) {
+  const Id caller = storage->addNode(StorageNodeData(nodeKindToInt(NODE_METHOD), L"caller")).first;
+  const Id callee = storage->addNode(StorageNodeData(nodeKindToInt(NODE_METHOD), L"callee")).first;
+  addTokenLocation(caller, referencingFileId, storage);
+  addTokenLocation(callee, referencedFileId, storage);
+  addTokenLocation(storage->addEdge(StorageEdgeData(Edge::EDGE_CALL, caller, callee)), referencingFileId, storage);
 }
 }    // namespace
 
@@ -842,6 +857,66 @@ TEST(RefreshInfoGenerator, clearsUnchangedFilesReferencedByUnchangedFileThatRefe
     EXPECT_TRUE(utility::containsElement<FilePath>(utility::toVector(refreshInfo.filesToClear), upToDateSourceFilePath));
     EXPECT_TRUE(utility::containsElement<FilePath>(utility::toVector(refreshInfo.filesToClear), upToDateHeaderFilePath));
     EXPECT_TRUE(utility::containsElement<FilePath>(utility::toVector(refreshInfo.filesToIndex), upToDateSourceFilePath));
+  }
+  cleanup();
+}
+
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesDefersFilesReferencingTheDeclarationsOfAnEditedFile) {
+  cleanup();
+  {
+    const FilePath editedFilePath = m_sourceFolder.getConcatenated(L"Edited.java");
+    const FilePath callerFilePath = m_sourceFolder.getConcatenated(L"Caller.java");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(std::make_shared<SourceGroupTest>(std::set<FilePath>{editedFilePath, callerFilePath}));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+
+    const Id editedFileId = addVeryOldFileToStorage(editedFilePath, true, true, storage);
+    addFileToFileSystem(editedFilePath);
+    const Id callerFileId = addVeryNewFileToStorage(callerFilePath, true, true, storage);
+    addFileToFileSystem(callerFilePath);
+    addSymbolReference(callerFileId, editedFileId, storage);
+
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+
+    EXPECT_EQ(std::set<FilePath>({editedFilePath}), refreshInfo.filesToClear);
+    EXPECT_EQ(std::set<FilePath>({editedFilePath}), refreshInfo.filesToIndex);
+    EXPECT_EQ(std::set<FilePath>({editedFilePath}), refreshInfo.filesToCompareDeclarations);
+    EXPECT_EQ(std::set<FilePath>({callerFilePath}), refreshInfo.dependentFilesToClear);
+    EXPECT_EQ(std::set<FilePath>({callerFilePath}), refreshInfo.dependentFilesToIndex);
+  }
+  cleanup();
+}
+
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReindexesFilesReferencingARemovedFileAtOnce) {
+  cleanup();
+  {
+    const FilePath removedFilePath = m_sourceFolder.getConcatenated(L"Removed.java");
+    const FilePath callerFilePath = m_sourceFolder.getConcatenated(L"Caller.java");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(std::make_shared<SourceGroupTest>(std::set<FilePath>{callerFilePath}));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+
+    const Id removedFileId = addVeryNewFileToStorage(removedFilePath, true, true, storage);
+    const Id callerFileId = addVeryNewFileToStorage(callerFilePath, true, true, storage);
+    addFileToFileSystem(callerFilePath);
+    addSymbolReference(callerFileId, removedFileId, storage);
+
+    storage->buildCaches();
+
+    const RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+
+    EXPECT_EQ(std::set<FilePath>({removedFilePath, callerFilePath}), refreshInfo.filesToClear);
+    EXPECT_EQ(std::set<FilePath>({callerFilePath}), refreshInfo.filesToIndex);
+    EXPECT_TRUE(refreshInfo.filesToCompareDeclarations.empty());
+    EXPECT_TRUE(refreshInfo.dependentFilesToClear.empty());
   }
   cleanup();
 }

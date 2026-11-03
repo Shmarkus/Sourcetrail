@@ -89,6 +89,12 @@ public:
 
   std::set<FilePath> getReferenced(const std::set<FilePath>& filePaths) const;
   std::set<FilePath> getReferencing(const std::set<FilePath>& filePaths) const;
+  std::set<FilePath> getReferencingByIncludes(const std::set<FilePath>& filePaths) const;
+  // Files that may resolve against what the given files declare: direct importers and files
+  // referencing their symbols.
+  std::set<FilePath> getReferencingByDeclarations(const std::set<FilePath>& filePaths) const;
+  // What other files can see of the given files, comparable between two indexes of the same project.
+  std::set<std::string> getDeclarations(const std::set<FilePath>& filePaths) const;
 
   void clearAllErrors();
   void clearFileElements(const std::vector<FilePath>& filePaths, std::function<void(int)> updateStatusCallback);
@@ -278,7 +284,6 @@ private:
   std::set<FilePath> getReferencedByIncludes(const std::set<FilePath>& filePaths) const;
   std::set<FilePath> getReferencedByImports(const std::set<FilePath>& filePaths) const;
 
-  std::set<FilePath> getReferencingByIncludes(const std::set<FilePath>& filePaths) const;
   std::set<FilePath> getReferencingByImports(const std::set<FilePath>& filePaths) const;
   std::set<FilePath> getReferencingBySymbols(const std::set<FilePath>& filePaths) const;
 

@@ -316,10 +316,34 @@ std::set<FilePath> PersistentStorage::getReferencing(const std::set<FilePath>& f
   std::set<FilePath> referencing;
 
   utility::append(referencing, getReferencingByIncludes(filePaths));
+  utility::append(referencing, getReferencingByDeclarations(filePaths));
+
+  return referencing;
+}
+
+std::set<FilePath> PersistentStorage::getReferencingByDeclarations(const std::set<FilePath>& filePaths) const {
+  std::set<FilePath> referencing;
+
   utility::append(referencing, getReferencingByImports(filePaths));
   utility::append(referencing, getReferencingBySymbols(filePaths));
 
   return referencing;
+}
+
+std::set<std::string> PersistentStorage::getDeclarations(const std::set<FilePath>& filePaths) const {
+  std::set<std::string> declarations;
+
+  for(const FilePath& filePath : filePaths) {
+    // Not from the caches: these are only built for reading, and indexing compares on the storage it writes.
+    const Id fileId = m_sqliteIndexStorage.getFileByPath(filePath.wstr()).id;
+    if(fileId != 0) {
+      for(const std::string& declaration : m_sqliteIndexStorage.getDeclarationsInFile(fileId)) {
+        declarations.insert(filePath.str() + '\t' + declaration);
+      }
+    }
+  }
+
+  return declarations;
 }
 
 void PersistentStorage::clearAllErrors() {

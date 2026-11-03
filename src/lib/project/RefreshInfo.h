@@ -57,4 +57,10 @@ struct RefreshInfo final {
 
   RefreshMode mode = RefreshMode::None;
   bool shallow = false;
+
+  // Files referencing what filesToCompareDeclarations declare. They are cleared and indexed in a second
+  // pass, and only if indexing those files changed their declarations.
+  std::set<FilePath> filesToCompareDeclarations;
+  std::set<FilePath> dependentFilesToClear;
+  std::set<FilePath> dependentFilesToIndex;
 };

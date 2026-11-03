@@ -18,6 +18,7 @@
 #include "RefreshInfo.h"
 #include "SourceGroup.h"
 
+class CombinedIndexerCommandProvider;
 class DialogView;
 class FilePath;
 class PersistentStorage;
@@ -156,6 +157,16 @@ private:
                                                       std::shared_ptr<DialogView> dialogView,
                                                       std::shared_ptr<PersistentStorage> tempStorage,
                                                       size_t& sourceFileCount);
+
+  // The first provider holds the commands run by the indexer threads, the second the custom commands.
+  [[nodiscard]] std::pair<std::unique_ptr<CombinedIndexerCommandProvider>, std::unique_ptr<CombinedIndexerCommandProvider>> createIndexerCommandProviders(
+      const RefreshInfo& info) const;
+  void addIndexingTasks(const std::shared_ptr<TaskGroupSequence>& taskSequential,
+                        std::unique_ptr<CombinedIndexerCommandProvider> indexerCommandProvider,
+                        std::unique_ptr<CombinedIndexerCommandProvider> customIndexerCommandProvider,
+                        const std::shared_ptr<PersistentStorage>& tempStorage,
+                        const std::shared_ptr<DialogView>& dialogView,
+                        int indexerThreadCount);
 
   bool checkIfNothingToRefresh(const RefreshInfo& info, std::shared_ptr<DialogView> dialogView);
 

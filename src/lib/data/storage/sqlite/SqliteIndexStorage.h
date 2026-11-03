@@ -380,6 +380,13 @@ public:
   std::vector<Id> getFileIdsReferencingSymbolsDeclaredInFiles(const std::vector<Id>& fileIds) const;
 
   /**
+   * @brief Describes what a file declares: its symbols with their signatures, bases and overrides
+   * @param fileId The ID of the file
+   * @return One line per declaration, comparable between two indexes of the same project
+   */
+  std::vector<std::string> getDeclarationsInFile(Id fileId) const;
+
+  /**
    * @brief Returns edges by their type
    * @param type The type of the edges
    * @return The edges

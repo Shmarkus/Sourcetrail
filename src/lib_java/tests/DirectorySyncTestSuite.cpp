@@ -109,3 +109,40 @@ TEST_F(DirectorySync, reportsFilesItCannotWrite) {
   EXPECT_EQ(0U, result.written);
   EXPECT_EQ("class A {}", read(target, "a/A.java"));
 }
+
+TEST_F(DirectorySync, fileSyncWritesOnlyListedFilesWhoseBytesChanged) {
+  write(source, "A.java", "class A { int x; }");
+  write(source, "B.java", "class B {}");
+  write(target, "pkg/A.java", "class A {}");
+  write(target, "pkg/B.java", "class B {}");
+  write(target, "pkg/C.java", "class C {}");
+
+  const std::filesystem::path unchangedFile = std::filesystem::path(target.str()) / "pkg/B.java";
+  const auto past = std::filesystem::last_write_time(unchangedFile) - std::chrono::seconds(10);
+  std::filesystem::last_write_time(unchangedFile, past);
+
+  const utility::DirectorySyncResult result = utility::syncFiles(
+      {{source.getConcatenated(L"A.java"), target.getConcatenated(L"pkg/A.java")},
+       {source.getConcatenated(L"B.java"), target.getConcatenated(L"pkg/B.java")},
+       {source.getConcatenated(L"D.java"), target.getConcatenated(L"new/D.java")}});
+
+  EXPECT_EQ("class A { int x; }", read(target, "pkg/A.java"));
+  EXPECT_EQ(past, std::filesystem::last_write_time(unchangedFile));
+  EXPECT_TRUE(exists(target, "pkg/C.java"));
+  EXPECT_FALSE(exists(target, "new/D.java"));
+  EXPECT_EQ(1U, result.written);
+  EXPECT_EQ(1U, result.unchanged);
+  EXPECT_EQ(1U, result.failed);
+}
+
+TEST_F(DirectorySync, fillsATargetThatWasCheckedBeforeItExisted) {
+  write(source, "a/A.java", "class A {}");
+  const FilePath fresh = s_root.getConcatenated(L"fresh");
+  ASSERT_FALSE(fresh.recheckExists());
+
+  const utility::DirectorySyncResult result = utility::syncDirectoryContents(source, fresh);
+
+  EXPECT_EQ("class A {}", read(fresh, "a/A.java"));
+  EXPECT_EQ(1U, result.written);
+  EXPECT_EQ(0U, result.removed);
+}

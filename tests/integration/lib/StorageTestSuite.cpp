@@ -1,5 +1,6 @@
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <memory>
 #include <thread>
@@ -52,9 +53,24 @@ Id addJavaFile(PersistentStorage& storage, const std::wstring& path) {
   addLocation(storage, elementId, fileId, line, LOCATION_TOKEN);
 }
 
-// Indexes data/StorageTestSuite/A.java holding class p.A on line 2 and, given parameters, a method
-// "int size<parameters>" whose header is line 3. Returns the file's declarations.
-std::set<std::string> getDeclarationsOfIndexedClass(const std::string& text, const std::wstring& methodParameters = L"") {
+// Declares a method "int size<parameters>" in class p.A whose header is the given line of the file's text.
+void addSizeMethod(PersistentStorage& storage, Id file, const std::string& text, size_t line, const std::wstring& parameters) {
+  NameHierarchy name(L"p.A", kJavaDelimiter);
+  name.push(NameElement(L"size", L"int", parameters));
+  const Id method = storage.addNode(StorageNodeData(nodeKindToInt(NODE_METHOD), NameHierarchy::serialize(name))).first;
+  storage.addSymbol(StorageSymbol(method, definitionKindToInt(DEFINITION_EXPLICIT)));
+  addTokenLocation(storage, method, file, line);
+
+  const std::string header = utility::splitToVector(text, "\n")[line - 1];
+  const Id signature = storage.addSourceLocation(StorageSourceLocationData(
+      file, line, header.find_first_not_of('\t') + 1, line, header.find(')') + 1, locationTypeToInt(LOCATION_SIGNATURE)));
+  storage.addOccurrence(StorageOccurrence(method, signature));
+}
+
+// Indexes the text as data/StorageTestSuite/A.java holding class p.A on line 2, lets declare add more
+// to the index, and returns the file's declarations.
+std::set<std::string> getDeclarationsOfIndexedFile(
+    const std::string& text, const std::function<void(PersistentStorage& storage, Id file, Id classA)>& declare) {
   const FilePath path(L"data/StorageTestSuite/A.java");
   FileSystem::createDirectory(path.getParentDirectory());
   std::ofstream(path.str()) << text;
@@ -62,24 +78,23 @@ std::set<std::string> getDeclarationsOfIndexedClass(const std::string& text, con
   PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
   storage.setup();
   const Id file = addJavaFile(storage, path.wstr());
-  addTokenLocation(storage, addJavaSymbol(storage, NODE_CLASS, L"p.A"), file, 2);
-  if(!methodParameters.empty()) {
-    NameHierarchy name(L"p.A", kJavaDelimiter);
-    name.push(NameElement(L"size", L"int", methodParameters));
-    const Id method = storage.addNode(StorageNodeData(nodeKindToInt(NODE_METHOD), NameHierarchy::serialize(name))).first;
-    storage.addSymbol(StorageSymbol(method, definitionKindToInt(DEFINITION_EXPLICIT)));
-    addTokenLocation(storage, method, file, 3);
-
-    const std::string header = utility::splitToVector(text, "\n")[2];
-    const Id signature = storage.addSourceLocation(StorageSourceLocationData(
-        file, 3, header.find_first_not_of('\t') + 1, 3, header.find(')') + 1, locationTypeToInt(LOCATION_SIGNATURE)));
-    storage.addOccurrence(StorageOccurrence(method, signature));
-  }
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  addTokenLocation(storage, classA, file, 2);
+  declare(storage, file, classA);
   storage.buildCaches();
 
   const std::set<std::string> declarations = storage.getDeclarations({path});
   FileSystem::remove(path);
   return declarations;
+}
+
+// Class p.A with, given parameters, a method "int size<parameters>" whose header is line 3.
+std::set<std::string> getDeclarationsOfIndexedClass(const std::string& text, const std::wstring& methodParameters = L"") {
+  return getDeclarationsOfIndexedFile(text, [&](PersistentStorage& storage, Id file, Id /*classA*/) {
+    if(!methodParameters.empty()) {
+      addSizeMethod(storage, file, text, 3, methodParameters);
+    }
+  });
 }
 
 class TestStorage : public PersistentStorage {
@@ -333,6 +348,54 @@ TEST(Storage, declarationsChangeWhenAMethodIsRemoved) {
   EXPECT_NE(before, getDeclarationsOfIndexedClass("package p;\nclass A {\n}\n"));
 }
 
+TEST(Storage, declarationsChangeWithAFieldType) {
+  const auto declareField = [](const std::wstring& type) {
+    return [type](PersistentStorage& storage, Id file, Id /*classA*/) {
+      NameHierarchy name(L"p.A", kJavaDelimiter);
+      name.push(NameElement(L"name", type, L""));
+      const Id field = storage.addNode(StorageNodeData(nodeKindToInt(NODE_FIELD), NameHierarchy::serialize(name))).first;
+      storage.addSymbol(StorageSymbol(field, definitionKindToInt(DEFINITION_EXPLICIT)));
+      addTokenLocation(storage, field, file, 3);
+    };
+  };
+
+  EXPECT_NE(
+      getDeclarationsOfIndexedFile("package p;\nclass A {\n\tString name;\n}\n", declareField(L"java.lang.String")),
+      getDeclarationsOfIndexedFile("package p;\nclass A {\n\tCharSequence name;\n}\n", declareField(L"java.lang.CharSequence")));
+}
+
+TEST(Storage, declarationsChangeWithABaseType) {
+  const auto declareBases = [](const std::vector<std::wstring>& bases) {
+    return [bases](PersistentStorage& storage, Id /*file*/, Id classA) {
+      for(const std::wstring& base : bases) {
+        storage.addEdge(StorageEdgeData(Edge::EDGE_INHERITANCE, classA, addJavaSymbol(storage, NODE_CLASS, base)));
+      }
+    };
+  };
+  const std::string extendsB = "package p;\nclass A extends B {\n}\n";
+  const std::set<std::string> before = getDeclarationsOfIndexedFile(extendsB, declareBases({L"p.B"}));
+
+  EXPECT_NE(before, getDeclarationsOfIndexedFile("package p;\nclass A extends C {\n}\n", declareBases({L"p.C"})))
+      << "extends another class";
+  EXPECT_NE(before, getDeclarationsOfIndexedFile(extendsB, declareBases({L"q.B"}))) << "same text, base resolved elsewhere";
+  EXPECT_NE(
+      before, getDeclarationsOfIndexedFile("package p;\nclass A extends B implements I {\n}\n", declareBases({L"p.B", L"p.I"})))
+      << "implements an interface";
+}
+
+TEST(Storage, declarationsChangeWithAnAddedOverload) {
+  const std::string text = "package p;\nclass A {\n\tint size(String s) {\n\t\treturn s.length();\n\t}\n}\n";
+  const std::string overloaded =
+      "package p;\nclass A {\n\tint size(String s) {\n\t\treturn s.length();\n\t}\n"
+      "\tint size(CharSequence s) {\n\t\treturn s.length();\n\t}\n}\n";
+
+  EXPECT_NE(getDeclarationsOfIndexedClass(text, L"(java.lang.String)"),
+            getDeclarationsOfIndexedFile(overloaded, [&](PersistentStorage& storage, Id file, Id /*classA*/) {
+              addSizeMethod(storage, file, overloaded, 3, L"(java.lang.String)");
+              addSizeMethod(storage, file, overloaded, 6, L"(java.lang.CharSequence)");
+            }));
+}
+
 TEST(Storage, dependentFilesAreIndexedOnlyWhenDeclarationsChanged) {
   PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
   storage.setup();
@@ -342,22 +405,35 @@ TEST(Storage, dependentFilesAreIndexedOnlyWhenDeclarationsChanged) {
   const std::set<std::string> declarations = storage.getDeclarations(filePaths);
   const std::shared_ptr<PersistentStorage> indexed(&storage, [](PersistentStorage*) {});
 
-  // Runs the task on a fresh blackboard and tells whether it indexed the dependent files.
+  struct Outcome {
+    bool cleared = false;
+    bool indexed = false;
+  };
+  // Runs the task on a fresh blackboard and tells what it did with the dependent files.
   const auto indexIfChanged = [&](const std::set<std::string>& previousDeclarations, bool interrupted) {
     auto blackboard = std::make_shared<Blackboard>();
     if(interrupted) {
       blackboard->set("interrupted_indexing", true);
     }
-    bool dependentFilesIndexed = false;
-    std::make_shared<TaskIndexIfDeclarationsChanged>(indexed, filePaths, previousDeclarations, [&]() {
-      return std::make_shared<TaskLambda>([&]() { dependentFilesIndexed = true; });
+    Outcome outcome;
+    std::make_shared<TaskIndexIfDeclarationsChanged>(indexed, filePaths, previousDeclarations, [&](bool index) {
+      return std::make_shared<TaskLambda>([&outcome, index]() {
+        outcome.cleared = true;
+        outcome.indexed = index;
+      });
     })->update(blackboard);
-    return dependentFilesIndexed;
+    return outcome;
   };
 
-  EXPECT_FALSE(indexIfChanged(declarations, false)) << "unchanged";
-  EXPECT_TRUE(indexIfChanged({}, false)) << "changed";
-  EXPECT_FALSE(indexIfChanged({}, true)) << "changed but interrupted";
+  EXPECT_FALSE(indexIfChanged(declarations, false).cleared) << "unchanged";
+  const Outcome changed = indexIfChanged({}, false);
+  EXPECT_TRUE(changed.cleared) << "changed";
+  EXPECT_TRUE(changed.indexed) << "changed";
+  // The edited files may already be stored as up to date, so their dependents are left unindexed for the
+  // next refresh to pick up.
+  const Outcome interrupted = indexIfChanged(declarations, true);
+  EXPECT_TRUE(interrupted.cleared) << "interrupted";
+  EXPECT_FALSE(interrupted.indexed) << "interrupted";
 }
 
 TEST(Storage, keepsTheEdgesOfASymbolAClearedFileOnlyQualifies) {
@@ -502,5 +578,30 @@ TEST(Storage, buildsTheCachesQueriesNeedWithoutTheMemberOrder) {
   const std::vector<SearchMatch> matches = storage.getAutocompletionSymbolMatches(L"p.A", NodeTypeSet::all(), 10, 10);
   ASSERT_FALSE(matches.empty());
   EXPECT_EQ(std::vector<Id>{classA}, matches.front().tokenIds);
+}
+TEST(Storage, keepsAnUndeclaredSymbolAClearedFileReferencedIfItHasMembers) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id cleared = addJavaFile(storage, L"/project/a.cpp");
+  const Id other = addJavaFile(storage, L"/project/b.cpp");
+
+  // No file declares std, a.cpp only names it in "using namespace std;", b.cpp uses std::vector.
+  const Id stdNamespace = addJavaSymbol(storage, NODE_NAMESPACE, L"std");
+  const Id vector = addJavaSymbol(storage, NODE_CLASS, L"std.vector");
+  const Id user = addJavaSymbol(storage, NODE_FUNCTION, L"user");
+  const Id main = addJavaSymbol(storage, NODE_FUNCTION, L"main");
+  addTokenLocation(storage, user, other, 1);
+  addTokenLocation(storage, main, cleared, 1);
+  const Id member = storage.addEdge(StorageEdgeData(Edge::EDGE_MEMBER, stdNamespace, vector));
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_TYPE_USAGE, user, vector)), other, 2);
+  addTokenLocation(storage, storage.addEdge(StorageEdgeData(Edge::EDGE_USAGE, main, stdNamespace)), cleared, 2);
+  storage.buildCaches();
+
+  storage.setMode(SqliteIndexStorage::STORAGE_MODE_CLEAR);
+  storage.clearFileElements({FilePath(L"/project/a.cpp")}, [](int) {});
+
+  const std::vector<StorageEdge> members = storage.getEdgesForSourceIds({stdNamespace});
+  ASSERT_EQ(1U, members.size());
+  EXPECT_EQ(member, members.front().id);
 }
 }    // namespace

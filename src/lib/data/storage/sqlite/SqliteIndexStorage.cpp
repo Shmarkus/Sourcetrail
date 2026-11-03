@@ -440,12 +440,16 @@ void SqliteIndexStorage::removeElementsWithLocationInFiles(const std::vector<Id>
       "	GROUP BY (occurrence.element_id)");
 
   // add the targets of edges located in fileIds: a symbol whose declaring file was cleared before
-  // survives as long as these edges point to it, and is removed below if nothing else does
+  // survives as long as these edges point to it, and is removed below if nothing else does. Symbols with
+  // members are left alone: removing them would take the members' links to their parent with them.
   executeStatement(
       "INSERT OR IGNORE INTO element_id_to_clear "
       "	SELECT edge.target_node_id "
       "	FROM edge "
-      "	INNER JOIN element_id_to_clear ON (element_id_to_clear.id = edge.id)");
+      "	INNER JOIN element_id_to_clear ON (element_id_to_clear.id = edge.id) "
+      "	WHERE NOT EXISTS (SELECT * FROM edge AS member WHERE member.source_node_id = edge.target_node_id "
+      "		AND member.type == " +
+      std::to_string(Edge::typeToInt(Edge::EDGE_MEMBER)) + ")");
 
   if(updateStatusCallback != nullptr) {
     updateStatusCallback(4);

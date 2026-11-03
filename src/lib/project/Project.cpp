@@ -562,7 +562,13 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
         tempStorage,
         info.filesToCompareDeclarations,
         m_storage->getDeclarations(info.filesToCompareDeclarations),
-        [this, info, tempStorage, dialogView, indexerThreadCount, firstPassSourceFileCount]() {
+        [this, info, tempStorage, dialogView, indexerThreadCount, firstPassSourceFileCount](bool index) -> std::shared_ptr<Task> {
+          std::shared_ptr<Task> clearTask = std::make_shared<TaskCleanStorage>(
+              tempStorage, dialogView, utility::toVector(info.dependentFilesToClear), false);
+          if(!index) {
+            return clearTask;
+          }
+
           RefreshInfo dependentInfo;
           dependentInfo.mode = info.mode;
           dependentInfo.filesToIndex = info.dependentFilesToIndex;
@@ -572,8 +578,7 @@ std::shared_ptr<TaskGroupSequence> Project::createIndexTasks(RefreshInfo info,
               dependentCustomIndexerCommandProvider->size();
 
           auto dependentTasks = std::make_shared<TaskGroupSequence>();
-          dependentTasks->addTask(
-              std::make_shared<TaskCleanStorage>(tempStorage, dialogView, utility::toVector(info.dependentFilesToClear), false));
+          dependentTasks->addTask(clearTask);
           dependentTasks->addTask(std::make_shared<TaskSetValue<int>>(
               "source_file_count", static_cast<int>(firstPassSourceFileCount + dependentSourceFileCount)));
           addIndexingTasks(dependentTasks,

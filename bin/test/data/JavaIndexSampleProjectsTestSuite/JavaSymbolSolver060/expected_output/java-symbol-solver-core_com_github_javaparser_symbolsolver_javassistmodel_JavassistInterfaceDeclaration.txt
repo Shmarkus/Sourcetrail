@@ -95,11 +95,6 @@ SYMBOL_PACKAGE: javassist.bytecode
 QUALIFIER: javassist.bytecode.SyntheticAttribute [JavassistInterfaceDeclaration.java <109:71 109:88>]
 QUALIFIER: java.lang [JavassistInterfaceDeclaration.java <37:13 37:16>]
 SYMBOL_PACKAGE: java.lang
-QUALIFIER: java [JavassistInterfaceDeclaration.java <37:8 37:11>]
-QUALIFIER: java [JavassistInterfaceDeclaration.java <38:8 38:11>]
-QUALIFIER: java [JavassistInterfaceDeclaration.java <39:8 39:11>]
-QUALIFIER: java [JavassistInterfaceDeclaration.java <40:8 40:11>]
-SYMBOL_PACKAGE: java
 QUALIFIER: java.lang.reflect.Modifier [JavassistInterfaceDeclaration.java <107:82 107:89>]
 QUALIFIER: java.lang.reflect [JavassistInterfaceDeclaration.java <37:18 37:24>]
 SYMBOL_PACKAGE: java.lang.reflect
@@ -755,8 +750,8 @@ LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfa
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<1> [JavassistInterfaceDeclaration.java <184:25 184:37>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<1> [JavassistInterfaceDeclaration.java <185:21 185:33>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<1> [JavassistInterfaceDeclaration.java <188:35 188:47>]
-LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<7> [JavassistInterfaceDeclaration.java <192:41 192:41>]
-LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<7> [JavassistInterfaceDeclaration.java <193:40 193:40>]
+LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<6> [JavassistInterfaceDeclaration.java <192:41 192:41>]
+LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasDirectlyAnnotation<6> [JavassistInterfaceDeclaration.java <193:40 193:40>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasInternalType<0> [JavassistInterfaceDeclaration.java <273:43 273:46>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.hasInternalType<0> [JavassistInterfaceDeclaration.java <278:81 278:84>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistInterfaceDeclaration.internalTypes<2> [JavassistInterfaceDeclaration.java <255:36 255:36>]

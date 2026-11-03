@@ -89,11 +89,10 @@ TEST(JavaIndexSampleProjects, JavaSampleParserCanSetupEnvironmentFactory) {
   ASSERT_TRUE(JavaEnvironmentFactory::getInstance().use_count() >= 1);
 }
 
-// Disabled: the expected outputs predate the fork's indexer. Today's output lacks the "java" package qualifiers
-// and numbers some local symbols differently in 97 of the 135 files. The fork's copy of this test never indexed
-// anything (its class path lacked the ".jar" suffix), so it hid the drift. Re-enable after regenerating
-// expected_output with updateExpectedOutput.
-TEST(JavaIndexSampleProjects, DISABLED_IndexJavasymbolsolver060Project) {
+// expected_output was regenerated (updateExpectedOutput) with the fork's java-indexer.jar on JDK 21. The older data
+// had a "java" package qualifier on every java.* import and numbered lambda parameters one higher; the fork's
+// copy of this test never indexed (its class path lacked ".jar") and so never noticed.
+TEST(JavaIndexSampleProjects, IndexJavasymbolsolver060Project) {
   const std::vector<FilePath>& classpath = {
       FilePath(L"data/JavaIndexSampleProjectsTestSuite/JavaSymbolSolver060/lib/guava-21.0.jar").makeAbsolute(),
       FilePath(L"data/JavaIndexSampleProjectsTestSuite/JavaSymbolSolver060/lib/"

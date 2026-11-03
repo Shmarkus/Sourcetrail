@@ -35,9 +35,6 @@ QUALIFIER: javassist.bytecode.SignatureAttribute [JavassistTypeDeclarationAdapte
 QUALIFIER: javassist.bytecode.SignatureAttribute [JavassistTypeDeclarationAdapter.java <75:24 75:41>]
 QUALIFIER: java.util [JavassistTypeDeclarationAdapter.java <25:13 25:16>]
 SYMBOL_PACKAGE: java.util
-QUALIFIER: java [JavassistTypeDeclarationAdapter.java <24:8 24:11>]
-QUALIFIER: java [JavassistTypeDeclarationAdapter.java <25:8 25:11>]
-SYMBOL_PACKAGE: java
 QUALIFIER: java.util.stream.Collectors [JavassistTypeDeclarationAdapter.java <42:74 42:83>]
 QUALIFIER: java.util.stream.Collectors [JavassistTypeDeclarationAdapter.java <47:79 47:88>]
 QUALIFIER: java.util.stream.Collectors [JavassistTypeDeclarationAdapter.java <77:22 77:31>]
@@ -239,7 +236,7 @@ LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDec
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.collectDeclaredFields<1> [JavassistTypeDeclarationAdapter.java <56:78 56:87>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.collectDeclaredFields<1> [JavassistTypeDeclarationAdapter.java <59:25 59:34>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.collectDeclaredFields<1> [JavassistTypeDeclarationAdapter.java <61:56 61:65>]
-LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.collectDeclaredFields<4> [JavassistTypeDeclarationAdapter.java <62:34 62:34>]
+LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.collectDeclaredFields<3> [JavassistTypeDeclarationAdapter.java <62:34 62:34>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.containerType<0> [JavassistTypeDeclarationAdapter.java <89:32 89:32>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.containerType<0> [JavassistTypeDeclarationAdapter.java <90:34 90:34>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.javassistmodel.JavassistTypeDeclarationAdapter.getDeclaredFields<0> [JavassistTypeDeclarationAdapter.java <51:28 51:37>]

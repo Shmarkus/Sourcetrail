@@ -305,4 +305,19 @@ TEST(Storage, keepsTheMembersASymbolDeclaredInSeveralFilesHasOutsideAClearedFile
   EXPECT_EQ(memberB, members.front().id);
   EXPECT_EQ(0U, storage.getNodeIdForNameHierarchy(NameHierarchy(L"p.A", kJavaDelimiter)));
 }
+
+TEST(Storage, buildsTheCachesQueriesNeedWithoutTheMemberOrder) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id file = addJavaFile(storage, L"/project/p/A.java");
+  const Id classA = addJavaSymbol(storage, NODE_CLASS, L"p.A");
+  addTokenLocation(storage, classA, file, 2);
+
+  storage.buildQueryCaches();
+
+  EXPECT_EQ(file, storage.getNodeIdForFileNode(FilePath(L"/project/p/A.java")));
+  const std::vector<SearchMatch> matches = storage.getAutocompletionSymbolMatches(L"p.A", NodeTypeSet::all(), 10, 10);
+  ASSERT_FALSE(matches.empty());
+  EXPECT_EQ(std::vector<Id>{classA}, matches.front().tokenIds);
+}
 }    // namespace

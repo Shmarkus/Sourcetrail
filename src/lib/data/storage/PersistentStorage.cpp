@@ -384,6 +384,14 @@ void PersistentStorage::buildCaches() {
   buildHierarchyCache();
 }
 
+void PersistentStorage::buildQueryCaches() {
+  clearCaches();
+
+  buildFilePathMaps();
+  buildSearchIndex();
+  buildHierarchyCache();
+}
+
 void PersistentStorage::optimizeMemory() {
   m_sqliteIndexStorage.setTime();
   m_sqliteIndexStorage.optimizeMemory();

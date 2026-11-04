@@ -1,6 +1,7 @@
 #include "QtProjectWizardContentPathsHeaderSearchGlobal.h"
 
 #include <QMessageBox>
+#include <QPushButton>
 
 #include "globalStrings.h"
 #include "IApplicationSettings.hpp"
@@ -72,13 +73,13 @@ bool QtProjectWizardContentPathsHeaderSearchGlobal::check() {
         "you want to remove "
         "these paths?");
     msgBox.setDetailedText(compilerHeaderPaths);
-    msgBox.addButton(QStringLiteral("Remove"), QMessageBox::ButtonRole::YesRole);
+    QPushButton* removeButton = msgBox.addButton(QStringLiteral("Remove"), QMessageBox::ButtonRole::YesRole);
     msgBox.addButton(QStringLiteral("Keep"), QMessageBox::ButtonRole::NoRole);
     msgBox.setIcon(QMessageBox::Icon::Question);
-    int ret = msgBox.exec();
+    msgBox.exec();
 
-    if(ret == 0)    // QMessageBox::Yes
-    {
+    // with custom buttons, exec() returns an opaque value
+    if(msgBox.clickedButton() == removeButton) {
       setPaths(utility::toStlPath(paths));
       save();
     }

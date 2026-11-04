@@ -112,9 +112,10 @@ bool QtProjectWizardContentProjectData::check() {
     QPushButton* createButton = msgBox.addButton(QStringLiteral("Create"), QMessageBox::ButtonRole::YesRole);
     msgBox.setDefaultButton(createButton);
     msgBox.setIcon(QMessageBox::Icon::Question);
-    int ret = msgBox.exec();
-    if(ret == 1)    // QMessageBox::Yes
-    {
+    msgBox.exec();
+
+    // with custom buttons, exec() returns an opaque value
+    if(msgBox.clickedButton() == createButton) {
       FileSystem::createDirectory(paths[0]);
     } else {
       return false;

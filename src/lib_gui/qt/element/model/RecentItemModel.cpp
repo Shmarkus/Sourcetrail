@@ -3,6 +3,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QPushButton>
 
 #include "IApplicationSettings.hpp"
 #include "ProjectSettings.h"
@@ -33,16 +34,19 @@ QIcon getProjectIcon(LanguageType lang) {
   }
 }
 
-int showMissingProjectDialog(const std::wstring& projectFilePath) {
+bool askToRemoveMissingProject(const std::wstring& projectFilePath) {
   QMessageBox msgBox;
   msgBox.setText(QStringLiteral("Missing Project File"));
   msgBox.setInformativeText(QString::fromStdWString(L"<p>Couldn't find \"" + projectFilePath +
                                                     L"\" on your filesystem.</p><p>Do you want to remove it from recent project "
                                                     L"list?</p>"));
-  msgBox.addButton(QStringLiteral("Remove"), QMessageBox::ButtonRole::YesRole);
+  QPushButton* removeButton = msgBox.addButton(QStringLiteral("Remove"), QMessageBox::ButtonRole::YesRole);
   msgBox.addButton(QStringLiteral("Keep"), QMessageBox::ButtonRole::NoRole);
   msgBox.setIcon(QMessageBox::Icon::Question);
-  return msgBox.exec();
+  msgBox.exec();
+
+  // with custom buttons, exec() returns an opaque value
+  return msgBox.clickedButton() == removeButton;
 }
 
 }    // namespace
@@ -208,8 +212,7 @@ void RecentItemModel::clicked(const QModelIndex& index) {
     MessageLoadProject(FilePath{item.path.wstring()}).dispatch();
     return;
   }
-  const auto status = ::showMissingProjectDialog(item.path.wstring());
-  if(status == 0) {
+  if(::askToRemoveMissingProject(item.path.wstring())) {
     mRecentProjects.erase(std::begin(mRecentProjects) + index.row());
     updateRecentProjects();
   }

@@ -105,8 +105,10 @@ bool QtProjectWizardContentPathsIndexedHeaders::check() {
     QPushButton* yesButton = msgBox.addButton(QStringLiteral("Continue"), QMessageBox::ButtonRole::YesRole);
     msgBox.addButton(QStringLiteral("Cancel"), QMessageBox::ButtonRole::NoRole);
     msgBox.setDefaultButton(yesButton);
+    msgBox.exec();
 
-    if(msgBox.exec() != 0) {
+    // with custom buttons, exec() returns an opaque value
+    if(msgBox.clickedButton() != yesButton) {
       return false;
     }
   }

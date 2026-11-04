@@ -195,13 +195,13 @@ void QtBookmark::deleteClicked() {
   QMessageBox msgBox;
   msgBox.setText(QStringLiteral("Delete Bookmark"));
   msgBox.setInformativeText(QStringLiteral("Do you really want to delete this bookmark?"));
-  msgBox.addButton(QStringLiteral("Delete"), QMessageBox::ButtonRole::YesRole);
+  QPushButton* deleteButton = msgBox.addButton(QStringLiteral("Delete"), QMessageBox::ButtonRole::YesRole);
   msgBox.addButton(QStringLiteral("Keep"), QMessageBox::ButtonRole::NoRole);
   msgBox.setIcon(QMessageBox::Icon::Question);
-  int ret = msgBox.exec();
+  msgBox.exec();
 
-  if(ret == 0)    // QMessageBox::Yes)
-  {
+  // with custom buttons, exec() returns an opaque value
+  if(msgBox.clickedButton() == deleteButton) {
     m_controllerProxy->executeAsTaskWithArgs(&BookmarkController::deleteBookmark, m_bookmark->getId());
   }
 }

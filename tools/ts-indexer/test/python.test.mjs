@@ -176,7 +176,8 @@ describe('Python projects', () => {
     try {
       assert.equal(run.code, 0, run.stderr);
       assert.equal(run.stderr, '');
-      assert.match(run.stdout, /^scip-indexer: \/nonexistent\/python3 not found; library symbols unresolved\n/);
+      assert.equal(run.stdout, 'scip-indexer: /nonexistent/python3 not found; library symbols unresolved\n'
+        + 'scip-indexer: 1 module unresolved (paylink)\nscip-indexer: 5 files, 1 errors\n');
       assert.deepEqual(errorsOf(index), [{ message: 'unresolved import: paylink', start_line: 1,
         path: path.join(project, 'shop/payments.py') }]);
       assert.deepEqual(index.nodes.filter(n => n.name.startsWith('paylink')).map(n => n.name), [], 'nothing invented');
@@ -213,6 +214,81 @@ describe('Python projects', () => {
       assert.deepEqual(index.edgesBetween('shop.payments.settle', 'paylink.charge').map(e => e.type), [EDGE.CALL]);
       const files = index.db.prepare("SELECT path FROM file WHERE path LIKE '%.venv%'").all();
       assert.deepEqual(files, [], 'the environment is not project code');
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('anUnresolvedModuleIsOneErrorPerRun', () => {
+    const files = {};
+    for (const name of ['a', 'b', 'c', 'd']) {
+      files[`shop/uses_${name}.py`] = 'import paylink\nfrom stockbook.api import level\n\n\n'
+        + 'def f():\n    return level()\n';
+    }
+    files['shop/known.py'] = 'from shop.models import NoSuchName\n';
+    const { dir, project, run, index } = indexCopy('pyunresolved', files, ['--python', '/nonexistent/python3']);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      const errors = errorsOf(index).sort((x, y) => x.message.localeCompare(y.message));
+      assert.deepEqual(errors.map(e => e.message), ['unresolved import: paylink', 'unresolved import: stockbook']);
+      assert.ok(errors.every(e => e.path === path.join(project, 'shop/uses_a.py')), 'at the first import');
+      assert.match(run.stdout, /^scip-indexer: 2 modules unresolved \(paylink, stockbook\)\n/m);
+      assert.match(run.stdout, /scip-indexer: 9 files, 2 errors\n$/);
+      assert.deepEqual(index.nodes.filter(n => /^(paylink|stockbook)\b/.test(n.name)).map(n => n.name), []);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('theUnresolvedListIsCapped', () => {
+    const imports = Array.from({ length: 12 }, (_, i) => `import lib${String(i).padStart(2, '0')}\n`).join('');
+    const { dir, run, index } = indexCopy('pycap', { 'shop/many.py': imports }, ['--python', '/nonexistent/python3']);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      const shown = Array.from({ length: 10 }, (_, i) => `lib0${i}`).join(', ');
+      assert.ok(run.stdout.includes(`scip-indexer: 12 modules unresolved (${shown}, …)\n`), run.stdout);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const SRC_LAYOUT = { 'src/app/__init__.py': '', 'src/app/core.py': 'def run():\n    return 1\n',
+    'tests/test_core.py': 'from app.core import run\n\n\ndef test_run():\n    run()\n' };
+  const srcLayout = (prefix, extra) => {
+    const dir = scratchDir(prefix);
+    for (const [file, text] of Object.entries(SRC_LAYOUT)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+    }
+    fs.writeFileSync(path.join(dir, 'pyproject.toml'), '[project]\nname = "app"\n');
+    const out = path.join(dir, 'py.srctrldb');
+    const run = indexPython(dir, out, extra);
+    return { dir, run, index: run.code === 0 ? openIndex(out) : null };
+  };
+
+  test('aSrcLayoutLinksTestsToTheProject', { skip: !python3 && 'python3 not found' }, () => {
+    const { dir, run, index } = srcLayout('pysrc', []);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, 'scip-indexer: 3 files, 0 errors\n');
+      assert.deepEqual(index.named('app.core.run').map(n => n.type), [NODE.FUNCTION]);
+      assert.deepEqual(index.edgesBetween('tests.test_core.test_run', 'app.core.run').map(e => e.type), [EDGE.CALL]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aProjectModuleIsNeverUnresolved', () => {
+    // without an interpreter, src/ is not on the search path: the import does not link, but it is no error
+    const { dir, run, index } = srcLayout('pysrcnopy', ['--python', '/nonexistent/python3']);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.deepEqual(errorsOf(index), []);
+      assert.deepEqual(index.named('app.core.run').map(n => n.type), [NODE.FUNCTION]);
     } finally {
       index?.close();
       fs.rmSync(dir, { recursive: true, force: true });

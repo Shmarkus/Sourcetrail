@@ -83,10 +83,15 @@ function absoluteModule(relative, current, isPackage) {
   return [...base, ...(rest ? [rest] : [])].join('.');
 }
 
+// A src layout: the packages live in src/, which is no package itself, and are imported without the `src.`.
+export const isSrcLayout = projectRoot =>
+  !!fs.statSync(path.join(projectRoot, 'src'), { throwIfNoEntry: false })?.isDirectory()
+  && !fs.existsSync(path.join(projectRoot, 'src', '__init__.py'));
+
 // Converts `index` (a scip.Index from scip-python) into `writer` (an IndexWriter).
 //   projectRoot: absolute folder the SCIP paths are relative to
 //   parser: loadPythonParser()'s result
-// Returns {files, errors}.
+// Returns {files, errors, unresolvedModules}: the top-level modules imports could not resolve, in order of first use.
 export function convertPython({ index, projectRoot, writer, parser }) {
   const projectDocuments = index.documents.filter(doc =>
     !doc.relative_path.split('/').slice(0, -1).some(dir => SKIPPED_DIRECTORIES.has(dir)));
@@ -95,12 +100,19 @@ export function convertPython({ index, projectRoot, writer, parser }) {
   for (const doc of index.documents) for (const si of doc.symbols) info.set(si.symbol, si);
   for (const si of index.external_symbols) info.set(si.symbol, si);
 
-  // A src layout's modules are imported without the `src.`, which scip-python keeps.
-  const srcLayout = fs.statSync(path.join(projectRoot, 'src'), { throwIfNoEntry: false })?.isDirectory()
-    && !fs.existsSync(path.join(projectRoot, 'src', '__init__.py'));
+  // Without src/ on its search path (no interpreter), scip-python names a src layout's modules `src.app.core`. Only
+  // a name whose next part is in src/ is the project's.
+  const srcLayout = isSrcLayout(projectRoot);
+  const inSrc = new Map(); // first part after `src.` -> whether src/ holds it
   const moduleNameOf = parts => {
     const name = parts.map(p => p.name).join('.');
-    return srcLayout && name.startsWith('src.') ? name.slice(4) : name;
+    if (!srcLayout || parts.length < 1 || !name.startsWith('src.')) return name;
+    const first = name.split('.')[1];
+    if (!inSrc.has(first)) {
+      inSrc.set(first, fs.existsSync(path.join(projectRoot, 'src', first))
+        || fs.existsSync(path.join(projectRoot, 'src', `${first}.py`)));
+    }
+    return inSrc.get(first) ? name.slice(4) : name;
   };
   const leadingNamespaces = parsed => {
     let n = 0;
@@ -161,12 +173,16 @@ export function convertPython({ index, projectRoot, writer, parser }) {
   }
 
   // ---- modules and classes of the project ----
-  const projectModules = new Set();
+  const projectModules = new Set(); // the project's modules and the packages around them
+  const unresolvedModules = new Set(); // top-level modules an import could not resolve, reported once
   const bases = new Map(); // class symbol -> base class symbols
   for (const doc of projectDocuments) {
     for (const si of doc.symbols) {
       const r = elementsFor(si.symbol);
-      if (r?.kind === NODE.MODULE) projectModules.add(r.module);
+      if (r?.kind === NODE.MODULE) {
+        const segments = r.module.split('.');
+        for (let i = 1; i <= segments.length; i++) projectModules.add(segments.slice(0, i).join('.'));
+      }
       if (r?.kind === NODE.CLASS) {
         bases.set(si.symbol, si.relationships.filter(rel => rel.is_implementation && rel.symbol.endsWith('#'))
           .map(rel => rel.symbol));
@@ -236,13 +252,14 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         if (rest) aliases.set(rest, module);
         else for (const n of imp.names) aliases.set(n.name, `${module}.${n.name}`);
       }
-      if (!moduleFound) writer.error(fileId, abs, ...imp.module.position, `unresolved import: ${module}`);
-      else {
-        for (const n of imp.names.filter(n => local(n.key))) {
-          writer.error(fileId, abs, ...n.position, `unresolved import: ${module}.${n.name}`);
-        }
+      const unresolved = !moduleFound || imp.names.some(n => local(n.key));
+      // one error per missing top-level module and run, at its first import; the project's own never count
+      const top = module.split('.')[0];
+      if (unresolved && !projectModules.has(top) && !unresolvedModules.has(top)) {
+        unresolvedModules.add(top);
+        writer.error(fileId, abs, ...imp.module.position, `unresolved import: ${top}`);
       }
-      return { span: imp.span, unresolved: !moduleFound || imp.names.some(n => local(n.key)) };
+      return { span: imp.span, unresolved };
     });
     const elementsIn = symbol => {
       const parsed = parseSymbol(symbol);
@@ -346,5 +363,5 @@ export function convertPython({ index, projectRoot, writer, parser }) {
     }
   }
 
-  return { files: writer.fileCount, errors: writer.errorCount };
+  return { files: writer.fileCount, errors: writer.errorCount, unresolvedModules: [...unresolvedModules] };
 }

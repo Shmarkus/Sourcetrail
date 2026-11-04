@@ -294,13 +294,16 @@ function findPython(options) {
 }
 
 // scip-python (Pyright) asks `python3` on PATH for its search paths: a folder whose only python3 runs the chosen
-// interpreter (a wrapper, not a link, so that a virtualenv stays one), or none.
-function interpreterPath(scratch, python) {
+// interpreter (a wrapper, not a link, so that a virtualenv stays one), or none. In a src layout the wrapper puts src/
+// on PYTHONPATH, so that tests outside src/ resolve the project's packages. A /bin/sh script: Linux and macOS only.
+function interpreterPath(scratch, python, srcDir) {
   const bin = path.join(scratch, 'bin');
   fs.mkdirSync(bin);
   if (python) {
-    const quoted = `'${python.replaceAll("'", "'\\''")}'`;
-    fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\nexec ${quoted} "$@"\n`, { mode: 0o755 });
+    const quote = text => `'${text.replaceAll("'", "'\\''")}'`;
+    const pythonPath = srcDir ? `PYTHONPATH=${quote(srcDir)}\${PYTHONPATH:+:\$PYTHONPATH} ` : '';
+    fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\n${pythonPath}exec ${quote(python)} "$@"\n`,
+      { mode: 0o755 });
   }
   return bin;
 }
@@ -330,7 +333,9 @@ async function mainPython(argv) {
     // (scip-python would otherwise ask pip for them).
     const environment = path.join(scratch, 'environment.json');
     fs.writeFileSync(environment, '[]\n');
-    runScipPython(scipPython, options.project, interpreterPath(scratch, python), environment, scipFile);
+    const { isSrcLayout } = await import('./python.mjs');
+    const srcDir = isSrcLayout(options.project) ? path.join(options.project, 'src') : null;
+    runScipPython(scipPython, options.project, interpreterPath(scratch, python, srcDir), environment, scipFile);
     const index = scip.Index.deserializeBinary(fs.readFileSync(scipFile));
 
     const { IndexWriter } = await import('./sqlite.mjs');
@@ -348,6 +353,12 @@ async function mainPython(argv) {
       throw e;
     }
     if (missing) process.stdout.write(`scip-indexer: ${missing} not found; library symbols unresolved\n`);
+    const unresolved = result.unresolvedModules;
+    if (unresolved.length) {
+      const shown = unresolved.slice(0, 10).join(', ') + (unresolved.length > 10 ? ', …' : '');
+      process.stdout.write(`scip-indexer: ${unresolved.length} module${unresolved.length === 1 ? '' : 's'} unresolved `
+        + `(${shown})\n`);
+    }
     process.stdout.write(`scip-indexer: ${result.files} files, ${result.errors} errors\n`);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });

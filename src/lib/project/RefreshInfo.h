@@ -71,4 +71,7 @@ struct RefreshInfo final {
   // once for this refresh, and the stored failures of those left alone although their last run failed.
   std::map<std::string, std::string> wholeGroupInputs;
   std::vector<std::wstring> wholeGroupFailures;
+  // Groups indexed as a whole that this refresh re-runs although their source files are gone (a deleted tsconfig): their
+  // commands report that instead of running, so the group's record is updated and it is not re-run again and again.
+  std::set<std::string> wholeGroupsWithoutSources;
 };

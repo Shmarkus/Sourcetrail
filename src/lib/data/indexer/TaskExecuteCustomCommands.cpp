@@ -203,6 +203,17 @@ void TaskExecuteCustomCommands::runIndexerCommand(const std::shared_ptr<IndexerC
                                             {sourcePath});
     MessageIndexingStatus{true, toPercent(static_cast<size_t>(indexedSourceFileCount), mIndexerCommandCount)}.dispatch();
 
+    if(const std::wstring& reason = indexerCommand->getNotRunReason(); !reason.empty()) {
+      const std::wstring statusText = std::format(L"{} skipped: {}", indexerCommand->getLabel(), reason);
+      LOG_WARNING(statusText);
+      MessageStatus(statusText).dispatch();
+      if(storage) {
+        indexerCommand->finished(IndexerCommandCustom::Result::Skipped, statusText, *storage);
+      }
+      blackboard->update<int>("indexed_source_file_count", [=](int count) { return count + 1; });
+      return;
+    }
+
     const std::wstring command = indexerCommand->getCommand();
     const std::vector<std::wstring> arguments = indexerCommand->getArguments();
 

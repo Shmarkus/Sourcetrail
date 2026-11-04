@@ -1,6 +1,7 @@
 #ifndef SOURCE_GROUP_TYPESCRIPT_H
 #define SOURCE_GROUP_TYPESCRIPT_H
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -23,6 +24,8 @@ public:
 
   bool isIndexedAsWhole() const override;
   std::string getInputsRecord() const override;
+  // The inputs record of the TypeScript project in `root`, handing each trigger file to `visit` on the way.
+  static std::string getInputsRecord(const FilePath& root, const std::function<void(const FilePath& triggerFile)>& visit);
 
   std::set<FilePath> filterToContainedFilePaths(const std::set<FilePath>& filePaths) const override;
   std::set<FilePath> getAllSourceFilePaths() const override;

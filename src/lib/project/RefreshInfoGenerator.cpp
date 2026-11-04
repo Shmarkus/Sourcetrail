@@ -84,6 +84,9 @@ void applyGroupsIndexedAsWhole(RefreshInfo& info,
           info.filesToIndex.insert(path);
         }
       }
+      if(std::ranges::none_of(sourceFilePaths, [](const FilePath& path) { return path.exists(); })) {
+        info.wholeGroupsWithoutSources.insert(sourceGroup->getId());
+      }
     } else {
       info.filesToClear = subtract(info.filesToClear, groupFilePaths);
       info.nonIndexedFilesToClear = subtract(info.nonIndexedFilesToClear, groupFilePaths);
@@ -281,6 +284,12 @@ RefreshInfo RefreshInfoGenerator::getRefreshInfoForAllFiles(const std::vector<st
   info.mode = RefreshMode::AllFiles;
   info.filesToIndex = getAllSourceFilePaths(sourceGroups);
   takeInputsRecords(info, getEnabledGroupsIndexedAsWhole(sourceGroups));
+  for(const std::shared_ptr<SourceGroup>& sourceGroup : getEnabledGroupsIndexedAsWhole(sourceGroups)) {
+    const std::set<FilePath> sourceFilePaths = sourceGroup->getAllSourceFilePaths();
+    if(std::ranges::none_of(sourceFilePaths, [](const FilePath& path) { return path.exists(); })) {
+      info.wholeGroupsWithoutSources.insert(sourceGroup->getId());
+    }
+  }
   return info;
 }
 

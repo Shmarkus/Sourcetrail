@@ -1548,6 +1548,19 @@ TEST(StQuery, memoizedResolutionReturnsTheSameIdsAsAFreshOne) {
 }
 
 namespace {
+// Locates a link on `line` from `column` to `endColumn`, as the Java indexer locates a field use or a call.
+void locate(Code& code, Id link, const std::wstring& inFile, size_t line, size_t column, size_t endColumn) {
+  const Id location = code.storage.addSourceLocation(
+      StorageSourceLocationData(code.file(inFile), line, column, line, endColumn, locationTypeToInt(LOCATION_TOKEN)));
+  code.storage.addOccurrence(StorageOccurrence(link, location));
+}
+
+Id linkAt(Code& code, Edge::EdgeType type, Id from, Id to, const std::wstring& inFile, size_t line, size_t column, size_t endColumn) {
+  const Id id = code.link(type, from, to, inFile, {});
+  locate(code, id, inFile, line, column, endColumn);
+  return id;
+}
+
 // A Spring backend: OrderRepository and CustomerRepository extend the library's JpaRepository, AuditDao carries
 // @Repository, PaymentClient @FeignClient; Facade.run reaches each through a service.
 struct Backend {
@@ -1581,13 +1594,14 @@ struct Backend {
     const Id orderField = code.member(orderService, L"OrderService", L"orderRepository", NODE_FIELD);
     code.link(Edge::EDGE_TYPE_USAGE, orderField, orders, L"OrderService", {4});
     list = code.member(orderService, L"OrderService", L"list");
-    code.link(Edge::EDGE_USAGE, list, orderField, L"OrderService", {7});
-    code.link(Edge::EDGE_CALL, list, findAll, L"OrderService", {7});
+    // `orderRepository.findAll()`: the field's use ends just before the call's `.findAll`
+    linkAt(code, Edge::EDGE_USAGE, list, orderField, L"OrderService", 7, 16, 30);
+    listFindAll = linkAt(code, Edge::EDGE_CALL, list, findAll, L"OrderService", 7, 32, 38);
     code.link(Edge::EDGE_CALL, list, authorize, L"OrderService", {8});
 
     const Id customerService = code.type(L"shop", L"CustomerService");
     all = code.member(customerService, L"CustomerService", L"all");
-    // a local of the repository's type
+    // a local of the repository's type: nothing at the call names the receiver
     code.link(Edge::EDGE_TYPE_USAGE, all, customers, L"CustomerService", {5});
     code.link(Edge::EDGE_CALL, all, findAll, L"CustomerService", {6});
     code.link(Edge::EDGE_CALL, all, write, L"CustomerService", {7});
@@ -1598,8 +1612,16 @@ struct Backend {
     code.storage.buildCaches();
   }
 
+  Id orderField() {
+    return code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService", L"orderRepository"}));
+  }
+
+  Id orderService() {
+    return code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService"}));
+  }
+
   Code code;
-  Id jpa, findAll, orders, customers, payments, authorize, write, list, all, run;
+  Id jpa, findAll, orders, customers, payments, authorize, write, list, all, run, listFindAll;
 };
 
 std::vector<std::wstring> printedKeys(const std::vector<st::ResultLine>& lines) {
@@ -1657,7 +1679,7 @@ TEST(StQuery, boundariesNameALibraryRepositoryMethodAfterTheRepositoryItIsCalled
   const st::Boundaries found = st::boundaries(backend.code.storage, lines, &walked);
 
   EXPECT_EQ((std::vector<std::wstring>{L"AuditDao.write\tmethod, depth 2\t7",
-                                       L"CustomerRepository.findAll (JpaRepository)\tmethod, depth 2\t6",
+                                       L"JpaRepository.findAll\tmethod, depth 2\t6",
                                        L"OrderRepository.findAll (JpaRepository)\tmethod, depth 2\t7"}),
             printedKeys(found.repositories));
   EXPECT_EQ((std::vector<std::wstring>{L"PaymentClient.authorize\tmethod, depth 2\t8"}), printedKeys(found.feignClients));
@@ -1726,11 +1748,9 @@ TEST(StQuery, boundariesNameAMethodOfALibraryBaseTheIndexDoesNotLinkAfterTheCall
   const std::vector<std::wstring> crud = {L"org", L"springframework", L"data", L"repository", L"ListCrudRepository<T, ID>"};
   undefined(backend.code.storage, typeName(crud), NODE_SYMBOL);
   const Id findAll = undefined(backend.code.storage, method(crud, L"findAll", L"java.util.List", L"()"), NODE_METHOD);
-  const Id orderService = backend.code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService"}));
-  const Id page = backend.code.member(orderService, L"OrderService", L"page");
-  const Id field = backend.code.storage.getNodeIdForNameHierarchy(typeName({L"shop", L"OrderService", L"orderRepository"}));
-  backend.code.link(Edge::EDGE_USAGE, page, field, L"OrderService", {12});
-  backend.code.link(Edge::EDGE_CALL, page, findAll, L"OrderService", {12});
+  const Id page = backend.code.member(backend.orderService(), L"OrderService", L"page");
+  linkAt(backend.code, Edge::EDGE_USAGE, page, backend.orderField(), L"OrderService", 12, 16, 30);
+  linkAt(backend.code, Edge::EDGE_CALL, page, findAll, L"OrderService", 12, 32, 38);
   backend.code.storage.buildCaches();
 
   st::QueryOptions options;
@@ -1739,4 +1759,32 @@ TEST(StQuery, boundariesNameAMethodOfALibraryBaseTheIndexDoesNotLinkAfterTheCall
   const auto lines = st::calls(backend.code.storage, {page}, st::Direction::Outgoing, 0, &walked, options);
   EXPECT_EQ((std::vector<std::wstring>{L"OrderRepository.findAll (ListCrudRepository)\tmethod, depth 1\t12"}),
             printedKeys(st::boundaries(backend.code.storage, lines, &walked).repositories));
+}
+
+// The receiver is named only from the call site: a chained call in a method that also uses a repository field is the
+// declaring type's, never the field's.
+TEST(StQuery, boundariesNameTheReceiverOnlyFromTheCallSite) {
+  Backend backend;
+  const Id chain = backend.code.member(backend.orderService(), L"OrderService", L"chain");
+  // `orderRepository.count(); registry.orders().findAll();`
+  linkAt(backend.code, Edge::EDGE_USAGE, chain, backend.orderField(), L"OrderService", 10, 9, 23);
+  linkAt(backend.code, Edge::EDGE_CALL, chain, backend.findAll, L"OrderService", 10, 60, 66);
+  // list's second call, `orderRepository\n    .findAll()`: the receiver's use is on the line before
+  linkAt(backend.code, Edge::EDGE_USAGE, backend.list, backend.orderField(), L"OrderService", 11, 9, 23);
+  locate(backend.code, backend.listFindAll, L"OrderService", 12, 6, 12);
+  backend.code.storage.buildCaches();
+
+  st::QueryOptions options;
+  options.library = true;
+  st::Walked walked;
+  const auto lines = st::calls(backend.code.storage, {chain}, st::Direction::Outgoing, 0, &walked, options);
+  EXPECT_EQ((std::vector<std::wstring>{L"JpaRepository.findAll\tmethod, depth 1\t10"}),
+            printedKeys(st::boundaries(backend.code.storage, lines, &walked).repositories));
+
+  // One caller, two calls: each named by its own site.
+  walked = st::Walked();
+  const auto fromList = st::calls(backend.code.storage, {backend.list}, st::Direction::Outgoing, 0, &walked, options);
+  EXPECT_EQ((std::vector<std::wstring>{
+                L"JpaRepository.findAll\tmethod, depth 1\t12", L"OrderRepository.findAll (JpaRepository)\tmethod, depth 1\t7"}),
+            printedKeys(st::boundaries(backend.code.storage, fromList, &walked).repositories));
 }

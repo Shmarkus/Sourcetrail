@@ -580,13 +580,13 @@ int status(const st::Io& io,
          << "unresolved_symbols\t" << unresolved << '\n'
          << "stale_files\t" << freshness.changedFiles << '\n'
          << "server\t" << (serverRunning ? "running" : "off") << '\n';
-  // A TypeScript group's last run: indexed, failed with the indexer's message, or none in the index (skipped, e.g.
-  // without node_modules; `st index` shows why).
+  // A TypeScript group's last run: indexed, broken with the status it left (a failure, a missing tsconfig), or none in
+  // the index (skipped, e.g. without node_modules; `st index` shows why).
   for(const auto& group : settings.getAllSourceGroupSettings()) {
     if(group->getStatus() == SOURCE_GROUP_STATUS_ENABLED && group->getType() == SOURCE_GROUP_TYPESCRIPT) {
       const std::string failure = storage.getSourceGroupFailure(group->getId());
       io.out << "typescript\t"
-             << (!failure.empty() ? "failed: " + failure.substr(0, failure.find('\n')) :
+             << (!failure.empty() ? "broken: " + failure.substr(0, failure.find('\n')) :
                      storage.getSourceGroupInputs(group->getId()).empty() ? "not indexed; st index shows why" :
                                                                            "indexed")
              << '\n';

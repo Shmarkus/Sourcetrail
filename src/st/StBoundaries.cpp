@@ -9,6 +9,8 @@
 #include "DefinitionKind.h"
 #include "NodeType.h"
 #include "PersistentStorage.h"
+#include "SourceLocation.h"
+#include "SourceLocationCollection.h"
 #include "StGraphInternal.h"
 #include "StorageEdge.h"
 
@@ -82,23 +84,12 @@ public:
     return found;
   }
 
-  // The types a caller refers to: in its own type uses and in the types of the fields it uses.
-  std::set<Id> referencedTypes(Id caller) {
+  // The types of a field, as its type uses give them (a generic field's type arguments too).
+  std::set<Id> fieldTypes(Id field) {
     std::set<Id> types;
-    std::vector<Id> fields;
-    for(const StorageEdge& edge : m_storage.getEdgesForSourceIds({caller})) {
-      const Edge::EdgeType type = Edge::intToType(edge.type);
-      if(type == Edge::EDGE_TYPE_USAGE) {
+    for(const StorageEdge& edge : m_storage.getEdgesForSourceIds({field})) {
+      if(Edge::intToType(edge.type) == Edge::EDGE_TYPE_USAGE) {
         types.insert(edge.targetNodeId);
-      } else if(type == Edge::EDGE_USAGE && m_storage.getNodeTypeForNodeWithId(edge.targetNodeId).getKind() == NODE_FIELD) {
-        fields.push_back(edge.targetNodeId);
-      }
-    }
-    if(!fields.empty()) {
-      for(const StorageEdge& edge : m_storage.getEdgesForSourceIds(fields)) {
-        if(Edge::intToType(edge.type) == Edge::EDGE_TYPE_USAGE) {
-          types.insert(edge.targetNodeId);
-        }
       }
     }
     return types;
@@ -113,6 +104,35 @@ private:
   PersistentStorage& m_storage;
   std::map<Id, Boundary> m_kinds;
 };
+
+struct Span {
+  FilePath file;
+  size_t line = 0;
+  size_t column = 0;
+  size_t endColumn = 0;
+};
+
+// Every location of each link, with its end column when it ends on its first line.
+std::map<Id, std::vector<Span>> spans(PersistentStorage& storage, const std::vector<Id>& edgeIds) {
+  std::map<Id, std::vector<Span>> found;
+  if(edgeIds.empty()) {
+    return found;
+  }
+  const std::set<Id> wanted(edgeIds.begin(), edgeIds.end());
+  storage.getSourceLocationsForTokenIds(edgeIds)->forEachSourceLocation([&](SourceLocation* location) {
+    if(!location->isStartLocation()) {
+      return;
+    }
+    const SourceLocation* end = location->getOtherLocation();
+    const size_t endColumn = end && end->getLineNumber() == location->getLineNumber() ? end->getColumnNumber() : 0;
+    for(const Id id : location->getTokenIds()) {
+      if(wanted.count(id)) {
+        found[id].push_back({location->getFilePath(), location->getLineNumber(), location->getColumnNumber(), endColumn});
+      }
+    }
+  });
+  return found;
+}
 
 std::wstring simpleName(PersistentStorage& storage, Id id) {
   const NameHierarchy name = storage.getNameHierarchyForNodeId(id);
@@ -147,47 +167,62 @@ Boundaries boundaries(PersistentStorage& storage, const std::vector<ResultLine>&
     }
     const std::wstring member = L"." + bareName(name.back());
 
-    // Each caller's receiver: the declaring type or the one subtype of it the caller refers to.
-    std::map<std::wstring, std::vector<Id>> callsByKey;
+    // Each call's receiver, named only on evidence at the call site: a use of a field ending one character (the dot)
+    // before the call, the field's one type a subtype of the declaring type (or, for a library method, whose own
+    // inheritance the index lacks, a type of the same kind). Otherwise the declaring type.
+    std::map<std::wstring, Site> firstCalls;
     if(walked) {
       const std::set<Id> subtypes = classifier.subtypes(type);
       const bool library = storage.getDefinitionKindForNodeId(line.symbol) == DEFINITION_NONE;
-      for(const StorageEdge& edge : storage.getEdgesForTargetIds({line.symbol})) {
-        if(!(Edge::intToType(edge.type) & (Edge::EDGE_CALL | Edge::EDGE_USAGE)) || !walked->passed.count(edge.sourceNodeId)) {
+      const auto isReceiver = [&](Id candidate) {
+        return candidate != type && (subtypes.count(candidate) || (library && classifier.of(candidate) == boundary));
+      };
+      for(const StorageEdge& call : storage.getEdgesForTargetIds({line.symbol})) {
+        if(!(Edge::intToType(call.type) & (Edge::EDGE_CALL | Edge::EDGE_USAGE)) || !walked->passed.count(call.sourceNodeId)) {
           continue;
         }
-        const std::set<Id> referenced = classifier.referencedTypes(edge.sourceNodeId);
-        std::vector<Id> receivers;
-        std::set_intersection(
-            subtypes.begin(), subtypes.end(), referenced.begin(), referenced.end(), std::back_inserter(receivers));
-        // The index holds none of a library's own inheritance (JpaRepository extends ListCrudRepository): a library
-        // method's receiver is the one boundary of its kind the caller refers to.
-        if(receivers.empty() && library) {
-          std::copy_if(referenced.begin(), referenced.end(), std::back_inserter(receivers), [&](Id other) {
-            return other != type && classifier.of(other) == boundary;
-          });
+        std::vector<Id> fieldUses;
+        std::map<Id, Id> fieldOfUse;
+        for(const StorageEdge& use : storage.getEdgesForSourceIds({call.sourceNodeId})) {
+          if(Edge::intToType(use.type) == Edge::EDGE_USAGE &&
+             storage.getNodeTypeForNodeWithId(use.targetNodeId).getKind() == NODE_FIELD) {
+            fieldUses.push_back(use.id);
+            fieldOfUse[use.id] = use.targetNodeId;
+          }
         }
-        const std::wstring key = !referenced.count(type) && receivers.size() == 1 ?
-            simpleName(storage, receivers.front()) + member + L" (" + declaring + L")" :
-            declaring + member;
-        callsByKey[key].push_back(edge.id);
+        const std::map<Id, std::vector<Span>> useSpans = spans(storage, fieldUses);
+        const std::map<Id, std::vector<Span>> callSpans = spans(storage, {call.id});
+        if(!callSpans.count(call.id)) {
+          continue;
+        }
+        for(const Span& site : callSpans.at(call.id)) {
+          Id receiver = 0;
+          for(const auto& [use, uses] : useSpans) {
+            for(const Span& span : uses) {
+              if(span.file == site.file && span.line == site.line && span.endColumn && span.endColumn + 2 == site.column) {
+                std::vector<Id> types;
+                std::ranges::copy_if(classifier.fieldTypes(fieldOfUse.at(use)), std::back_inserter(types), isReceiver);
+                receiver = types.size() == 1 ? types.front() : 0;
+              }
+            }
+          }
+          const std::wstring key = receiver ? simpleName(storage, receiver) + member + L" (" + declaring + L")" :
+                                              declaring + member;
+          Site& first = firstCalls[key];
+          if(first.file.empty() || std::make_pair(site.file.wstr(), site.line) < std::make_pair(first.file.wstr(), first.line)) {
+            first = {site.file, site.line, site.column};
+          }
+        }
       }
     }
-    if(callsByKey.empty()) {
+    if(firstCalls.empty()) {
       ResultLine shown = line;
       shown.key = declaring + member;
       group.push_back(std::move(shown));
       continue;
     }
-    for(const auto& [key, edges] : callsByKey) {
-      Site first;
-      for(const auto& [edge, site] : linkSites(storage, edges)) {
-        if(first.file.empty() || std::make_pair(site.file.wstr(), site.line) < std::make_pair(first.file.wstr(), first.line)) {
-          first = site;
-        }
-      }
-      ResultLine shown = first.file.empty() ? line : resultLine(storage, key, line.kind, first);
-      shown.key = key;
+    for(const auto& [key, site] : firstCalls) {
+      ResultLine shown = resultLine(storage, key, line.kind, site);
       shown.tier = line.tier;
       shown.symbol = line.symbol;
       group.push_back(std::move(shown));

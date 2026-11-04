@@ -2112,6 +2112,35 @@ TEST(StIndex, stalenessSeesTsEdit) {
   EXPECT_EQ(1, run.exitCode) << run.out << run.err;
 }
 
+// A deleted tsconfig is refreshed once, reported, and then left alone: no refresh on every query.
+TEST(StIndex, missingTsconfigIsReportedOnceNotRefreshedAgain) {
+  if(!typeScriptIndexerStaged()) {
+    GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
+  }
+  ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
+  const FixtureCopy fixture(ST_TS_FIXTURE, "shop.srctrlprj", kMixedGroups);
+  StRun run = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+
+  QThread::sleep(2);
+  ASSERT_TRUE(QFile::remove(fixture.root() + "/tsconfig.json"));
+  run = fixture.st({"find", "OrderListComponent"});
+  EXPECT_NE(
+      std::string::npos,
+      run.err.find("TypeScript skipped: tsconfig.json not found: " + (fixture.root() + "/tsconfig.json").toStdString() + "\n"))
+      << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("refreshed ")) << run.err;
+  // The TypeScript part is gone, the Java part stays.
+  EXPECT_EQ(1, run.exitCode) << run.out << run.err;
+  EXPECT_EQ(0, fixture.st({"find", "com.acme.shop.OrderService"}).exitCode);
+
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t0\n")) << run.out << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("\ntypescript\tbroken: TypeScript skipped: tsconfig.json not found: ")) << run.out;
+  run = fixture.st({"find", "OrderListComponent"});
+  EXPECT_EQ(std::string::npos, run.err.find("refreshed")) << run.err;
+}
+
 // With no TypeScript in a project, callees, supers and deps print what they printed before st knew TypeScript.
 TEST(StIndex, javaOnlyOutputUnchanged) {
   ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "st index needs a JDK 21 JAVA_HOME";

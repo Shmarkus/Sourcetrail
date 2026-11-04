@@ -89,6 +89,14 @@ const std::wstring& IndexerCommandCustom::getLabel() const {
   return m_skippedLabel;
 }
 
+void IndexerCommandCustom::setNotRun(const std::wstring& reason) {
+  m_notRunReason = reason;
+}
+
+const std::wstring& IndexerCommandCustom::getNotRunReason() const {
+  return m_notRunReason;
+}
+
 void IndexerCommandCustom::setFinishedHandler(FinishedHandler handler) {
   m_finishedHandler = std::move(handler);
 }

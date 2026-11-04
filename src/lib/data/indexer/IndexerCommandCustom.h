@@ -48,6 +48,10 @@ public:
   bool isSkippedOn(int exitCode, bool started) const;
   const std::wstring& getLabel() const;
 
+  // A command that does not apply as it stands (its input is gone): never run, reported as "<label> skipped: <reason>".
+  void setNotRun(const std::wstring& reason);
+  const std::wstring& getNotRunReason() const;
+
   enum class Result { Succeeded, Skipped, Failed };
   // Called once the command ran, with its result, the status message shown for it (empty if it succeeded) and the
   // storage it wrote to.
@@ -70,6 +74,7 @@ private:
   bool m_runInParallel;
   std::wstring m_skippedLabel;
   std::set<int> m_skippedExitCodes;
+  std::wstring m_notRunReason;
   FinishedHandler m_finishedHandler;
 };
 

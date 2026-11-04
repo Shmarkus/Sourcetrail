@@ -816,7 +816,8 @@ void Project::addIndexingTasks(const std::shared_ptr<TaskGroupSequence>& taskSeq
 
 bool Project::checkIfNothingToRefresh(const RefreshInfo& info, std::shared_ptr<DialogView> dialogView) {
   std::wstring message;
-  if(info.mode != RefreshMode::AllFiles && info.filesToClear.empty() && info.filesToIndex.empty()) {
+  if(info.mode != RefreshMode::AllFiles && info.filesToClear.empty() && info.filesToIndex.empty() &&
+     info.wholeGroupsWithoutSources.empty()) {
     message = L"Nothing to refresh, all files are up-to-date.";
   } else if(m_sourceGroups.empty()) {
     message = L"Nothing to refresh, no Source Groups loaded.";

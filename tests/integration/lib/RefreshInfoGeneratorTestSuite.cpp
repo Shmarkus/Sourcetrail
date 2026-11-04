@@ -998,6 +998,39 @@ TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReimportsAWholeGroupWhoseIn
   cleanup();
 }
 
+// A group whose inputs changed and whose source file is gone (a deleted tsconfig) is cleared and named, so its command
+// reports the missing file instead of the group being re-run on every refresh.
+TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesNamesAChangedWholeGroupWhoseSourceIsGone) {
+  cleanup();
+  {
+    const FilePath configFilePath = m_sourceFolder.getConcatenated(L"tsconfig.json");
+    const FilePath moduleFilePath = m_sourceFolder.getConcatenated(L"module.ts");
+
+    std::vector<std::shared_ptr<SourceGroup>> sourceGroups;
+    sourceGroups.push_back(
+        std::make_shared<WholeSourceGroupTest>(configFilePath, std::set<FilePath>{moduleFilePath}, "new inputs"));
+
+    std::shared_ptr<PersistentStorage> storage = std::make_shared<PersistentStorage>(m_indexDbPath, m_bookmarkDbPath);
+    storage->setup();
+    addVeryNewFileToStorage(moduleFilePath, true, true, storage);
+    addFileToFileSystem(moduleFilePath);
+    storage->setSourceGroupInputs("TEST_ID", "old inputs");
+    storage->buildCaches();
+
+    RefreshInfo refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+    EXPECT_EQ(std::set<FilePath>({moduleFilePath}), refreshInfo.filesToClear);
+    EXPECT_TRUE(refreshInfo.filesToIndex.empty());
+    EXPECT_EQ(std::set<std::string>({"TEST_ID"}), refreshInfo.wholeGroupsWithoutSources);
+
+    // Once its record is the current one, the group is left alone.
+    storage->setSourceGroupInputs("TEST_ID", "new inputs");
+    refreshInfo = RefreshInfoGenerator::getRefreshInfoForUpdatedFiles(sourceGroups, storage);
+    EXPECT_TRUE(refreshInfo.wholeGroupsWithoutSources.empty());
+    EXPECT_TRUE(refreshInfo.filesToClear.empty());
+  }
+  cleanup();
+}
+
 // An edit to one of the group's files re-imports all of them at once, with no second pass over the files that
 // reference it.
 TEST(RefreshInfoGenerator, refreshInfoForUpdatedFilesReimportsAWholeGroupWithAnEditedFile) {

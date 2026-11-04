@@ -35,7 +35,12 @@ bool SourceGroupTypeScript::isIndexedAsWhole() const {
 // Each trigger file below the TypeScript project with its size and modification time, hashed: any edit, new or
 // deleted file changes it.
 std::string SourceGroupTypeScript::getInputsRecord() const {
-  const fs::path root = directory(getTypeScriptProjectPath());
+  return getInputsRecord(getTypeScriptProjectPath(), [](const FilePath&) {});
+}
+
+std::string SourceGroupTypeScript::getInputsRecord(const FilePath& projectPath,
+                                                   const std::function<void(const FilePath& triggerFile)>& visit) {
+  const fs::path root = directory(projectPath);
   std::vector<std::string> entries;
   std::error_code ec;
   for(fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
@@ -45,6 +50,7 @@ std::string SourceGroupTypeScript::getInputsRecord() const {
         it.disable_recursion_pending();
       }
     } else if(it->is_regular_file(ec) && SourceGroupSettingsTypeScript::isTriggerFile(FilePath(it->path().wstring()))) {
+      visit(FilePath(it->path().wstring()));
       const auto size = it->file_size(ec);
       const auto written = it->last_write_time(ec).time_since_epoch().count();
       entries.push_back(std::format("{}\t{}\t{}\n", it->path().lexically_relative(root).generic_string(), size, written));
@@ -85,7 +91,8 @@ std::set<FilePath> SourceGroupTypeScript::getAllSourceFilePaths() const {
 
 std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCommands(const RefreshInfo& info) const {
   const FilePath tsconfig = m_settings->getTsconfigPathExpandedAndAbsolute();
-  if(!info.filesToIndex.contains(tsconfig)) {
+  const bool missing = info.wholeGroupsWithoutSources.contains(getId());
+  if(!info.filesToIndex.contains(tsconfig) && !missing) {
     return {};
   }
 
@@ -109,9 +116,19 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCo
       tsconfig,
       false);
   command->setSkippedOn(L"TypeScript", {NodeModulesMissingExitCode, UnsupportedLayoutExitCode});
+  const auto inputs = info.wholeGroupInputs.find(getId());
+  if(missing) {
+    // Recorded like a failed run: reported on every refresh, re-run once the inputs change (the tsconfig is back).
+    command->setNotRun(tsconfig.fileName() + L" not found: " + tsconfig.wstr());
+    command->setFinishedHandler([id = getId(), inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord()](
+                                    IndexerCommandCustom::Result, const std::wstring& status, PersistentStorage& storage) {
+      storage.setSourceGroupInputs(id, inputs);
+      storage.setSourceGroupFailure(id, utility::encodeToUtf8(status));
+    });
+    return {command};
+  }
   // Taken before the run, so that an edit during it is seen by the next refresh. A skipped run (a missing
   // prerequisite) is retried on every refresh, a failed one only once its inputs changed.
-  const auto inputs = info.wholeGroupInputs.find(getId());
   command->setFinishedHandler([id = getId(), inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord()](
                                   IndexerCommandCustom::Result result, const std::wstring& status, PersistentStorage& storage) {
     storage.setSourceGroupInputs(id, result == IndexerCommandCustom::Result::Skipped ? std::string() : inputs);

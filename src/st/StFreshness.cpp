@@ -92,39 +92,21 @@ size_t changesBelow(const FilePath& root, const std::set<std::wstring>& extensio
   return changedFiles;
 }
 
-// The TypeScript group's trigger files changed at or after `indexedAt`, the walk leaving out what the group's own does.
-size_t triggerFileChanges(const FilePath& root, const TimeStamp& indexedAt) {
-  size_t changedFiles = 0;
-  std::error_code ec;
-  for(std::filesystem::recursive_directory_iterator it(root.str(), std::filesystem::directory_options::skip_permission_denied, ec),
-      end;
-      !ec && it != end;
-      it.increment(ec)) {
-    if(it->is_directory(ec)) {
-      if(SourceGroupSettingsTypeScript::isUnwalkedDirectory(it->path().filename().wstring())) {
-        it.disable_recursion_pending();
-      }
-    } else if(SourceGroupSettingsTypeScript::isTriggerFile(FilePath(it->path().wstring())) &&
-              changedSince(FilePath(it->path().wstring()), indexedAt)) {
-      changedFiles++;
-    }
-  }
-  return changedFiles;
-}
-
 // A TypeScript group is re-indexed as a whole when its inputs record changed, as the refresh decides; the changed
-// trigger files are what st reports, at least one for a record that differs (a deleted file).
+// trigger files are what st reports, at least one for a record that differs (a deleted file). Without a stored record
+// (the last run was skipped) only the changed trigger files count. One walk over the project either way.
 size_t typeScriptChanges(const std::shared_ptr<SourceGroupSettingsTypeScript>& group,
                          const TimeStamp& indexedAt,
                          const GroupInputs& inputs) {
-  const SourceGroupTypeScript sourceGroup(group);
+  size_t changedFiles = 0;
+  const std::string record = SourceGroupTypeScript::getInputsRecord(
+      group->getTsconfigPathExpandedAndAbsolute().getParentDirectory(),
+      [&](const FilePath& file) { changedFiles += changedSince(file, indexedAt) ? 1 : 0; });
   const auto stored = inputs.find(group->getId());
-  if(stored != inputs.end() && !stored->second.empty()) {
-    return sourceGroup.getInputsRecord() == stored->second ?
-        0 :
-        std::max<size_t>(1, triggerFileChanges(sourceGroup.getTypeScriptProjectPath(), indexedAt));
+  if(stored == inputs.end() || stored->second.empty()) {
+    return changedFiles;
   }
-  return triggerFileChanges(sourceGroup.getTypeScriptProjectPath(), indexedAt);
+  return record == stored->second ? 0 : std::max<size_t>(1, changedFiles);
 }
 }    // namespace
 

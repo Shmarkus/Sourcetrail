@@ -26,6 +26,9 @@ void PrintTo(LanguageType type, std::ostream* ostream) {
     *ostream << "LANGUAGE_JAVA";
     break;
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+  case LANGUAGE_TYPESCRIPT:
+    *ostream << "LANGUAGE_TYPESCRIPT";
+    break;
   case LANGUAGE_CUSTOM:
     *ostream << "LANGUAGE_CUSTOM";
     break;

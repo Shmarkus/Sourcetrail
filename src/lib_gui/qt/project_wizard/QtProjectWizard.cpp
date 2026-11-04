@@ -17,6 +17,7 @@
 #include "QtProjectWizardContentGroup.h"
 #include "QtProjectWizardContentPathsExclude.h"
 #include "QtProjectWizardContentPathsSource.h"
+#include "QtProjectWizardContentPathTsconfig.h"
 #include "QtProjectWizardContentProjectData.h"
 #include "QtProjectWizardContentRequiredLabel.h"
 #include "QtProjectWizardContentSelect.h"
@@ -25,11 +26,13 @@
 #include "QtProjectWizardContentUnloadable.h"
 #include "ResourcePaths.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsUnloadable.h"
 #include "type/MessageLoadProject.h"
 #include "type/MessageStatus.h"
 #include "utility.h"
 #include "utilityApp.h"
+#include "utilityFile.h"
 #include "utilityPathDetection.h"
 #include "utilityString.h"
 #include "utilityUuid.h"
@@ -56,6 +59,7 @@
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "ProjectSetup.h"
 #  include "QtProjectWizardContentJavaStandard.h"
 #  include "QtProjectWizardContentPathsClassJava.h"
 #  include "QtProjectWizardContentPathSettingsMaven.h"
@@ -242,6 +246,13 @@ void addSourceGroupContents<SourceGroupSettingsCustomCommand>(QtProjectWizardCon
   group->addContent(new QtProjectWizardContentPathsSource(settings, window));
   group->addContent(new QtProjectWizardContentPathsExclude(settings, window));
   group->addContent(new QtProjectWizardContentExtensions(settings, window));
+}
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsTypeScript>(QtProjectWizardContentGroup* group,
+                                                           std::shared_ptr<SourceGroupSettingsTypeScript> settings,
+                                                           QtProjectWizardWindow* window) {
+  group->addContent(new QtProjectWizardContentPathTsconfig(settings, window));
 }
 
 template <>
@@ -547,6 +558,8 @@ void QtProjectWizard::selectedSourceGroupChanged(int index) {
 
   if(auto settings = std::dynamic_pointer_cast<SourceGroupSettingsCustomCommand>(group)) {
     addSourceGroupContents(summary, settings, this);
+  } else if(auto settingsTypeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
+    addSourceGroupContents(summary, settingsTypeScript, this);
   } else if(auto settingsUnloadable = std::dynamic_pointer_cast<SourceGroupSettingsUnloadable>(group)) {
     addSourceGroupContents(summary, settingsUnloadable, this);
   }
@@ -598,13 +611,13 @@ void QtProjectWizard::removeSelectedSourceGroup() {
   QMessageBox msgBox(this);
   msgBox.setText(QStringLiteral("Remove Source Group"));
   msgBox.setInformativeText(QStringLiteral("Do you really want to remove this source group from the project?"));
-  msgBox.addButton(QStringLiteral("Yes"), QMessageBox::ButtonRole::YesRole);
+  QAbstractButton* yes = msgBox.addButton(QStringLiteral("Yes"), QMessageBox::ButtonRole::YesRole);
   msgBox.addButton(QStringLiteral("No"), QMessageBox::ButtonRole::NoRole);
   msgBox.setIcon(QMessageBox::Icon::Question);
-  int ret = msgBox.exec();
+  msgBox.exec();
 
-  if(ret == 0)    // QMessageBox::Yes
-  {
+  // with custom buttons, exec() returns an opaque value
+  if(msgBox.clickedButton() == yes) {
     int currentRow = m_sourceGroupList->currentRow();
     m_allSourceGroupSettings.erase(m_allSourceGroupSettings.begin() + currentRow);
 
@@ -783,7 +796,17 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
   case SOURCE_GROUP_CUSTOM_COMMAND:
     settings = std::make_shared<SourceGroupSettingsCustomCommand>(sourceGroupId, m_projectSettings.get());
     break;
-  case SOURCE_GROUP_TYPESCRIPT:    // not offered by the wizard's source group selection
+  case SOURCE_GROUP_TYPESCRIPT: {
+    auto typeScriptSettings = std::make_shared<SourceGroupSettingsTypeScript>(sourceGroupId, m_projectSettings.get());
+    typeScriptSettings->setName("TypeScript");
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+    // starts with the tsconfig.json next to the project, if there is one
+    if(const FilePath tsconfig = rootTsconfigFor(m_projectSettings->getProjectDirectoryPath()); !tsconfig.empty()) {
+      typeScriptSettings->setTsconfigPath(utility::getAsRelativeIfShorter(tsconfig, m_projectSettings->getProjectDirectoryPath()));
+    }
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+    settings = typeScriptSettings;
+  } break;
   case SOURCE_GROUP_UNKNOWN:
     break;
   }

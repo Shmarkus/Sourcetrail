@@ -45,7 +45,7 @@ set(test_lib_names
     UserPathsTestSuite)
 
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
-  list(APPEND test_lib_names JavaProjectSetupTestSuite)
+  list(APPEND test_lib_names ProjectSetupTestSuite)
 endif()
 
 foreach(test_name IN LISTS test_lib_names)

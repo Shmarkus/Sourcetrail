@@ -69,7 +69,7 @@
 #include "View.h"
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE
-#  include "JavaProjectSetup.h"
+#  include "ProjectSetup.h"
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
 QtViewToggle::QtViewToggle(View* view, QWidget* parent) : QWidget(parent), m_view(view) {}
@@ -504,7 +504,8 @@ void QtMainWindow::hideStartScreen() {
   m_windowStack.clearWindows();
 }
 
-// With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build.
+// With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build and
+// its TypeScript project.
 void QtMainWindow::newProject() {
 #if BUILD_JAVA_LANGUAGE_PACKAGE
   const QString folder = QtFileDialog::getExistingDirectory(this, tr("Select the Project Folder"), FilePath());
@@ -513,10 +514,10 @@ void QtMainWindow::newProject() {
   }
 
   bool declined = false;
-  const JavaProjectChoice choice = openOrCreateJavaProject(FilePath(folder.toStdWString()), [this, &folder, &declined]() {
+  const ProjectChoice choice = openOrCreateProject(FilePath(folder.toStdWString()), [this, &folder, &declined]() {
     QMessageBox msgBox(this);
     msgBox.setText(tr("No Gradle or Maven build found"));
-    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle or pom.xml at its top level.</p>"
+    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle, pom.xml or tsconfig.json at its top level.</p>"
                                  "<p>You can create a plain Java project and fill in its class path, or cancel.</p>")
                                   .arg(folder.toHtmlEscaped()));
     QAbstractButton* plainJava = msgBox.addButton(tr("Plain Java Project"), QMessageBox::AcceptRole);
@@ -544,11 +545,36 @@ void QtMainWindow::newProject() {
     auto* wizard = createWindow<QtProjectWizard>();
     const FilePath projectFolder(folder.toStdWString());
     wizard->setBeforeSave([projectFolder]() { return prepareProjectFolder(projectFolder); });
-    wizard->editProject(javaProjectSettings(projectFolder, choice.kind));
+    wizard->editProject(projectSettingsFor(projectFolder, choice.build));
     return;
   }
 
-  MessageLoadProject(choice.projectFile).dispatch();
+  bool addedTypeScript = false;
+  if(choice.canAddTypeScript) {
+    QMessageBox msgBox(this);
+    msgBox.setText(tr("Add TypeScript to the project?"));
+    msgBox.setInformativeText(tr("<p>%1 has a tsconfig.json, which its project does not index yet.</p>"
+                                 "<p>Adding it indexes the TypeScript too and links its HTTP calls to the Spring "
+                                 "handlers. You can remove it again in the project settings.</p>")
+                                  .arg(folder.toHtmlEscaped()));
+    QAbstractButton* addTypeScript = msgBox.addButton(tr("Add TypeScript"), QMessageBox::AcceptRole);
+    msgBox.addButton(tr("Open As Is"), QMessageBox::RejectRole);
+    msgBox.exec();
+    if(msgBox.clickedButton() == addTypeScript) {
+      addedTypeScript = addTypeScriptGroup(choice.projectFile, FilePath(folder.toStdWString()));
+      if(addedTypeScript) {
+        MessageStatus(L"Added TypeScript to project: " + choice.projectFile.wstr()).dispatch();
+      } else {
+        QMessageBox::warning(
+            this,
+            tr("Could not add TypeScript"),
+            tr("Sourcetrail was unable to write %1.").arg(QString::fromStdWString(choice.projectFile.wstr()).toHtmlEscaped()));
+      }
+    }
+  }
+
+  // the project may be the one already loaded, which reloads only with its settings changed
+  MessageLoadProject(choice.projectFile, addedTypeScript).dispatch();
   m_windowStack.clearWindows();
 #else
   newCustomProject();

@@ -1,4 +1,4 @@
-#include "JavaProjectSetup.h"
+#include "ProjectSetup.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -11,6 +11,7 @@
 #include "SourceGroupSettingsJavaEmpty.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "utilityUuid.h"
 
 namespace fs = std::filesystem;
@@ -18,6 +19,7 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr auto ProjectFolderName = L".sourcetrail";
+constexpr auto TsconfigName = L"tsconfig.json";
 
 // Newest first, as the source group settings list them; an auto-created project has no one to ask, and the newest
 // level reads the widest range of code.
@@ -56,9 +58,9 @@ FilePath relativeToProject(const fs::path& path, const fs::path& projectDirector
   return FilePath{path.lexically_relative(projectDirectory).wstring()};
 }
 
-std::shared_ptr<SourceGroupSettings> createSourceGroup(const fs::path& folder,
-                                                       JavaBuildKind kind,
-                                                       const ProjectSettings* projectSettings) {
+std::shared_ptr<SourceGroupSettings> createJavaSourceGroup(const fs::path& folder,
+                                                           JavaBuildKind kind,
+                                                           const ProjectSettings* projectSettings) {
   const fs::path projectDirectory = folder / ProjectFolderName;
   const std::string id = utility::getUuidString();
 
@@ -92,6 +94,13 @@ std::shared_ptr<SourceGroupSettings> createSourceGroup(const fs::path& folder,
   return nullptr;
 }
 
+std::shared_ptr<SourceGroupSettings> createTypeScriptSourceGroup(const fs::path& folder, const ProjectSettings* projectSettings) {
+  auto settings = std::make_shared<SourceGroupSettingsTypeScript>(utility::getUuidString(), projectSettings);
+  settings->setName("TypeScript");
+  settings->setTsconfigPath(relativeToProject(folder / TsconfigName, folder / ProjectFolderName));
+  return settings;
+}
+
 }    // namespace
 
 JavaBuildKind detectJavaBuild(const FilePath& folder) {
@@ -103,6 +112,10 @@ JavaBuildKind detectJavaBuild(const FilePath& folder) {
     return JavaBuildKind::Maven;
   }
   return JavaBuildKind::None;
+}
+
+DetectedBuild detectBuild(const FilePath& folder) {
+  return {.java = detectJavaBuild(folder), .typeScript = isFile(folderPath(folder) / TsconfigName)};
 }
 
 FilePath projectFileFor(const FilePath& folder) {
@@ -129,12 +142,25 @@ FilePath existingProjectFile(const FilePath& folder) {
   return FilePath{std::ranges::min(projectFiles).wstring()};
 }
 
-FilePath createJavaProject(const FilePath& folder, JavaBuildKind kind) {
+FilePath rootTsconfigFor(const FilePath& projectDirectory) {
+  const fs::path directory = folderPath(projectDirectory);
+  if(!directory.is_absolute()) {
+    return {};    // no project location yet, which would read the working directory
+  }
+  for(const fs::path& candidate : {directory, directory.parent_path()}) {
+    if(isFile(candidate / TsconfigName) && (candidate == directory || directory.filename() == ProjectFolderName)) {
+      return FilePath{(candidate / TsconfigName).wstring()};
+    }
+  }
+  return {};
+}
+
+FilePath createProject(const FilePath& folder, const DetectedBuild& build) {
   if(!prepareProjectFolder(folder)) {
     return {};
   }
 
-  const auto settings = javaProjectSettings(folder, kind);
+  const auto settings = projectSettingsFor(folder, build);
   if(!settings->save(settings->getFilePath())) {
     LOG_ERROR("Cannot write {}", settings->getFilePath().str());
     return {};
@@ -142,13 +168,38 @@ FilePath createJavaProject(const FilePath& folder, JavaBuildKind kind) {
   return settings->getFilePath();
 }
 
-std::shared_ptr<ProjectSettings> javaProjectSettings(const FilePath& folder, JavaBuildKind kind) {
+std::shared_ptr<ProjectSettings> projectSettingsFor(const FilePath& folder, const DetectedBuild& build) {
   const fs::path path = folderPath(folder);
   auto settings = std::make_shared<ProjectSettings>();
   settings->setProjectFilePath(path.filename().wstring(), FilePath{(path / ProjectFolderName).wstring()});
   settings->setVersion(ProjectSettings::VERSION);
-  settings->setAllSourceGroupSettings({createSourceGroup(path, kind, settings.get())});
+
+  std::vector<std::shared_ptr<SourceGroupSettings>> groups;
+  if(build.java != JavaBuildKind::None || !build.typeScript) {
+    groups.push_back(createJavaSourceGroup(path, build.java, settings.get()));
+  }
+  if(build.typeScript) {
+    groups.push_back(createTypeScriptSourceGroup(path, settings.get()));
+  }
+  settings->setAllSourceGroupSettings(groups);
   return settings;
+}
+
+bool addTypeScriptGroup(const FilePath& projectFile, const FilePath& folder) {
+  ProjectSettings settings;
+  if(!settings.load(projectFile)) {
+    LOG_ERROR("Cannot read {}", projectFile.str());
+    return false;
+  }
+
+  auto groups = settings.getAllSourceGroupSettings();
+  groups.push_back(createTypeScriptSourceGroup(folderPath(folder), &settings));
+  settings.setAllSourceGroupSettings(groups);
+  if(!settings.save(projectFile)) {
+    LOG_ERROR("Cannot write {}", projectFile.str());
+    return false;
+  }
+  return true;
 }
 
 bool prepareProjectFolder(const FilePath& folder) {
@@ -170,20 +221,27 @@ bool prepareProjectFolder(const FilePath& folder) {
   return true;
 }
 
-JavaProjectChoice openOrCreateJavaProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava) {
+ProjectChoice openOrCreateProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava) {
+  const DetectedBuild build = detectBuild(folder);
+
   if(FilePath existing = existingProjectFile(folder); !existing.empty()) {
-    return {.projectFile = existing, .kind = detectJavaBuild(folder)};
+    bool hasTypeScript = false;
+    ProjectSettings settings;
+    if(settings.load(existing)) {
+      hasTypeScript = std::ranges::any_of(
+          settings.getAllSourceGroupSettings(), [](const auto& group) { return group->getType() == SOURCE_GROUP_TYPESCRIPT; });
+    }
+    return {.projectFile = existing, .canAddTypeScript = build.typeScript && !hasTypeScript, .build = build};
   }
 
-  const JavaBuildKind kind = detectJavaBuild(folder);
-  if(kind == JavaBuildKind::None) {
+  if(build.java == JavaBuildKind::None && !build.typeScript) {
     if(!acceptPlainJava()) {
       return {};
     }
-    return {.projectFile = projectFileFor(folder), .needsSetup = true, .kind = kind};
+    return {.projectFile = projectFileFor(folder), .needsSetup = true, .build = build};
   }
 
-  FilePath projectFile = createJavaProject(folder, kind);
+  FilePath projectFile = createProject(folder, build);
   const bool created = !projectFile.empty();
-  return {.projectFile = std::move(projectFile), .created = created, .kind = kind};
+  return {.projectFile = std::move(projectFile), .created = created, .build = build};
 }

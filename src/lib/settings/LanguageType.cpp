@@ -12,6 +12,8 @@ std::string languageTypeToString(LanguageType type) {
   case LANGUAGE_JAVA:
     return "Java";
 #endif
+  case LANGUAGE_TYPESCRIPT:
+    return "TypeScript";
   case LANGUAGE_CUSTOM:
     return "Custom";
   case LANGUAGE_UNKNOWN:
@@ -34,6 +36,9 @@ LanguageType stringToLanguageType(const std::string& typeString) {
     return LANGUAGE_JAVA;
   }
 #endif
+  if(typeString == languageTypeToString(LANGUAGE_TYPESCRIPT)) {
+    return LANGUAGE_TYPESCRIPT;
+  }
   if(typeString == languageTypeToString(LANGUAGE_CUSTOM)) {
     return LANGUAGE_CUSTOM;
   }
@@ -59,6 +64,7 @@ LanguageType getLanguageTypeForSourceGroupType(SourceGroupType type) {
     return LANGUAGE_JAVA;
 #endif
   case SOURCE_GROUP_TYPESCRIPT:
+    return LANGUAGE_TYPESCRIPT;
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return LANGUAGE_CUSTOM;
   default:

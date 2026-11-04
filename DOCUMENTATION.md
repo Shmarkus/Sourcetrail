@@ -22,7 +22,7 @@ Note: this fork supports Java and TypeScript. C/C++ and Python are work in progr
 
 ### Java
 
-Sourcetrail indexes Java up to Java 21, powered by [Eclipse JDT](https://github.com/eclipse/eclipse.jdt.core). Indexing needs JDK 21 or newer. Java records are [not indexed yet](#st-known-limits). If you encounter any issues while using Sourcetrail on a Java project, please provide a minimal example in the [issue tracker](https://github.com/Shmarkus/Sourcetrail/issues).
+Sourcetrail indexes Java up to Java 25, powered by [Eclipse JDT](https://github.com/eclipse/eclipse.jdt.core). Preview features are not enabled. Indexing needs JDK 21 or newer, also for Java 22–25 code. Java records are [not indexed yet](#st-known-limits). If you encounter any issues while using Sourcetrail on a Java project, please provide a minimal example in the [issue tracker](https://github.com/Shmarkus/Sourcetrail/issues).
 
 ### TypeScript
 

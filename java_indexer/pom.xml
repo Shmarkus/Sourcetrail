@@ -65,91 +65,103 @@
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.commands</artifactId>
-			<version>3.11.200</version>
+			<version>3.13.0</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.contenttype</artifactId>
-			<version>3.9.200</version>
+			<version>3.9.900</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.expressions</artifactId>
-			<version>3.9.200</version>
+			<version>3.9.700</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 				<artifactId>org.eclipse.core.filesystem</artifactId>
-			<version>1.10.200</version>
+			<version>1.11.500</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.jobs</artifactId>
-			<version>3.15.100</version>
+			<version>3.15.900</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.resources</artifactId>
-			<version>3.20.0</version>
+			<version>3.24.100</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.core.runtime</artifactId>
-			<version>3.30.0</version>
+			<version>3.35.0</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.app</artifactId>
-			<version>1.6.400</version>
+			<version>1.7.600</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.common</artifactId>
-			<version>3.18.200</version>
+			<version>3.21.0</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.preferences</artifactId>
-			<version>3.10.400</version>
+			<version>3.12.100</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.equinox.registry</artifactId>
-			<version>3.11.400</version>
+			<version>3.12.600</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jdt</groupId>
 			<artifactId>org.eclipse.jdt.core</artifactId>
-			<version>3.36.0</version>
+			<version>3.47.0</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jdt</groupId>
 			<artifactId>ecj</artifactId>
-			<version>3.36.0</version>
+			<version>3.46.100</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.osgi</artifactId>
-			<version>3.18.600</version>
+			<version>3.24.300</version>
 			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.platform</groupId>
 			<artifactId>org.eclipse.text</artifactId>
-			<version>3.13.100</version>
+			<version>3.14.800</version>
+			<scope>compile</scope>
+		</dependency>
+		<dependency>
+			<groupId>net.java.dev.jna</groupId>
+			<artifactId>jna</artifactId>
+			<version>5.19.1</version>
+			<scope>compile</scope>
+		</dependency>
+		<dependency>
+			<groupId>net.java.dev.jna</groupId>
+			<artifactId>jna-platform</artifactId>
+			<version>5.19.1</version>
 			<scope>compile</scope>
 		</dependency>
 

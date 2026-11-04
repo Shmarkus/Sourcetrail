@@ -6,6 +6,7 @@
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithSourcePaths.h"
 #if BUILD_JAVA_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsJavaGradle.h"
 #  include "SourceGroupSettingsJavaMaven.h"
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
@@ -141,5 +142,23 @@ TEST(ProjectSettings, migratesJavaStandardKey) {
   const auto maven = std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(settings.getAllSourceGroupSettings().front());
   ASSERT_TRUE(maven);
   EXPECT_EQ(L"8", maven->getJavaStandard());
+}
+
+TEST(ProjectSettings, keepsJava25Standard) {
+  ProjectSettings settings;
+  ASSERT_TRUE(
+      settings.loadFromString("<config><version>8</version><source_groups><source_group_a>"
+                              "<type>Java Source Group from Gradle</type><java_standard>25</java_standard>"
+                              "</source_group_a></source_groups></config>"));
+
+  settings.migrate();
+
+  const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(settings.getAllSourceGroupSettings().front());
+  ASSERT_TRUE(gradle);
+  EXPECT_EQ(L"25", gradle->getJavaStandard());
+  const std::vector<std::wstring> standards = gradle->getAvailableJavaStandards();
+  ASSERT_GE(standards.size(), 5U);
+  EXPECT_EQ((std::vector<std::wstring>{L"25", L"24", L"23", L"22", L"21"}),
+            std::vector<std::wstring>(standards.begin(), standards.begin() + 5));
 }
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE

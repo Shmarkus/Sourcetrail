@@ -226,8 +226,16 @@ public class JavaIndexer
 			return JavaCore.VERSION_19;
 		case "20":
 			return JavaCore.VERSION_20;
-		default:
+		case "21":
 			return JavaCore.VERSION_21;
+		case "22":
+			return JavaCore.VERSION_22;
+		case "23":
+			return JavaCore.VERSION_23;
+		case "24":
+			return JavaCore.VERSION_24;
+		default:
+			return JavaCore.VERSION_25;
 		}
 	}
 

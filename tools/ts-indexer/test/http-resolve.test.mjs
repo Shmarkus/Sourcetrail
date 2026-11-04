@@ -19,6 +19,17 @@ describe('URL resolution', () => {
       class S { http: any; list() { return this.http.get(\`\${base}/items\`); } }`), [resolved('api/orders/items')]);
   });
 
+  test('getEndpointForWithOneArgumentResolves', () => {
+    // with a second argument (a microservice) the helper returns services/<ms>/<api>, so it is not resolved
+    assert.deepEqual(urlsOf(`
+      class S {
+        http: any;
+        config: any;
+        local() { return this.http.get(this.config.getEndpointFor('api/orders')); }
+        remote() { return this.http.get(this.config.getEndpointFor('api/orders', 'billing')); }
+      }`), [resolved('api/orders'), unresolved("this.config.getEndpointFor('api/orders', 'billing')")]);
+  });
+
   test('parameterShadowsConst', () => {
     assert.deepEqual(urlsOf(`
       const base = 'api/orders';

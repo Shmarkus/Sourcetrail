@@ -1,6 +1,7 @@
 // Finds Angular HttpClient calls (`<expr>.get/post/put/patch/delete(url, ...)`) and resolves their URL argument with
 // a little constant propagation: string literals, template strings, `+` concatenation, `this.<field>` set once,
-// `const`s in scope, single-return helper methods of the same class, and `getEndpointFor(x)`, which returns x.
+// `const`s in scope, single-return helper methods of the same class, and `getEndpointFor(x)`, which returns x
+// (with a second argument, a microservice, it returns services/<ms>/x, so that form is left unresolved).
 // Whatever cannot be resolved for certain stays unresolved: a URL is never guessed.
 
 export const HTTP_VERBS = ['get', 'post', 'put', 'patch', 'delete'];
@@ -85,7 +86,7 @@ function resolve(ts, e, env, depth) {
   if (ts.isCallExpression(e)) {
     const callee = unwrap(ts, e.expression);
     const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
-    if (name === 'getEndpointFor' && e.arguments.length > 0) return resolve(ts, e.arguments[0], env, depth + 1);
+    if (name === 'getEndpointFor' && e.arguments.length === 1) return resolve(ts, e.arguments[0], env, depth + 1);
     if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
       const helper = classOf(ts, e)?.members.find(m => ts.isMethodDeclaration(m) && m.name?.getText() === name);
       const body = helper?.body?.statements;

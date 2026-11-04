@@ -228,8 +228,9 @@ its endpoint, called from the frontend or not.
 - `--boundaries` (`callees`, `impact`): only the repository and Feign client methods reached, under `repositories:` and
   `feign clients:` title lines, each keyed `Type.method`. A repository is a type that is or extends a Spring Data
   repository (`JpaRepository`, `CrudRepository`, ...) or carries `@Repository`; a Feign client carries `@FeignClient`.
-  A method the repository inherits from Spring Data is named after the repository the caller holds:
-  `OrderRepository.findAll (JpaRepository)`. Library methods count here even though `callees` hides them otherwise.
+  A method the repository inherits from Spring Data is named after the repository it is called on, when the call is
+  made on a field of that type (`orderRepository.findAll()`): `OrderRepository.findAll (JpaRepository)`; any other
+  receiver (a local, a chain) gives the declaring type, `JpaRepository.findAll`. Library methods count here even though `callees` hides them otherwise.
 - `--side frontend|backend` (`callers`, `callees`, `impact`): only TypeScript symbols, or only the others; endpoints are
   on neither side. With `--side frontend`, symbols of `*.spec.ts` files are left out unless `--tests` is given.
 - `--library` (`callees`, `supers`, `deps`): include library symbols, the ones without a definition in the index

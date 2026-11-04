@@ -6,8 +6,8 @@
 > [OpenSourceSourceTrail](https://github.com/OpenSourceSourceTrail/Sourcetrail) continuation of the project.
 
 > [!IMPORTANT]
-> The fork adds Java 25 support for Gradle and Maven projects, TypeScript indexing, and `st`, a command-line tool that
-> gives agents fast, reliable lookups of classes and call chains.
+> The fork adds Java 25 support for Gradle and Maven projects, TypeScript and Python indexing, and `st`, a command-line
+> tool that gives agents fast, reliable lookups of classes and call chains.
 
 Sourcetrail is a free, offline source explorer that helps you get productive on unfamiliar code. It indexes a project
 and lets you browse its symbols and their relationships in a graph next to the code.
@@ -23,7 +23,9 @@ and lets you browse its symbols and their relationships in a graph next to the c
   [not indexed yet](DOCUMENTATION.md#st-known-limits).
 - **TypeScript:** projects with a `tsconfig.json`. In an Angular + Spring app in one folder, frontend HTTP calls are
   linked to their Spring handlers.
-- **Work in progress:** C/C++ and Python indexing are not in the current builds.
+- **Python:** projects with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt`, tests included.
+  Library calls resolve through the project's virtualenv.
+- **Work in progress:** C/C++ indexing is not in the current builds.
 
 ## Getting started
 
@@ -32,11 +34,11 @@ and lets you browse its symbols and their relationships in a graph next to the c
 2. Run `sudo Sourcetrail/install.sh` to install to `/opt/sourcetrail` and add `sourcetrail` and `st` to your `PATH`. To
    try it without installing, run `Sourcetrail/Sourcetrail.sh`.
 3. In Sourcetrail, choose **New Project** and pick your project's source folder. There is no setup wizard: Sourcetrail
-   detects Gradle, Maven and TypeScript from the folder. Start indexing, and `st` then works from anywhere in that
-   folder.
+   detects Gradle, Maven, TypeScript and Python from the folder. Start indexing, and `st` then works from anywhere in
+   that folder.
 
 Java indexing needs JDK 21 or newer, set in the preferences. TypeScript needs Node.js 22.13 or newer and the project's
-`node_modules`.
+`node_modules`. Python needs Node.js 22.13 or newer, and for library calls a `.venv` with the project's dependencies.
 
 To give an agent `st`, add [this snippet](docs/agents/st-claude-md-snippet.md) to your project's `CLAUDE.md`.
 
@@ -85,6 +87,7 @@ For every command, option and known limit, see the [`st` reference](DOCUMENTATIO
 - [User documentation](DOCUMENTATION.md)
 - [Java projects](DOCUMENTATION.md#new-java-projects)
 - [TypeScript and the frontend–backend link](DOCUMENTATION.md#typescript-and-the-frontendbackend-link)
+- [Python projects](DOCUMENTATION.md#python-projects)
 - [`st` reference](DOCUMENTATION.md#st-reference)
 - [Building from source and running the tests](DOCUMENTATION.md#how-to-build)
 - [Changelog](CHANGELOG.md)

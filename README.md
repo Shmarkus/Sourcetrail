@@ -133,7 +133,9 @@ one project; with a `tsconfig.json` and no Java build it creates a TypeScript-on
 backend in the index). On a folder whose existing project has no TypeScript yet, New Project offers to add it. New
 Custom Project and Edit Project have a "TypeScript" source group type whose one setting is the `tsconfig.json`. To turn
 TypeScript off, untick the group's "active" status in the project settings rather than removing the group: a removed
-group is offered again the next time New Project sees the `tsconfig.json`.
+group is offered again the next time New Project sees the `tsconfig.json`. A project has one TypeScript source group:
+the project settings refuse a second enabled one, and a refresh of a project file that has several indexes the first and
+reports `TypeScript: only one TypeScript source group per project is supported; skipping <name>` for the others.
 
 One TypeScript project per folder: the root `tsconfig.json` with its `references`. Names start at the webapp root
 taken from the tsconfig's `baseUrl` or `rootDir` (`app.orders.order.service.OrderService.list`, no `src.main.webapp.`
@@ -144,8 +146,9 @@ several independent apps (Nx, several root tsconfigs) are reported as unsupporte
 annotation, called by the handler's frontend callers and calling the handler. A frontend call is linked when its verb and
 URL match exactly one handler. The URL may be built from string literals, template strings and `+`, with one level of
 constants: a `this.<field>` set once (`resourceUrl`), a `const` in scope, a single-return helper method of the same
-class, or `getEndpointFor('api/...')`. A refresh that re-indexed TypeScript or a Java file with Spring mappings prints
-`link: N linked, A ambiguous, U unresolved`.
+class, or `getEndpointFor('api/...')` with that one argument (a second, microservice argument leaves it unresolved). A
+refresh that re-indexed TypeScript or a Java file with Spring mappings prints `link: N linked, A ambiguous, U
+unresolved`, or `Endpoint linking skipped: TypeScript was not indexed` when the TypeScript group was skipped or failed.
 
 What is not linked:
 - A URL the analysis cannot resolve, or one matching no handler or several (ambiguous): no link, never a guess; the call
@@ -294,7 +297,8 @@ its endpoint, called from the frontend or not.
   (`java.lang.String.length()`, `JpaRepository` from a jar). Without it the output is as it always was.
 - Freshness covers the TypeScript group: a changed, new or deleted `.ts`/`.tsx` file, `tsconfig*.json`, `package.json`
   or lockfile makes the index stale, and the next query refreshes it as usual.
-- A refresh passes on the indexer's `TypeScript skipped: ...`, `TypeScript failed (exit code N): ...` and
+- A refresh passes on the indexer's `TypeScript skipped: ...`, `TypeScript failed (exit code N): ...`,
+  `TypeScript: only one TypeScript source group ...`, `Endpoint linking skipped: ...` and
   `link: N linked, A ambiguous, U unresolved` lines on stderr. In a project with an active TypeScript group, `st status`
   ends with a `typescript` row: `indexed`, `broken: <status>` (its last run failed, or its tsconfig is gone), or
   `not indexed; st index shows why` (skipped, for example without Node or `node_modules`). Java-only projects print

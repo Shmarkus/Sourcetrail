@@ -47,7 +47,9 @@ so that group was checked on the fixture only. Tests: `StAcrossTheLink.calleesBo
 - **Wrong links: none found.** An automated cross-check of both sides: each resolved URL's literal path segments
   appear in its TypeScript file (32 on the call itself, 49 through a constant in the same file), and each endpoint's
   path segments appear in the Java file where the endpoint is declared (97 of 97). An ambiguous match is never linked
-  (`ambiguousHandlerLeavesCallUnlinked`).
+  (`ambiguousHandlerLeavesCallUnlinked`). This check is weaker than the fixture's hand-made list: it shows that each
+  link joins a URL and a mapping that share their path, not that each of the 72 links is the one a person would draw,
+  and the 72 links were not checked one by one.
 
 ## 4. Refresh
 
@@ -55,9 +57,12 @@ so that group was checked on the fixture only. Tests: `StAcrossTheLink.calleesBo
 |---|---|---|---|---|---|
 | A Java service method | Fixture | 1 Java file | not run | not run | 3.1 s |
 | A `.ts` file | Fixture | TypeScript group only (9 files) | ran | 3 / 0 / 1 | 2.0 s |
-| A controller's mapping | Private app | 1 Java file | not run | 72 / 0 / 9 | |
+| A controller's mapping | Private app | 1 Java file | not run | 72 / 0 / 9 | 7.1 s |
 | A `.ts` file | Private app | TypeScript group only (327 files), 0 Java files | 3.5 s | 0.3 s | 10.1 s |
 
+- The controller row is `st index` after a mapping path edit, and after undoing it: 7.05–7.07 s over 4 runs, the
+  linking relinking 71 / 0 / 10 with the edit and 72 / 0 / 9 without. As with the `.ts` row, most of it is Maven's
+  preparation (below).
 - The links are correct after every kind of edit: a mapping path edit drops the old link and creates the new one, with
   no stale `HTTP.*` node (`EndpointLinking.mappingPathEditRelinks`); a deleted `.ts` file takes its nodes, calls and links
   with it and leaves the Java untouched (`TypeScriptSourceGroup.deletedTsFileIsCleared`); also
@@ -77,7 +82,7 @@ so that group was checked on the fixture only. Tests: `StAcrossTheLink.calleesBo
 | A wrong HTTP link | None found (section 3). Unresolved and ambiguous calls get no link and are counted. |
 | The Java part of the index changes | `compare-index.sh` on the lombok fixture: identical with the feature on and off. Private app, Java-only against mixed index with `--exclude-endpoints`: `identical (217625 rows)`. Test: `TypeScriptSourceGroup.javaPartIdenticalToJavaOnlyIndex`. |
 | `st` answers noisier without TypeScript | `StIndex.javaOnlyOutputUnchanged`: 8 `callees`/`supers`/`deps` commands on the lombok fixture print byte for byte what the pre-change binary printed; `st status` has no `typescript` row. |
-| Private names in committed files | None: the branch diff against master was searched for the private app's names. |
+| Private names in committed files | None: the branch diff against master and its commit messages were searched for the private app's names. The first search missed two words from the app's domain in a test and a commit message; the final review found them, and they were replaced and removed from the branch history. |
 
 Missing Node or `node_modules`: the Java indexes and one `TypeScript skipped: ...` line says why
 (`missingNodeSkipsTypeScriptOnly`, `missingNodeModulesSkipsTypeScriptOnly`, and the package check below).
@@ -119,7 +124,10 @@ Then the package alone, in a clean `ubuntu:22.04` with only the GUI's system lib
 | `callers com.acme.shop.OrderService.list --depth 0 --side frontend` | the 8 Angular methods | |
 | `callers com.acme.shop.OrderService.list --depth 0` | | `OrderResource.list()`: the Java half answers |
 
-Without Node the linking step also says `Endpoint linking skipped: cannot run "node": ...`.
+Without Node the linking step also said `Endpoint linking skipped: cannot run "node": ...`. Since the final review it
+says `Endpoint linking skipped: TypeScript was not indexed`, as it does whenever the TypeScript group was skipped or
+failed. The Node minimum is 22.13: `node:sqlite` needs a flag before it, and on an older Node the TypeScript group is
+skipped with `Node.js 22.13 or newer is required (found v...)`.
 
 ## CI
 

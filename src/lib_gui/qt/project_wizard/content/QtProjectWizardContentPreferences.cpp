@@ -291,8 +291,6 @@ void QtProjectWizardContentPreferences::populate(QGridLayout* layout, int& row) 
   addJavaSection(layout, row);
   addGap(layout, row);
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
-
-  addTitle(QStringLiteral("C/C++"), layout, row);
 }
 
 void QtProjectWizardContentPreferences::load() {
@@ -481,7 +479,7 @@ void QtProjectWizardContentPreferences::addJavaSection(QGridLayout* layout, int&
   addHelpButton(QStringLiteral("Java Path"),
                 QStringLiteral("<p>Only required for indexing Java projects.</p>"
                                "<p>Provide the location of the jvm library inside the installation of your Java "
-                               "runtime (JDK 17 or later), or use the auto detection below.</p>"),
+                               "runtime (JDK 21 or later), or use the auto detection below.</p>"),
                 layout,
                 row);
   row++;

@@ -884,6 +884,16 @@ The refresh button allows you to refresh the current project and reindex all upd
 
 !["Refresh Button"](docs/documentation/refresh_button.png "Refresh Button")
 
+#### Maven projects
+
+A refresh runs Maven (`generate-sources`, `dependency:copy-dependencies` and `help:effective-pom`) only when the build changed since the last run: a `pom.xml` anywhere in the project (not under `target/`, `node_modules/`, `.git/` or `.sourcetrail/`), a file under `.mvn/`, `~/.m2/settings.xml`, the source group's Maven settings file, the Maven executable or the "index tests" setting. Otherwise it reuses the copied dependencies and the source directories from the last run. A **Full Refresh** (or `st index --full`) always runs Maven.
+
+* Sources generated from inputs other than POMs (an OpenAPI or WSDL file, say) are regenerated only by a full refresh or after touching a `pom.xml`. A generated source directory that is gone (after `mvn clean`) runs Maven again.
+* Changes outside the project folder (a module like `<module>../x</module>`, or a new SNAPSHOT of a dependency or parent POM) need a full refresh.
+* Only a Maven that cannot be run, or a failing `help:effective-pom`, fails the refresh. A failing `generate-sources` or `dependency:copy-dependencies` (for example in a multi-module project whose modules are not installed) is a warning, `Maven: <goal> failed in <module>: <first error>; indexing with partial results`, shown again on every refresh that reuses that run and in `st status`'s `maven` row.
+
+On a private Maven project of 22 modules and 5.5k Java files, a refresh with no changes went from 13.1 s to 5.1 s and one after a one-line Java edit from 39 s to 24 s.
+
 **Interactions:**
 
 * Hover the buttons to see a tooltip.

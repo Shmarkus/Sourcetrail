@@ -19,7 +19,7 @@ private:
   std::vector<FilePath> doGetClassPath() const override;
   std::shared_ptr<SourceGroupSettings> getSourceGroupSettings() override;
   std::shared_ptr<const SourceGroupSettings> getSourceGroupSettings() const override;
-  bool prepareMavenData();
+  bool prepareMavenData(bool fullRefresh);
   std::vector<FilePath> doGetAllSourcePaths() const;
 
   std::shared_ptr<SourceGroupSettingsJavaMaven> m_settings;

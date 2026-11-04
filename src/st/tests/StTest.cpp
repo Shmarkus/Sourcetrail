@@ -58,6 +58,7 @@
 #include "TimeStamp.h"
 #include "utilityGradle.h"
 #include "utilityGradleCache.h"
+#include "utilityMavenCache.h"
 
 using namespace st::test;
 
@@ -519,6 +520,83 @@ TEST(St, freshnessDetectsEditsNewFilesAndDeletions) {
   ASSERT_FALSE(st::checkFreshness(settings, indexedAt, indexed).stale);
   write(repo + "/build.gradle", "plugins { id 'java' }");
   ASSERT_TRUE(st::checkFreshness(settings, indexedAt, indexed).stale);
+}
+
+TEST(St, freshnessOfAMavenGroupWatchesItsBuildFiles) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString repo = base + "/repo";
+  write(repo + "/pom.xml", "<project/>");
+  write(repo + "/module/pom.xml", "<project/>");
+  write(repo + "/module/target/classes/META-INF/maven/pom.xml", "<project/>");
+  write(repo + "/.mvn/maven.config", "-Pdefault");
+  write(repo + "/src/main/java/p/A.java", "class A {}");
+  write(base + "/prj/x.srctrlprj",
+        QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_m1>"
+                "<maven><project_file_path>" +
+                repo +
+                "/pom.xml</project_file_path><should_index_tests>0</should_index_tests></maven>"
+                "<source_extensions><source_extension>.java</source_extension></source_extensions>"
+                "<status>enabled</status><type>Java Source Group from Maven</type>"
+                "</source_group_m1></source_groups><version>8</version></config>\n")
+            .toUtf8());
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+  const auto past = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+  const auto age = [&]() {
+    std::filesystem::last_write_time(repo.toStdString(), past);
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(repo.toStdString())) {
+      std::filesystem::last_write_time(entry.path(), past);
+    }
+  };
+  age();
+  const TimeStamp indexedAt(boost::posix_time::second_clock::local_time() - boost::posix_time::minutes(5));
+  const std::vector<FilePath> indexed = {FilePath((repo + "/src/main/java/p/A.java").toStdWString())};
+
+  ASSERT_FALSE(st::checkFreshness(settings, indexedAt, indexed).stale);
+  write(repo + "/module/pom.xml", "<project><artifactId>m</artifactId></project>");
+  auto freshness = st::checkFreshness(settings, indexedAt, indexed);
+  ASSERT_TRUE(freshness.stale);
+  ASSERT_TRUE(freshness.changedFiles == 1);
+
+  age();
+  write(repo + "/.mvn/maven.config", "-Pother");
+  ASSERT_TRUE(st::checkFreshness(settings, indexedAt, indexed).stale);
+
+  age();
+  write(repo + "/module/target/classes/META-INF/maven/pom.xml", "<project><x/></project>");
+  ASSERT_FALSE(st::checkFreshness(settings, indexedAt, indexed).stale);
+  write(repo + "/src/main/java/p/A.java", "class A { int x; }");
+  ASSERT_TRUE(st::checkFreshness(settings, indexedAt, indexed).stale);
+}
+
+TEST(St, statusShowsTheMavenPreparationOfEachMavenGroup) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  write(base + "/repo/pom.xml", "<project/>");
+  write(base + "/prj/x.srctrlprj",
+        QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups><source_group_m1>"
+                "<maven><project_file_path>" +
+                base +
+                "/repo/pom.xml</project_file_path><should_index_tests>0</should_index_tests></maven>"
+                "<source_extensions><source_extension>.java</source_extension></source_extensions>"
+                "<status>enabled</status><type>Java Source Group from Maven</type>"
+                "</source_group_m1></source_groups><version>8</version></config>\n")
+            .toUtf8());
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+  ASSERT_EQ(std::vector<std::string>{"maven\tnot prepared; st index runs Maven"}, st::mavenStatusRows(settings));
+
+  const FilePath output((base + "/prj/sourcetrail_dependencies/m1/maven").toStdWString());
+  utility::markMavenDependenciesExported(output, "fp", {}, {});
+  ASSERT_EQ(std::vector<std::string>{"maven\tok"}, st::mavenStatusRows(settings));
+
+  utility::markMavenDependenciesExported(
+      output, "fp", {}, {L"Maven: dependency:copy-dependencies failed in app: boom; indexing with partial results"});
+  ASSERT_EQ(std::vector<std::string>{"maven\tMaven: dependency:copy-dependencies failed in app: boom; indexing with partial results"},
+            st::mavenStatusRows(settings));
 }
 
 TEST(St, freshnessCountsAVanishedSourceRootButNotANevercreatedOne) {

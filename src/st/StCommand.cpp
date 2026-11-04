@@ -580,6 +580,9 @@ int status(const st::Io& io,
          << "unresolved_symbols\t" << unresolved << '\n'
          << "stale_files\t" << freshness.changedFiles << '\n'
          << "server\t" << (serverRunning ? "running" : "off") << '\n';
+  for(const std::string& row : st::mavenStatusRows(settings)) {
+    io.out << row << '\n';
+  }
   // A TypeScript group's last run: indexed, broken with the status it left (a failure, a missing tsconfig), or none in
   // the index (skipped, e.g. without node_modules; `st index` shows why).
   for(const auto& group : settings.getAllSourceGroupSettings()) {

@@ -5,6 +5,7 @@ set(java_test_names
     JavaIndexSampleProjectsTestSuite
     JavaLoggingTestSuite
     JavaParserTestSuite
+    MavenCacheTestSuite
     SourceGroupJavaTestSuite
     UtilityGradleTestSuite
     UtilityMavenTestSuite)

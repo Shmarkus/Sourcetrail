@@ -24,7 +24,8 @@ and lets you browse its symbols and their relationships in a graph next to the c
 - **TypeScript:** projects with a `tsconfig.json`. In an Angular + Spring app in one folder, frontend HTTP calls are
   linked to their Spring handlers.
 - **Python:** projects with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt`, tests included.
-  Library calls resolve through the project's virtualenv.
+  Library calls resolve through the project's virtualenv; see [Python projects](DOCUMENTATION.md#python-projects) for
+  limits.
 - **Work in progress:** C/C++ indexing is not in the current builds.
 
 ## Getting started

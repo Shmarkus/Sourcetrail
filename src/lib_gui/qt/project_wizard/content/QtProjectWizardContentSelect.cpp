@@ -95,7 +95,7 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
   m_sourceGroupTypeDescriptions[SOURCE_GROUP_PYTHON] =
       "Create a new Source Group from the folder of a Python project: the .py files below it are indexed, tests "
       "included.<br /><br />Indexing needs Node.js. Library imports resolve against the project's virtualenv "
-      "(.venv or venv) or the interpreter you name.";
+      "(.venv or venv), or the interpreter you name, wherever it is installed.";
   m_sourceGroupTypeDescriptions[SOURCE_GROUP_CUSTOM_COMMAND] =
       "Create a new Source Group executing a custom command on each source file. "
       "This Source Group type can be used on <a "

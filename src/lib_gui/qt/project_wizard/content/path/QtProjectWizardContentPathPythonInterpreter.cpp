@@ -11,7 +11,8 @@ QtProjectWizardContentPathPythonInterpreter::QtProjectWizardContentPathPythonInt
   setTitleString("Python Interpreter");
   setHelpString(
       "Library imports (requests, django, ...) resolve against the packages installed for this interpreter, e.g. "
-      ".venv/bin/python, or a name on the PATH such as python3.12.<br />"
+      ".venv/bin/python, a virtualenv elsewhere (~/.virtualenvs/app/bin/python), a pyenv or asdf shim, or a name on "
+      "the PATH such as python3.12.<br />"
       "<br />"
       "Leave it empty to use the active virtualenv, else a .venv or venv in the Python project folder, else python3. "
       "Without an interpreter the project's own code is still indexed; library symbols stay unresolved.<br />"

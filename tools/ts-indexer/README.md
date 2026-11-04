@@ -14,9 +14,17 @@ Tests: `npm ci && node --test .` (the tests that need a virtualenv skip without 
 ## Python
 
 - Library imports resolve against an interpreter's search paths. The interpreter is `--python`, else the active
-  virtualenv, `.venv` or `venv` in the project, else `python3` on PATH. The tool hands it to scip-python through a
-  `/bin/sh` wrapper, so Python indexing runs on Linux and macOS only. In a src layout the wrapper also puts `src/` on
-  `PYTHONPATH`.
+  virtualenv, `.venv` or `venv` in the project, else `python3` on PATH; it may live anywhere, and shims (pyenv, asdf,
+  mise) work. The tool hands it to scip-python through a `/bin/sh` wrapper that restores the caller's `PATH`, so
+  Python indexing runs on Linux and macOS only. In a src layout (a module or a folder of `.py` files right below
+  `src/`, and no `src/__init__.py`) the wrapper also puts `src/` on `PYTHONPATH`, unless the project path holds a `:`
+  (stdout says so; the tests then do not link to `src/`).
+- scip-python names a library module after the distribution whose files hold it, so the tool lists the interpreter's
+  distributions (`importlib.metadata`: name, version and the `.py`/`.pyi` files of each RECORD, relative to its
+  folder) in the `--environment` file. A src layout's own modules come first, as the project's distribution, so that
+  tests still link to a package Pyright reads from typeshed's bundled stubs (`requests`, `six`). If the interpreter
+  cannot list them, stdout says `scip-indexer: library resolution off: <python> could not list its packages (...)`
+  and the list is empty.
 - Without an interpreter, project code still indexes, and the standard library resolves from scip-python's typeshed.
   Each missing top-level module is one error row (`unresolved import: x`) and one entry in the stdout summary. Missing
   modules are never linked.

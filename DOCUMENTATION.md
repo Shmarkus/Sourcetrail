@@ -34,7 +34,7 @@ Work in progress: C and C++ indexing is not in this fork's current builds.
 
 ### Python
 
-Sourcetrail indexes Python projects, powered by [scip-python](https://github.com/sourcegraph/scip-python). Indexing needs Node.js 22.13 or newer. Calls into libraries resolve when the project has a Python environment with its dependencies installed, ideally a `.venv` or `venv` in the project folder; without one the project's own code still indexes. Test files are indexed like any other code. See [Python projects](#python-projects) for details.
+Sourcetrail indexes Python projects, powered by [scip-python](https://github.com/sourcegraph/scip-python). Indexing needs Node.js 22.13 or newer. Calls into libraries resolve when the project has a Python environment with its dependencies installed: a `.venv` or `venv` in the project folder, the active virtualenv, or any interpreter named in the project settings; without one the project's own code still indexes. Test files are indexed like any other code. See [Python projects](#python-projects) for details.
 
 
 # Getting Started
@@ -1614,9 +1614,12 @@ have a "Python" source group type.
 
 **Prerequisites.** Node.js 22.13 or newer on `PATH` (it runs scip-python). For library calls, a Python environment with
 the project's dependencies installed: the group's interpreter setting, else the active virtualenv (`$VIRTUAL_ENV`), else
-`.venv` or `venv` in the Python project folder, else `python3` on `PATH`. Create one with
-`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (or `pip install -e .`). Without any Python the
-project's own code and the standard library still resolve. Without Node the rest of the project still indexes and the
+`.venv` or `venv` in the Python project folder, else `python3` on `PATH`. The interpreter can live anywhere (a
+virtualenv outside the project, a pyenv, asdf or mise shim, the system `python3` with its distribution's packages).
+Create one with `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (or `pip install -e .`). Sourcetrail
+asks the interpreter for its installed distributions; if it cannot answer, `st index --verbose` shows
+`scip-indexer: library resolution off: <python> could not list its packages (...)`. Without any Python the project's
+own code and the standard library still resolve. Without Node the rest of the project still indexes and the
 Python step reports one line instead, `Python skipped: cannot run "node": ...` or `Python skipped: ... Node.js 22.13 or
 newer is required (found v...)`, and is tried again on the next refresh. A run that fails for another reason reports
 `Python failed (exit code N): ...`; a refresh retries it once its inputs change, `st index --full` right away.
@@ -1629,10 +1632,10 @@ a module's top level as `<module>.toplevel()`. A name re-exported by a package's
 
 **Errors.** A file with a syntax error gets an error row, and the other files index as usual. An imported module the
 environment does not have gets one error, `unresolved import: <module>`, at its first import; its uses are not linked,
-and nothing is invented for them.
+and nothing is invented for them. Some imports of modules that do exist get the same error (see below).
 
 **Refresh.** A change to a `.py` file, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt`, `poetry.lock`,
-`uv.lock` or `Pipfile.lock` re-indexes the Python group as a whole (about 6 s for the 71 files of `click`), never the
+`uv.lock` or `Pipfile.lock` re-indexes the Python group as a whole (about 7 s for the 71 files of `click`), never the
 Java or TypeScript; a Java or TypeScript edit never runs the Python step. `node_modules`, `.sourcetrail`, `build`,
 `dist`, `target`, `out`, `.git`, `.gradle`, `.idea`, `.venv`, `venv`, `__pycache__`, `.tox` and `.mypy_cache` are
 skipped. Installing packages into the environment is no edit: run `st index --full` (or a full refresh) afterwards.
@@ -1642,18 +1645,19 @@ What is not covered:
 - One Python part per project, Linux and macOS only (the package is Linux). A second enabled Python group is skipped
   with `Python: only one Python source group per project is supported; skipping <name>`.
 - No link between web routes (Flask, Django, FastAPI) and a frontend.
-- Libraries outside a `site-packages` folder (a distribution's system `dist-packages`, `PYTHONPATH` folders) are
-  reported as unresolved imports: install the dependencies into a virtualenv. So are libraries that Pyright types from
-  its bundled typeshed stubs instead of their own code (packages without a `py.typed` marker that typeshed covers, such
-  as `six` or `chardet`), even in a virtualenv. A project whose own top-level package has typeshed stubs (`requests`)
-  meets the same in a `src/` layout: its tests resolve to the stubs, and their calls into it are not linked.
+- A distribution installed without a list of its files (Debian's `python3-*` packages) is matched by its name only:
+  its modules resolve, but names a typeshed stub re-exports may not (`six.ensure_str`). A pip-installed one has the list.
+- A `src/` package that typeshed has stubs for (`requests`) is read from the stubs where the tests import it. The tests
+  still link to `src/`, but a name the stub declares where the code only imports it gets a node of its own
+  (`requests.utils.to_native_string()` next to `requests._internal_utils.to_native_string`).
 - Some imports of modules that do exist are reported unresolved too: `from <package> import <submodule>`
   (`from http import cookiejar`), a name imported twice (`import simplejson as json` then `import json`), a name the
   installed version lacks (reported under its module), and imports in Windows-only code.
 - `os.path` shows as `ntpath`. References to builtins and the standard library (`builtins.str`, `list.append`) are kept,
   so `st callees` lists them.
 - After a syntax error, Pyright's recovery can take the rest of that file into the broken definition.
-- With no Python at all, the tests of a `src/` layout are not linked to `src/` (no error is reported).
+- With no Python at all, or with a `:` in the project path, the tests of a `src/` layout are not linked to `src/`
+  (no error is reported; `st index --verbose` says why for the `:`).
 
 ## `st` reference
 

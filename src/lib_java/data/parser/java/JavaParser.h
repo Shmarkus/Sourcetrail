@@ -41,6 +41,7 @@ public:
 
   void buildIndex(std::shared_ptr<IndexerCommandJava> indexerCommand);
   void buildIndex(const FilePath& filePath, std::shared_ptr<TextAccess> textAccess);
+  void buildIndex(const FilePath& filePath, const std::wstring& languageStandard, std::shared_ptr<TextAccess> textAccess);
 
 private:
   void buildIndex(const FilePath& sourceFilePath,

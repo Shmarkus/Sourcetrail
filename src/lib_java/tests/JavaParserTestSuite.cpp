@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <gtest/gtest.h>
 
 #include "IndexerStateInfo.h"
@@ -12,14 +14,43 @@
 #include "utilityJava.h"
 
 namespace {
-std::shared_ptr<TestStorage> parseCode(std::string code) {
+std::shared_ptr<TestStorage> parseCode(std::string code, const std::wstring& languageStandard = L"12") {
   java_test::setupJavaEnvironmentFactory();
 
   std::shared_ptr<IntermediateStorage> storage = std::make_shared<IntermediateStorage>();
   JavaParser parser(std::make_shared<ParserClientImpl>(storage.get()), std::make_shared<IndexerStateInfo>());
-  parser.buildIndex(FilePath(L"input.java"), TextAccess::createFromString(code));
+  parser.buildIndex(FilePath(L"input.java"), languageStandard, TextAccess::createFromString(code));
 
   return TestStorage::create(storage);
+}
+
+// An unnamed lambda parameter, pattern variable and local variable: standard since Java 22, an error before.
+const std::string UnnamedVariablesCode =
+    "interface F { int apply(int a); }\n"
+    "record P(int x, int y) {}\n"
+    "class A {\n"
+    "	int f(Object o) {\n"
+    "		F g = _ -> 1;\n"
+    "		if (o instanceof P(int x, _)) {\n"
+    "			return x;\n"
+    "		}\n"
+    "		int _ = g.apply(0);\n"
+    "		return 0;\n"
+    "	}\n"
+    "}\n";
+
+std::string joined(const std::vector<std::wstring>& lines) {
+  std::string text;
+  for(const std::wstring& line : lines) {
+    text += utility::encodeToUtf8(line) + "\n";
+  }
+  return text;
+}
+
+bool reportsUnderscoreKeyword(const std::vector<std::wstring>& errors) {
+  return std::ranges::any_of(errors, [](const std::wstring& error) {
+    return error.starts_with(L"'_' is a keyword from source level 9 onwards, cannot be used as identifier");
+  });
 }
 }    // namespace
 
@@ -1457,4 +1488,22 @@ TEST(JavaParser, JavaParsersupportsJava14SwitchExpression) {
 
   ASSERT_TRUE(
       utility::containsElement<std::wstring>(client->usages, L"void foo.Foo.foo() -> foo.Foo.FruitType.PEAR <12:9 12:12>"));
+}
+
+TEST(JavaParser, acceptsUnnamedVariablesWithJava25) {
+  std::shared_ptr<TestStorage> client = parseCode(UnnamedVariablesCode, L"25");
+
+  EXPECT_TRUE(client->errors.empty()) << joined(client->errors);
+}
+
+TEST(JavaParser, acceptsUnnamedVariablesWithJava22) {
+  std::shared_ptr<TestStorage> client = parseCode(UnnamedVariablesCode, L"22");
+
+  EXPECT_TRUE(client->errors.empty()) << joined(client->errors);
+}
+
+TEST(JavaParser, rejectsUnnamedVariablesWithJava21) {
+  std::shared_ptr<TestStorage> client = parseCode(UnnamedVariablesCode, L"21");
+
+  EXPECT_TRUE(reportsUnderscoreKeyword(client->errors)) << joined(client->errors);
 }

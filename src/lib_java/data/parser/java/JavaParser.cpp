@@ -88,7 +88,11 @@ void JavaParser::buildIndex(std::shared_ptr<IndexerCommandJava> indexerCommand) 
 }
 
 void JavaParser::buildIndex(const FilePath& filePath, std::shared_ptr<TextAccess> textAccess) {
-  buildIndex(filePath, L"12", "", textAccess);
+  buildIndex(filePath, L"12", textAccess);
+}
+
+void JavaParser::buildIndex(const FilePath& filePath, const std::wstring& languageStandard, std::shared_ptr<TextAccess> textAccess) {
+  buildIndex(filePath, languageStandard, "", textAccess);
 }
 
 void JavaParser::buildIndex(const FilePath& sourceFilePath,

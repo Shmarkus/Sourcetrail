@@ -11,6 +11,7 @@
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
 #include "SourceGroupSettingsTypeScript.h"
+#include "SourceGroupSettingsWithJavaStandard.h"
 
 namespace fs = std::filesystem;
 
@@ -30,8 +31,20 @@ protected:
   }
 
   void touch(const fs::path& relative) const {
+    write(relative, "\n");
+  }
+
+  void write(const fs::path& relative, const std::string& content) const {
     fs::create_directories((mRoot / relative).parent_path());
-    std::ofstream{mRoot / relative} << "\n";
+    std::ofstream{mRoot / relative, std::ios::binary} << content;
+  }
+
+  // The Java standard of the one source group createProject writes for the folder's build.
+  std::wstring createdJavaStandard() {
+    auto java = std::dynamic_pointer_cast<SourceGroupSettingsWithJavaStandard>(
+        onlySourceGroup(createProject(folder(), detectBuild(folder()))));
+    EXPECT_TRUE(java);
+    return java ? java->getJavaStandard() : L"";
   }
 
   [[nodiscard]] FilePath folder() const {
@@ -198,6 +211,110 @@ TEST_F(ProjectSetupTest, createWithoutABuildWritesAPlainJavaSourceGroupOverTheFo
   ASSERT_EQ(1U, plain->getSourcePathsExpandedAndAbsolute().size());
   EXPECT_EQ(folder(), plain->getSourcePathsExpandedAndAbsolute().front());
   EXPECT_TRUE(plain->getClasspath().empty());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromTheGradleToolchain) {
+  write("build.gradle.kts",
+        "java {\n"
+        "    toolchain {\n"
+        "        languageVersion = JavaLanguageVersion.of(25)\n"
+        "    }\n"
+        "}\n");
+
+  EXPECT_EQ(L"25", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromGradleSourceCompatibility) {
+  write("build.gradle", "plugins { id 'java' }\nsourceCompatibility = '1.8'\ntargetCompatibility = '11'\n");
+
+  EXPECT_EQ(L"8", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromGradleJavaVersion) {
+  write("build.gradle.kts", "java {\n    targetCompatibility = JavaVersion.VERSION_17\n}\n");
+
+  EXPECT_EQ(L"17", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromAnOldStyleGradleJavaVersion) {
+  write("build.gradle", "java {\n    sourceCompatibility JavaVersion.VERSION_1_7\n}\n");
+
+  EXPECT_EQ(L"7", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardIgnoresCommentedOutGradleLines) {
+  write("build.gradle",
+        "// sourceCompatibility = '11'\n"
+        "/* java { toolchain { languageVersion = JavaLanguageVersion.of(17) } } */\n"
+        "java { toolchain { languageVersion = JavaLanguageVersion.of(\"22\") } }\n");
+
+  EXPECT_EQ(L"22", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardIsClampedToTheNewestSupportedOne) {
+  write("build.gradle", "java { toolchain { languageVersion = JavaLanguageVersion.of(27) } }\n");
+
+  EXPECT_EQ(L"25", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardDefaultsTo21WithoutAGradleVersion) {
+  write("build.gradle", "plugins { id 'java' }\n");
+
+  EXPECT_EQ(L"21", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardIsNotReadFromSettingsGradle) {
+  write("settings.gradle", "// JavaLanguageVersion.of(17)\nrootProject.name = 'shop'\n");
+
+  EXPECT_EQ(L"21", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromMavenCompilerRelease) {
+  write("pom.xml",
+        "<project><properties>\n"
+        "  <java.version>11</java.version>\n"
+        "  <maven.compiler.release>17</maven.compiler.release>\n"
+        "</properties></project>\n");
+
+  EXPECT_EQ(L"17", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromMavenCompilerSource) {
+  write("pom.xml", "<project><properties><maven.compiler.source>1.8</maven.compiler.source></properties></project>\n");
+
+  EXPECT_EQ(L"8", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardComesFromTheSpringBootJavaVersion) {
+  write("pom.xml", "<project><properties><java.version>24</java.version></properties></project>\n");
+
+  EXPECT_EQ(L"24", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardResolvesAPropertyInTheCompilerPluginRelease) {
+  write("pom.xml",
+        "<project>\n"
+        "  <!-- <maven.compiler.release>11</maven.compiler.release> -->\n"
+        "  <properties><jdk>23</jdk></properties>\n"
+        "  <build><plugins><plugin>\n"
+        "    <artifactId>maven-compiler-plugin</artifactId>\n"
+        "    <configuration><release>${jdk}</release></configuration>\n"
+        "  </plugin></plugins></build>\n"
+        "</project>\n");
+
+  EXPECT_EQ(L"23", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardDefaultsTo21WithAnUnresolvedMavenProperty) {
+  write("pom.xml", "<project><properties><java.version>${jdk}</java.version></properties></project>\n");
+
+  EXPECT_EQ(L"21", createdJavaStandard());
+}
+
+TEST_F(ProjectSetupTest, javaStandardDefaultsTo21WithoutABuild) {
+  touch("src/Main.java");
+
+  EXPECT_EQ(L"21", createdJavaStandard());
 }
 
 TEST_F(ProjectSetupTest, createWritesBothGroups) {

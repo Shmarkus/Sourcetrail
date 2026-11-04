@@ -6,7 +6,7 @@
 > [OpenSourceSourceTrail](https://github.com/OpenSourceSourceTrail/Sourcetrail) continuation of the project.
 
 > [!IMPORTANT]
-> The fork adds Java 21 support for Gradle and Maven projects, TypeScript indexing, and `st`, a command-line tool that
+> The fork adds Java 25 support for Gradle and Maven projects, TypeScript indexing, and `st`, a command-line tool that
 > gives agents fast, reliable lookups of classes and call chains.
 
 Sourcetrail is a free, offline source explorer that helps you get productive on unfamiliar code. It indexes a project

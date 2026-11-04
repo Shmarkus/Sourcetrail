@@ -234,7 +234,7 @@ LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParamete
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.Bound.superBound<0> [TypeParameterDeclaration.java <196:45 196:48>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.Bound.superBound<0> [TypeParameterDeclaration.java <197:37 197:40>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.getBounds<0> [TypeParameterDeclaration.java <166:38 166:47>]
-LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.onType.anonymous class (TypeParameterDeclaration.java<42:47>).getBounds<10> [TypeParameterDeclaration.java <79:53 79:62>]
+LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.onType.anonymous class (TypeParameterDeclaration.java<42:47>).getBounds<3> [TypeParameterDeclaration.java <79:53 79:62>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.onType<0> [TypeParameterDeclaration.java <41:57 41:60>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.onType<0> [TypeParameterDeclaration.java <45:24 45:27>]
 LOCAL_SYMBOL: com.github.javaparser.symbolsolver.model.declarations.TypeParameterDeclaration.onType<0> [TypeParameterDeclaration.java <85:50 85:53>]

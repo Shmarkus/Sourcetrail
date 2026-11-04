@@ -7,7 +7,6 @@
 #include "logging.h"
 #include "ScopedFunctor.h"
 #include "SourceGroupSettingsJavaMaven.h"
-#include "type/MessageStatus.h"
 #include "utility.h"
 #include "utilityJava.h"
 #include "utilityMaven.h"
@@ -20,7 +19,7 @@ bool SourceGroupJavaMaven::prepareIndexing(bool fullRefresh) {
     return false;
   }
 
-  if(!prepareMavenData()) {
+  if(!prepareMavenData(fullRefresh)) {
     return false;
   }
 
@@ -56,30 +55,30 @@ std::shared_ptr<const SourceGroupSettings> SourceGroupJavaMaven::getSourceGroupS
   return m_settings;
 }
 
-bool SourceGroupJavaMaven::prepareMavenData() {
+bool SourceGroupJavaMaven::prepareMavenData(bool fullRefresh) {
   if(m_settings && m_settings->getMavenProjectFilePathExpandedAndAbsolute().exists()) {
     const FilePath mavenPath = ApplicationSettings::getInstance()->getMavenPath();
     const FilePath mavenSettingsPath = m_settings->getMavenSettingsFilePathExpandedAndAbsolute();
     const FilePath projectRootPath = m_settings->getMavenProjectFilePathExpandedAndAbsolute().getParentDirectory();
 
     std::shared_ptr<DialogView> dialogView = Application::getInstance()->getDialogView(DialogView::UseCase::PROJECT_SETUP);
-    dialogView->showUnknownProgressDialog(L"Preparing Project", L"Maven\nGenerating Source Files");
+    bool dialogShown = false;
+    ScopedFunctor dialogHider([&dialogView, &dialogShown]() {
+      if(dialogShown) {
+        dialogView->hideUnknownProgressDialog();
+      }
+    });
 
-    ScopedFunctor dialogHider([&dialogView]() { dialogView->hideUnknownProgressDialog(); });
-
-    const std::wstring errorMessage = utility::mavenGenerateSources(mavenPath, mavenSettingsPath, projectRootPath);
-    if(!errorMessage.empty()) {
-      MessageStatus(errorMessage, true, false).dispatch();
-      Application::getInstance()->handleDialog(errorMessage);
-      return false;
-    }
-
-    dialogView->showUnknownProgressDialog(L"Preparing Project", L"Maven\nExporting Dependencies");
-
-    bool success = utility::mavenCopyDependencies(
-        mavenPath, mavenSettingsPath, projectRootPath, m_settings->getMavenDependenciesDirectoryPath());
-
-    return success;
+    return utility::mavenPrepareProject(mavenPath,
+                                        mavenSettingsPath,
+                                        projectRootPath,
+                                        m_settings->getMavenDependenciesDirectoryPath(),
+                                        m_settings->getShouldIndexMavenTests(),
+                                        fullRefresh,
+                                        [&dialogView, &dialogShown](const std::wstring& step) {
+                                          dialogView->showUnknownProgressDialog(L"Preparing Project", L"Maven\n" + step);
+                                          dialogShown = true;
+                                        });
   }
 
   return true;
@@ -95,11 +94,11 @@ std::vector<FilePath> SourceGroupJavaMaven::doGetAllSourcePaths() const {
     const FilePath mavenSettingsPath = m_settings->getMavenSettingsFilePathExpandedAndAbsolute();
     const FilePath projectRootPath = m_settings->getMavenProjectFilePathExpandedAndAbsolute().getParentDirectory();
 
-    sourcePaths = utility::mavenGetAllDirectoriesFromEffectivePom(mavenPath,
-                                                                  mavenSettingsPath,
-                                                                  projectRootPath,
-                                                                  m_settings->getMavenDependenciesDirectoryPath(),
-                                                                  m_settings->getShouldIndexMavenTests());
+    sourcePaths = utility::mavenGetSourceDirectories(mavenPath,
+                                                     mavenSettingsPath,
+                                                     projectRootPath,
+                                                     m_settings->getMavenDependenciesDirectoryPath(),
+                                                     m_settings->getShouldIndexMavenTests());
 
     dialogView->hideUnknownProgressDialog();
   }

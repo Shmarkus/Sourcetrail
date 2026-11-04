@@ -108,6 +108,21 @@ The project lives in `<folder>/.sourcetrail/<folder name>.srctrlprj`. The index 
 dependency and delombok copies sit next to it. `.sourcetrail/` contains its own `.gitignore` (`*`), so none of it shows up
 in `git status`. `st` finds the project from anywhere in the folder.
 
+**Maven refresh.** A refresh runs Maven (`generate-sources`, `dependency:copy-dependencies` and `help:effective-pom`)
+only when its inputs changed since the last run: the size or modification time of a `pom.xml` anywhere in the project
+(not under `target/`, `node_modules/`, `.git/` or `.sourcetrail/`) or of a file under `.mvn/`, `~/.m2/settings.xml`,
+the source group's Maven settings file, the Maven executable or the "index tests" setting. Otherwise it reuses the
+copied dependencies, as long as every jar recorded after the last copy is still there, and the source directories
+read from the effective POM. A full refresh (`st index --full`, or "All files" in the GUI) always runs Maven. The cache
+(`sourcetrail-maven-*.cache`) sits next to the copied jars in the source group's dependency directory. Because
+`generate-sources` is skipped too, sources generated from inputs other than POMs (an OpenAPI or WSDL file, say) are
+regenerated only by a full refresh or after touching a `pom.xml`. Neither does the cache see changes outside the
+project, such as a new SNAPSHOT of a dependency or of a parent POM in a repository: a full refresh picks them up.
+On a private Maven project of 22 modules and 5.5k Java files (Nov 4, 2026, 3 runs each, medians), a refresh with no
+changes went from 13.1 s to 5.1 s and one after a one-line Java edit from 39 s to 24 s; the rest is loading the index
+(2 s), finding changed files (3 s) and, after an edit, the class path (about 4 s, once per indexing pass), the Java
+indexer and storage.
+
 **Project > New Custom Project...** opens the full project wizard (Custom Command source groups, manual Java source
 groups, or several groups in one project).
 
@@ -162,7 +177,8 @@ What is not linked:
 **Refresh.** A Java-only edit never runs the TypeScript step (the linking step may run, well under a second). A change to
 a `.ts`/`.tsx` file, a `tsconfig*.json`, `package.json` or the lockfile re-indexes the TypeScript group only, never the
 Java. On a private Angular + Spring app of 327 TypeScript files the TypeScript step takes about 3.5 s; on a Maven project
-the whole refresh takes about 10 s, because Maven's preparation runs on every refresh. Measurements:
+the whole refresh took about 10 s, because Maven's preparation ran on every refresh; it now runs only when the build
+changes (see [Maven refresh](#new-java-projects)). Measurements:
 `docs/superpowers/specs/2026-11-03-typescript-indexing-results.md`.
 
 ## `st`: code navigation for agents

@@ -1,6 +1,7 @@
 #include "utilityMaven.h"
 
 #include <cstdlib>
+#include <optional>
 
 #include "Application.h"
 #include "ApplicationSettings.h"
@@ -11,6 +12,7 @@
 #include "utility.h"
 #include "utilityApp.h"
 #include "utilityJava.h"
+#include "utilityMavenCache.h"
 #include "utilityString.h"
 #include "utilityXml.h"
 
@@ -74,6 +76,83 @@ std::vector<std::wstring> getMavenArgs(const FilePath& settingsFilePath) {
   return args;
 }
 
+// Every directory the effective POM names, existing or not; nullopt when Maven failed.
+std::optional<std::vector<FilePath>> getCandidateDirectoriesFromEffectivePom(const FilePath& mavenPath,
+                                                                             const FilePath& settingsFilePath,
+                                                                             const FilePath& projectDirectoryPath,
+                                                                             const FilePath& outputDirectoryPath,
+                                                                             bool addTestDirectories) {
+  utility::setJavaHomeVariableIfNotExists();
+
+  FilePath outputPath = outputDirectoryPath.getConcatenated(FilePath("/effective-pom.xml"));
+
+  auto args = getMavenArgs(settingsFilePath);
+  args.push_back(L"help:effective-pom");
+  args.push_back(L"-Doutput=" + outputPath.wstr());
+
+  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(
+      utility::encodeToUtf8(utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000).output));
+
+  const std::wstring errorMessage = getErrorMessageFromMavenOutput(outputAccess);
+  if(!errorMessage.empty()) {
+    MessageStatus(errorMessage, true, false).dispatch();
+    Application::getInstance()->handleDialog(errorMessage);
+    return std::nullopt;
+  } else if(!outputPath.exists()) {
+    LOG_ERROR("Maven effective-pom didn't generate an output file: {}", outputPath.str());
+    return std::nullopt;
+  }
+
+  std::shared_ptr<TextAccess> xmlAccess = TextAccess::createFromFile(outputPath);
+
+  std::vector<FilePath> uncheckedDirectories;
+  fetchDirectories(
+      uncheckedDirectories, xmlAccess, utility::createVectorFromElements<std::string>("project", "build", "sourceDirectory"));
+  fetchDirectories(uncheckedDirectories,
+                   xmlAccess,
+                   utility::createVectorFromElements<std::string>("projects", "project", "build", "sourceDirectory"));
+  fetchDirectories(uncheckedDirectories,
+                   xmlAccess,
+                   utility::createVectorFromElements<std::string>("project", "build", "directory"),
+                   FilePath(L"generated-sources"));
+  fetchDirectories(uncheckedDirectories,
+                   xmlAccess,
+                   utility::createVectorFromElements<std::string>("projects", "project", "build", "directory"),
+                   FilePath(L"generated-sources"));
+
+  if(addTestDirectories) {
+    fetchDirectories(uncheckedDirectories,
+                     xmlAccess,
+                     utility::createVectorFromElements<std::string>("project", "build", "testSourceDirectory"));
+    fetchDirectories(uncheckedDirectories,
+                     xmlAccess,
+                     utility::createVectorFromElements<std::string>("projects", "project", "build", "testSourceDirectory"));
+    fetchDirectories(uncheckedDirectories,
+                     xmlAccess,
+                     utility::createVectorFromElements<std::string>("project", "build", "directory"),
+                     FilePath(L"generated-test-sources"));
+    fetchDirectories(uncheckedDirectories,
+                     xmlAccess,
+                     utility::createVectorFromElements<std::string>("projects", "project", "build", "directory"),
+                     FilePath(L"generated-test-sources"));
+  }
+
+  return uncheckedDirectories;
+}
+
+std::vector<FilePath> filterExistingDirectories(const std::vector<FilePath>& uncheckedDirectories) {
+  std::vector<FilePath> directories;
+  for(const FilePath& uncheckedDirectory : uncheckedDirectories) {
+    if(uncheckedDirectory.recheckExists()) {
+      directories.push_back(uncheckedDirectory);
+    }
+  }
+
+  LOG_INFO("Found {} of {} directories on system.", directories.size(), uncheckedDirectories.size());
+
+  return directories;
+}
+
 }    // namespace
 
 namespace utility {
@@ -122,70 +201,65 @@ std::vector<FilePath> mavenGetAllDirectoriesFromEffectivePom(const FilePath& mav
                                                              const FilePath& projectDirectoryPath,
                                                              const FilePath& outputDirectoryPath,
                                                              bool addTestDirectories) {
-  utility::setJavaHomeVariableIfNotExists();
+  return filterExistingDirectories(getCandidateDirectoriesFromEffectivePom(
+                                       mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories)
+                                       .value_or(std::vector<FilePath>()));
+}
 
-  FilePath outputPath = outputDirectoryPath.getConcatenated(FilePath("/effective-pom.xml"));
+bool mavenPrepareProject(const FilePath& mavenPath,
+                         const FilePath& settingsFilePath,
+                         const FilePath& projectDirectoryPath,
+                         const FilePath& outputDirectoryPath,
+                         bool addTestDirectories,
+                         bool fullRefresh,
+                         const std::function<void(const std::wstring&)>& onStep) {
+  const std::string fingerprint = mavenBuildFingerprint(mavenPath, settingsFilePath, projectDirectoryPath, addTestDirectories);
+  if(!fullRefresh && mavenDependenciesUpToDate(outputDirectoryPath, fingerprint)) {
+    LOG_INFO("Maven build files unchanged, reusing generated sources and exported dependencies.");
+    return true;
+  }
 
-  auto args = getMavenArgs(settingsFilePath);
-  args.push_back(L"help:effective-pom");
-  args.push_back(L"-Doutput=" + outputPath.wstr());
+  // a run that fails half way must not leave a marker claiming its outputs are current
+  if(fullRefresh) {
+    removeMavenCache(outputDirectoryPath);
+  } else {
+    removeMavenDependenciesExported(outputDirectoryPath);
+  }
 
-  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(
-      utility::encodeToUtf8(utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000).output));
-
-  const std::wstring errorMessage = getErrorMessageFromMavenOutput(outputAccess);
+  onStep(L"Generating Source Files");
+  const std::wstring errorMessage = mavenGenerateSources(mavenPath, settingsFilePath, projectDirectoryPath);
   if(!errorMessage.empty()) {
     MessageStatus(errorMessage, true, false).dispatch();
     Application::getInstance()->handleDialog(errorMessage);
+    return false;
+  }
+
+  onStep(L"Exporting Dependencies");
+  if(!mavenCopyDependencies(mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath)) {
+    return false;
+  }
+
+  markMavenDependenciesExported(outputDirectoryPath, fingerprint);
+  return true;
+}
+
+std::vector<FilePath> mavenGetSourceDirectories(const FilePath& mavenPath,
+                                                const FilePath& settingsFilePath,
+                                                const FilePath& projectDirectoryPath,
+                                                const FilePath& outputDirectoryPath,
+                                                bool addTestDirectories) {
+  const std::string fingerprint = mavenBuildFingerprint(mavenPath, settingsFilePath, projectDirectoryPath, addTestDirectories);
+  if(const std::optional<std::vector<FilePath>> cached = loadMavenSourceDirectories(outputDirectoryPath, fingerprint)) {
+    LOG_INFO("Maven build files unchanged, reusing the source directories of the effective POM.");
+    return filterExistingDirectories(*cached);
+  }
+
+  const std::optional<std::vector<FilePath>> candidates = getCandidateDirectoriesFromEffectivePom(
+      mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories);
+  if(!candidates) {
     return {};
-  } else if(!outputPath.exists()) {
-    LOG_ERROR("Maven effective-pom didn't generate an output file: {}", outputPath.str());
-    return {};
   }
-
-  std::shared_ptr<TextAccess> xmlAccess = TextAccess::createFromFile(outputPath);
-
-  std::vector<FilePath> uncheckedDirectories;
-  fetchDirectories(
-      uncheckedDirectories, xmlAccess, utility::createVectorFromElements<std::string>("project", "build", "sourceDirectory"));
-  fetchDirectories(uncheckedDirectories,
-                   xmlAccess,
-                   utility::createVectorFromElements<std::string>("projects", "project", "build", "sourceDirectory"));
-  fetchDirectories(uncheckedDirectories,
-                   xmlAccess,
-                   utility::createVectorFromElements<std::string>("project", "build", "directory"),
-                   FilePath(L"generated-sources"));
-  fetchDirectories(uncheckedDirectories,
-                   xmlAccess,
-                   utility::createVectorFromElements<std::string>("projects", "project", "build", "directory"),
-                   FilePath(L"generated-sources"));
-
-  if(addTestDirectories) {
-    fetchDirectories(uncheckedDirectories,
-                     xmlAccess,
-                     utility::createVectorFromElements<std::string>("project", "build", "testSourceDirectory"));
-    fetchDirectories(uncheckedDirectories,
-                     xmlAccess,
-                     utility::createVectorFromElements<std::string>("projects", "project", "build", "testSourceDirectory"));
-    fetchDirectories(uncheckedDirectories,
-                     xmlAccess,
-                     utility::createVectorFromElements<std::string>("project", "build", "directory"),
-                     FilePath(L"generated-test-sources"));
-    fetchDirectories(uncheckedDirectories,
-                     xmlAccess,
-                     utility::createVectorFromElements<std::string>("projects", "project", "build", "directory"),
-                     FilePath(L"generated-test-sources"));
-  }
-
-  std::vector<FilePath> directories;
-  for(const FilePath& uncheckedDirectory : uncheckedDirectories) {
-    if(uncheckedDirectory.exists()) {
-      directories.push_back(uncheckedDirectory);
-    }
-  }
-
-  LOG_INFO("Found {} of {} directories on system.", directories.size(), uncheckedDirectories.size());
-
-  return directories;
+  saveMavenSourceDirectories(outputDirectoryPath, fingerprint, *candidates);
+  return filterExistingDirectories(*candidates);
 }
 }    // namespace utility

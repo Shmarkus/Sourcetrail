@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { EDGE, NODE, openIndex, runIndexer, scratchDir } from './helpers.mjs';
+import { isSrcLayout } from '../python.mjs';
 
 const fixture = path.resolve(import.meta.dirname, '..', '..', '..', 'testing', 'cli', 'python');
 const MODELS = 'shop.models';
@@ -43,6 +44,24 @@ const PAYMENTS = `import paylink
 def settle(total: float) -> bool:
     return paylink.charge(total)
 `;
+
+// A virtualenv at `venvDir` without pip, holding a distribution `name` 1.2.0 (a package, or one module file when
+// `module`) whose code is `code`, with its dist-info RECORD. Returns the venv's python.
+function fakeVenv(venvDir, { name = 'paylink', module = false,
+  code = 'def charge(amount: float) -> bool:\n    return True\n' } = {}) {
+  assert.equal(spawnSync(python3, ['-m', 'venv', '--without-pip', venvDir]).status, 0);
+  const python = path.join(venvDir, 'bin', 'python');
+  const site = spawnSync(python, ['-c', 'import sysconfig; print(sysconfig.get_paths()["purelib"])'],
+    { encoding: 'utf8' }).stdout.trim();
+  const file = module ? `${name}.py` : `${name}/__init__.py`;
+  fs.mkdirSync(path.dirname(path.join(site, file)), { recursive: true });
+  fs.writeFileSync(path.join(site, file), code);
+  const info = path.join(site, `${name}-1.2.0.dist-info`);
+  fs.mkdirSync(info);
+  fs.writeFileSync(path.join(info, 'METADATA'), `Metadata-Version: 2.1\nName: ${name}\nVersion: 1.2.0\n`);
+  fs.writeFileSync(path.join(info, 'RECORD'), `${file},,\n${name}-1.2.0.dist-info/METADATA,,\n`);
+  return python;
+}
 
 describe('the Python fixture index', () => {
   let dir, run, index;
@@ -192,19 +211,7 @@ describe('Python projects', () => {
   });
 
   test('aProjectVenvResolvesLibraryCalls', { skip: !python3 && 'python3 not found' }, () => {
-    const venv = project => {
-      const venvDir = path.join(project, '.venv');
-      assert.equal(spawnSync(python3, ['-m', 'venv', '--without-pip', venvDir]).status, 0);
-      const site = spawnSync(path.join(venvDir, 'bin', 'python'), ['-c',
-        'import sysconfig; print(sysconfig.get_paths()["purelib"])'], { encoding: 'utf8' }).stdout.trim();
-      fs.mkdirSync(path.join(site, 'paylink'));
-      fs.writeFileSync(path.join(site, 'paylink', '__init__.py'),
-        'def charge(amount: float) -> bool:\n    return True\n');
-      const info = path.join(site, 'paylink-1.2.0.dist-info');
-      fs.mkdirSync(info);
-      fs.writeFileSync(path.join(info, 'METADATA'), 'Metadata-Version: 2.1\nName: paylink\nVersion: 1.2.0\n');
-      fs.writeFileSync(path.join(info, 'RECORD'), 'paylink/__init__.py,,\npaylink-1.2.0.dist-info/METADATA,,\n');
-    };
+    const venv = project => fakeVenv(path.join(project, '.venv'));
     const { dir, run, index } = indexCopy('pyvenv', { 'shop/payments.py': PAYMENTS }, [], venv);
     try {
       assert.equal(run.code, 0, run.stderr);
@@ -217,6 +224,82 @@ describe('Python projects', () => {
     } finally {
       index?.close();
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // An environment outside the project: its distributions are listed for scip-python, so library calls resolve.
+  const withExternalVenv = (prefix, files, interpreter = python => python, venvOptions = {}) => {
+    const outside = scratchDir(`${prefix}-env`);
+    const python = fakeVenv(path.join(outside, 'env'), venvOptions);
+    const copy = indexCopy(prefix, files, ['--python', interpreter(python, outside)]);
+    return { ...copy, outside };
+  };
+
+  test('anExternalVenvResolvesLibraryCalls', { skip: !python3 && 'python3 not found' }, () => {
+    const { dir, outside, run, index } = withExternalVenv('pyextvenv', { 'shop/payments.py': PAYMENTS });
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, 'scip-indexer: 5 files, 0 errors\n');
+      assert.deepEqual(index.named('paylink.charge').map(n => n.type), [NODE.FUNCTION]);
+      assert.deepEqual(index.edgesBetween('shop.payments.settle', 'paylink.charge').map(e => e.type), [EDGE.CALL]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('aLibraryTypeshedHasStubsForResolves', { skip: !python3 && 'python3 not found' }, () => {
+    // Pyright reads six from its bundled stubs; the environment still names the distribution they belong to
+    const { dir, outside, run, index } = withExternalVenv('pystubbed',
+      { 'shop/text.py': 'import six\n\n\ndef label(value):\n    return six.ensure_str(value)\n' },
+      python => python, { name: 'six', module: true, code: 'def ensure_str(s, encoding="utf-8", errors="strict"):\n'
+        + '    return s\n' });
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, 'scip-indexer: 5 files, 0 errors\n');
+      assert.deepEqual(index.edgesBetween('shop.text.label', 'six.ensure_str').map(e => e.type), [EDGE.CALL]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('aShimInterpreterRuns', { skip: !python3 && 'python3 not found' }, () => {
+    // pyenv, asdf and mise shims find their interpreter through PATH
+    const shim = (python, outside) => {
+      const file = path.join(outside, 'shims', 'python');
+      fs.mkdirSync(path.dirname(file));
+      fs.writeFileSync(file, `#!/usr/bin/env bash\nexec "${python}" "$@"\n`, { mode: 0o755 });
+      return file;
+    };
+    const { dir, outside, run, index } = withExternalVenv('pyshim', { 'shop/payments.py': PAYMENTS }, shim);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, 'scip-indexer: 5 files, 0 errors\n');
+      assert.deepEqual(index.edgesBetween('shop.payments.settle', 'paylink.charge').map(e => e.type), [EDGE.CALL]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('aFailingInterpreterTurnsLibraryResolutionOff', () => {
+    const outside = scratchDir('pybadpy-env');
+    const broken = path.join(outside, 'python');
+    fs.writeFileSync(broken, '#!/bin/sh\necho broken >&2\nexit 1\n', { mode: 0o755 });
+    const { dir, run, index } = indexCopy('pybadpy', { 'shop/payments.py': PAYMENTS }, ['--python', broken]);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, `scip-indexer: library resolution off: ${broken} could not list its packages `
+        + '(exit 1: broken)\nscip-indexer: 1 module unresolved (paylink)\nscip-indexer: 5 files, 1 errors\n');
+      assert.deepEqual(index.named('shop.payments.settle').map(n => n.type), [NODE.FUNCTION]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
     }
   });
 
@@ -278,6 +361,74 @@ describe('Python projects', () => {
       assert.deepEqual(index.edgesBetween('tests.test_core.test_run', 'app.core.run').map(e => e.type), [EDGE.CALL]);
     } finally {
       index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aSrcPackageTypeshedHasStubsForLinksItsTests', { skip: !python3 && 'python3 not found' }, () => {
+    // Pyright reads the tests' `import six` from its bundled stubs, not from src/six
+    const dir = scratchDir('pysrcstubbed');
+    const files = { 'src/six/__init__.py': 'def ensure_str(s, encoding="utf-8", errors="strict"):\n    return s\n',
+      'tests/test_six.py': 'import six\n\n\ndef test_ensure_str():\n    six.ensure_str("x")\n',
+      'pyproject.toml': '[project]\nname = "six"\n' };
+    for (const [file, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+    }
+    const out = path.join(dir, 'py.srctrldb');
+    const run = indexPython(dir, out);
+    const index = run.code === 0 ? openIndex(out) : null;
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, 'scip-indexer: 2 files, 0 errors\n');
+      assert.deepEqual(index.edgesBetween('tests.test_six.test_ensure_str', 'six.ensure_str').map(e => e.type),
+        [EDGE.CALL]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aColonInTheProjectPathKeepsSrcOffTheSearchPath', { skip: !python3 && 'python3 not found' }, () => {
+    // PYTHONPATH cannot hold a folder whose path has the separator
+    const parent = scratchDir('pycolon');
+    const dir = path.join(parent, 'a:b');
+    fs.mkdirSync(dir);
+    for (const [file, text] of Object.entries(SRC_LAYOUT)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+    }
+    const out = path.join(parent, 'py.srctrldb');
+    const run = indexPython(dir, out);
+    const index = run.code === 0 ? openIndex(out) : null;
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(run.stdout, "scip-indexer: src/ is not on the search path: the project path holds ':'\n"
+        + 'scip-indexer: 3 files, 0 errors\n');
+      assert.deepEqual(index.named('app.core.run').map(n => n.type), [NODE.FUNCTION]);
+    } finally {
+      index?.close();
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test('onlyPythonUnderSrcMakesASrcLayout', () => {
+    const dir = scratchDir('pysrckind');
+    const layout = files => {
+      fs.rmSync(path.join(dir, 'src'), { recursive: true, force: true });
+      for (const file of files) {
+        fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+        fs.writeFileSync(path.join(dir, file), '');
+      }
+      return isSrcLayout(dir);
+    };
+    try {
+      assert.equal(layout(['src/main/java/com/acme/App.java', 'src/main/resources/tool.py']), false, 'a Java tree');
+      assert.equal(layout(['src/app/__init__.py']), true, 'a package');
+      assert.equal(layout(['src/app/core.py']), true, 'a namespace package');
+      assert.equal(layout(['src/tool.py']), true, 'a module');
+      assert.equal(layout(['src/__init__.py', 'src/app/__init__.py']), false, 'src is itself a package');
+    } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

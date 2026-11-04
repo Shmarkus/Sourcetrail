@@ -85,9 +85,17 @@ function absoluteModule(relative, current, isPackage) {
 }
 
 // A src layout: the packages live in src/, which is no package itself, and are imported without the `src.`.
-export const isSrcLayout = projectRoot =>
-  !!fs.statSync(path.join(projectRoot, 'src'), { throwIfNoEntry: false })?.isDirectory()
-  && !fs.existsSync(path.join(projectRoot, 'src', '__init__.py'));
+// Only Python right below src/ counts (a module, or a folder holding .py files): a Java tree's src/main/java is none.
+export function isSrcLayout(projectRoot) {
+  const src = path.join(projectRoot, 'src');
+  if (!fs.statSync(src, { throwIfNoEntry: false })?.isDirectory() || fs.existsSync(path.join(src, '__init__.py'))) {
+    return false;
+  }
+  const isPython = entry => entry.isFile() && entry.name.endsWith('.py');
+  return fs.readdirSync(src, { withFileTypes: true }).some(entry => isPython(entry) || (entry.isDirectory()
+    && !SKIPPED_DIRECTORIES.has(entry.name)
+    && fs.readdirSync(path.join(src, entry.name), { withFileTypes: true }).some(isPython)));
+}
 
 // Converts `index` (a scip.Index from scip-python) into `writer` (an IndexWriter).
 //   projectRoot: absolute folder the SCIP paths are relative to

@@ -294,18 +294,65 @@ function findPython(options) {
 }
 
 // scip-python (Pyright) asks `python3` on PATH for its search paths: a folder whose only python3 runs the chosen
-// interpreter (a wrapper, not a link, so that a virtualenv stays one), or none. In a src layout the wrapper puts src/
-// on PYTHONPATH, so that tests outside src/ resolve the project's packages. A /bin/sh script: Linux and macOS only.
+// interpreter (a wrapper, not a link, so that a virtualenv stays one), or none. The wrapper restores the caller's
+// PATH, which shims (pyenv, asdf, mise: `#!/usr/bin/env bash`) need. In a src layout it puts src/ on PYTHONPATH, so
+// that tests outside src/ resolve the project's packages. A /bin/sh script: Linux and macOS only.
 function interpreterPath(scratch, python, srcDir) {
   const bin = path.join(scratch, 'bin');
   fs.mkdirSync(bin);
   if (python) {
     const quote = text => `'${text.replaceAll("'", "'\\''")}'`;
-    const pythonPath = srcDir ? `PYTHONPATH=${quote(srcDir)}\${PYTHONPATH:+:\$PYTHONPATH} ` : '';
-    fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\n${pythonPath}exec ${quote(python)} "$@"\n`,
+    const pythonPath = srcDir ? `PYTHONPATH=${quote(srcDir)}\${PYTHONPATH:+:\$PYTHONPATH}; export PYTHONPATH\n` : '';
+    fs.writeFileSync(path.join(bin, 'python3'),
+      `#!/bin/sh\nPATH=${quote(process.env.PATH ?? '')}; export PATH\n${pythonPath}exec ${quote(python)} "$@"\n`,
       { mode: 0o755 });
   }
   return bin;
+}
+
+// The interpreter's distributions in scip-python's --environment format: [{name, version, files}], the files
+// relative to the folder the distribution is installed in, as its RECORD lists them (.py and .pyi only). scip-python
+// names a library module after the distribution whose files hold it; a module that none holds becomes a local symbol.
+const LIST_DISTRIBUTIONS = String.raw`
+import json, sys
+from importlib import metadata
+seen, out = set(), []
+for d in metadata.distributions():
+    name = d.metadata["Name"]
+    if not name or name.lower() in seen:
+        continue
+    seen.add(name.lower())
+    files = [str(f).replace("\\", "/") for f in (d.files or [])]
+    files = [f for f in files if f.endswith((".py", ".pyi")) and not f.startswith("..") and "__pycache__" not in f]
+    out.append({"name": name, "version": d.version or "0", "files": files})
+json.dump(out, sys.stdout)
+`;
+
+// Writes scip-python's environment file from the python3 in `bin` (none: an empty list). Returns why the interpreter
+// could not list its distributions, or null; the file then lists none. `own` (a src layout's modules, as the
+// project's distribution) comes first: when Pyright reads one of the project's packages from typeshed's stubs
+// (`requests`), the tests' references to it then keep the project's names instead of becoming local symbols.
+function writeEnvironment(file, bin, python, own) {
+  let packages = [];
+  let problem = null;
+  if (python) {
+    const r = spawnSync(path.join(bin, 'python3'), ['-I', '-c', LIST_DISTRIBUTIONS],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 60000 });
+    try {
+      if (r.error) throw new Error(r.error.message);
+      if (r.status !== 0) {
+        const detail = (r.stderr ?? '').trim().split('\n').pop();
+        throw new Error(`exit ${r.status}${detail ? `: ${detail}` : ''}`);
+      }
+      packages = JSON.parse(r.stdout);
+    } catch (e) {
+      problem = `${python} could not list its packages (${e.message})`;
+      packages = [];
+    }
+  }
+  if (own) packages = [own, ...packages];
+  fs.writeFileSync(file, `${JSON.stringify(packages)}\n`);
+  return problem;
 }
 
 function runScipPython(scipPython, project, bin, environment, output) {
@@ -329,13 +376,22 @@ async function mainPython(argv) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-indexer-'));
   try {
     const scipFile = path.join(scratch, 'index.scip');
-    // Library symbols are named from their module path, so the distributions they come from need not be listed
-    // (scip-python would otherwise ask pip for them).
+    const { isSrcLayout, SKIPPED_DIRECTORIES: skipped } = await import('./python.mjs');
+    const srcLayout = isSrcLayout(options.project) ? path.join(options.project, 'src') : null;
+    const own = srcLayout && { name: path.basename(options.project), version: '0',
+      files: fs.readdirSync(srcLayout, { recursive: true }).map(f => f.split(path.sep).join('/'))
+        .filter(f => f.endsWith('.py') && !f.split('/').some(dir => skipped.has(dir))) };
+    let srcDir = srcLayout;
+    if (srcDir?.includes(path.delimiter)) {
+      process.stdout.write('scip-indexer: src/ is not on the search path: '
+        + `the project path holds '${path.delimiter}'\n`);
+      srcDir = null;
+    }
+    const bin = interpreterPath(scratch, python, srcDir);
     const environment = path.join(scratch, 'environment.json');
-    fs.writeFileSync(environment, '[]\n');
-    const { isSrcLayout } = await import('./python.mjs');
-    const srcDir = isSrcLayout(options.project) ? path.join(options.project, 'src') : null;
-    runScipPython(scipPython, options.project, interpreterPath(scratch, python, srcDir), environment, scipFile);
+    const problem = writeEnvironment(environment, bin, python, own);
+    if (problem) process.stdout.write(`scip-indexer: library resolution off: ${problem}\n`);
+    runScipPython(scipPython, options.project, bin, environment, scipFile);
     const index = scip.Index.deserializeBinary(fs.readFileSync(scipFile));
 
     const { IndexWriter } = await import('./sqlite.mjs');

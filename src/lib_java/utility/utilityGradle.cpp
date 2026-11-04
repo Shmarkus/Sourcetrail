@@ -17,6 +17,7 @@
 #include "type/MessageStatus.h"
 #include "utility.h"
 #include "utilityApp.h"
+#include "utilityDelombokPathAliases.h"
 #include "utilityDirectorySync.h"
 #include "utilityGradleCache.h"
 #include "utilityJava.h"
@@ -141,6 +142,10 @@ DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const 
       return false;
     }
 
+    std::vector<FilePath> paths = inputs;
+    utility::append(paths, sourcePath);
+    const DelombokPathAliases aliases(paths);
+
     std::vector<std::wstring> args;
     // A short run: the JIT's top tier and a parallel collector only add start-up work.
     args.push_back(L"-XX:TieredStopAtLevel=1");
@@ -149,7 +154,7 @@ DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const 
     args.push_back(lombokJarPath.wstr());
     args.push_back(L"delombok");
     for(const FilePath& input : inputs) {
-      args.push_back(input.wstr());
+      args.push_back(aliases.map(input).wstr());
     }
     if(!sourcePath.empty()) {
 #ifdef _WIN32
@@ -159,7 +164,7 @@ DelombokRunner createDelombokRunner(const FilePath& projectDirectoryPath, const 
 #endif
       std::wstring joined;
       for(const FilePath& directory : sourcePath) {
-        joined += (joined.empty() ? L"" : separator) + directory.wstr();
+        joined += (joined.empty() ? L"" : separator) + aliases.map(directory).wstr();
       }
       args.push_back(L"-s");
       args.push_back(joined);

@@ -16,6 +16,7 @@ target_sources(
           project/SourceGroupJavaEmpty.cpp
           project/SourceGroupJavaGradle.cpp
           project/SourceGroupJavaMaven.cpp
+          utility/utilityDelombokPathAliases.cpp
           utility/utilityDirectorySync.cpp
           utility/utilityGradle.cpp
           utility/utilityGradleCache.cpp

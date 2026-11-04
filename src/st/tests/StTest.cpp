@@ -1862,6 +1862,57 @@ TEST(StIndex, fullIndexReportsFileCount) {
 }
 
 namespace {
+// Copies the Lombok fixture to <base>/<directory>/lombok and runs st with the given JVM there.
+struct LombokRun {
+  int exitCode = -1;
+  QByteArray out;
+  QByteArray err;
+};
+
+LombokRun indexLombokCopy(const QString& base, const QString& directory, const QByteArray& javaPath, const QStringList& args) {
+  const std::filesystem::path project = (base + "/" + directory + "/lombok").toStdString();
+  std::filesystem::create_directories(project.parent_path());
+  std::filesystem::copy(ST_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
+  write(base + "/home/.config/sourcetrail/ApplicationSettings.xml",
+        "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
+        "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
+            javaPath + "</java_path></java></indexing></config>\n");
+
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  if(!environment.contains("GRADLE_USER_HOME")) {
+    environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
+  }
+  environment.insert("HOME", base + "/home");
+  environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
+  environment.remove("DISPLAY");
+  QProcess st;
+  st.setProcessEnvironment(environment);
+  st.setWorkingDirectory(QString::fromStdString((project / "src").string()));
+  st.start(ST_APP_PATH, args);
+  if(!st.waitForFinished(300000)) {
+    st.kill();
+    st.waitForFinished();
+  }
+  return {st.exitStatus() == QProcess::NormalExit ? st.exitCode() : -1, st.readAllStandardOutput(), st.readAllStandardError()};
+}
+}    // namespace
+
+// The processes the indexer runs, such as delombok, get the non-ASCII paths intact, and delombok keeps the package
+// directories of its output.
+TEST(StIndex, projectBelowANonAsciiDirectoryIndexesEveryFile) {
+  const QByteArray javaHome = qgetenv("JAVA_HOME");
+  ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+
+  const LombokRun run = indexLombokCopy(
+      base, QString::fromUtf8("ünïcödé"), javaHome + "/lib/server/libjvm.so", {"index", "--full", "--no-server"});
+  EXPECT_EQ(0, run.exitCode) << run.err.toStdString();
+  EXPECT_EQ("indexed 9 files, 0 errors\n", run.out.toStdString()) << run.err.toStdString();
+}
+
+namespace {
 struct StRun {
   int exitCode = -1;
   std::string out;

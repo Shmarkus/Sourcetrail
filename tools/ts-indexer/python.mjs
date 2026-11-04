@@ -14,9 +14,10 @@ import { DEFINITION, EDGE, LOCATION, NODE } from './sqlite.mjs';
 const CALLABLE = new Set([NODE.METHOD, NODE.FUNCTION]);
 const TYPES = new Set([NODE.CLASS, NODE.TYPE_PARAMETER]);
 const DEFINITION_ROLE = 1;
-// Folders whose Python files are not project code (build output, environments, caches)
+// Folders whose Python files are not project code (build output, environments, caches; Gradle, Maven and IDE output
+// for a Python part next to a Java build)
 export const SKIPPED_DIRECTORIES = new Set(['node_modules', '.sourcetrail', 'build', 'dist', '.git', '.venv', 'venv',
-  '__pycache__', '.tox', '.mypy_cache']);
+  '__pycache__', '.tox', '.mypy_cache', '.gradle', 'target', 'out', '.idea']);
 
 // "a: int, b=2, *args, c: Dict[str, int] = {}" -> ["int", "b", "*args", "Dict[str, int]"]
 function parameterTypes(text) {

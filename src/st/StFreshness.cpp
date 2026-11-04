@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <set>
 
@@ -16,8 +17,10 @@
 
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
+#include "SourceGroupPython.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupTypeScript.h"
 #include "utilityGradleCache.h"
@@ -94,17 +97,20 @@ size_t changesBelow(const FilePath& root, const std::set<std::wstring>& extensio
   return changedFiles;
 }
 
-// A TypeScript group is re-indexed as a whole when its inputs record changed, as the refresh decides; the changed
-// trigger files are what st reports, at least one for a record that differs (a deleted file). Without a stored record
-// (the last run was skipped) only the changed trigger files count. One walk over the project either way.
-size_t typeScriptChanges(const std::shared_ptr<SourceGroupSettingsTypeScript>& group,
+using InputsRecord = std::string (*)(const FilePath& root, const std::function<void(const FilePath& triggerFile)>& visit);
+
+// A TypeScript or Python group is re-indexed as a whole when its inputs record changed, as the refresh decides; the
+// changed trigger files are what st reports, at least one for a record that differs (a deleted file). Without a stored
+// record (the last run was skipped) only the changed trigger files count. One walk over the project either way.
+size_t wholeGroupChanges(const SourceGroupSettings& group,
+                         const FilePath& root,
+                         InputsRecord inputsRecord,
                          const TimeStamp& indexedAt,
                          const GroupInputs& inputs) {
   size_t changedFiles = 0;
-  const std::string record = SourceGroupTypeScript::getInputsRecord(
-      group->getTsconfigPathExpandedAndAbsolute().getParentDirectory(),
-      [&](const FilePath& file) { changedFiles += changedSince(file, indexedAt) ? 1 : 0; });
-  const auto stored = inputs.find(group->getId());
+  const std::string record = inputsRecord(
+      root, [&](const FilePath& file) { changedFiles += changedSince(file, indexedAt) ? 1 : 0; });
+  const auto stored = inputs.find(group.getId());
   if(stored == inputs.end() || stored->second.empty()) {
     return changedFiles;
   }
@@ -115,7 +121,8 @@ size_t typeScriptChanges(const std::shared_ptr<SourceGroupSettingsTypeScript>& g
 GroupInputs storedGroupInputs(const ProjectSettings& settings, const PersistentStorage& storage) {
   GroupInputs inputs;
   for(const auto& group : settings.getAllSourceGroupSettings()) {
-    if(std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
+    if(std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group) ||
+       std::dynamic_pointer_cast<SourceGroupSettingsPython>(group)) {
       inputs[group->getId()] = storage.getSourceGroupInputs(group->getId());
     }
   }
@@ -129,16 +136,27 @@ Freshness checkFreshness(const ProjectSettings& settings,
   Freshness freshness;
   bool fallback = false;
   std::vector<FilePath> typeScriptRoots;
+  std::vector<FilePath> pythonRoots;
   const auto groups = settings.getAllSourceGroupSettings();
   // A refresh skips these, whatever changed in them.
-  const auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
+  auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
+  for(const auto& group : SourceGroupSettingsPython::getUnsupportedGroups(groups)) {
+    unsupported.push_back(group);
+  }
   for(const auto& group : groups) {
     if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED || std::ranges::find(unsupported, group) != unsupported.end()) {
       continue;
     }
     if(const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
-      freshness.changedFiles += typeScriptChanges(typeScript, indexedAt, inputs);
-      typeScriptRoots.push_back(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory());
+      const FilePath root = typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory();
+      freshness.changedFiles += wholeGroupChanges(*group, root, &SourceGroupTypeScript::getInputsRecord, indexedAt, inputs);
+      typeScriptRoots.push_back(root);
+      continue;
+    }
+    if(const auto python = std::dynamic_pointer_cast<SourceGroupSettingsPython>(group)) {
+      const FilePath root = python->getProjectRootExpandedAndAbsolute();
+      freshness.changedFiles += wholeGroupChanges(*group, root, &SourceGroupPython::getInputsRecord, indexedAt, inputs);
+      pythonRoots.push_back(root);
       continue;
     }
     if(const auto maven = std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(group)) {
@@ -191,10 +209,12 @@ Freshness checkFreshness(const ProjectSettings& settings,
       freshness.reason = "no Gradle source roots cached; checked indexed files only";
     }
     for(const FilePath& file : indexedFiles) {
-      // counted with their TypeScript group
+      // counted with their TypeScript or Python group
       const bool typeScript = SourceGroupSettingsTypeScript::isTriggerFile(file) &&
           std::ranges::any_of(typeScriptRoots, [&](const FilePath& root) { return root.contains(file); });
-      if(!typeScript && (!file.recheckExists() || changedSince(file, indexedAt))) {
+      const bool python = SourceGroupSettingsPython::isTriggerFile(file) &&
+          std::ranges::any_of(pythonRoots, [&](const FilePath& root) { return root.contains(file); });
+      if(!typeScript && !python && (!file.recheckExists() || changedSince(file, indexedAt))) {
         freshness.changedFiles++;
       }
     }

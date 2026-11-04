@@ -10,6 +10,7 @@
 #include "SourceGroupSettingsJavaEmpty.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithJavaStandard.h"
 
@@ -151,6 +152,83 @@ TEST_F(ProjectSetupTest, noneWhenNeitherExists) {
 
   EXPECT_EQ(JavaBuildKind::None, build.java);
   EXPECT_FALSE(build.typeScript);
+  EXPECT_FALSE(build.python);
+}
+
+TEST_F(ProjectSetupTest, detectsPythonFromEachProjectFileAtTheTopLevel) {
+  for(const char* name : {"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "requirements-dev.txt"}) {
+    fs::remove_all(mRoot);
+    touch(name);
+    const DetectedBuild build = detectBuild(folder());
+    EXPECT_TRUE(build.python) << name;
+    EXPECT_EQ(JavaBuildKind::None, build.java) << name;
+    EXPECT_FALSE(build.typeScript) << name;
+  }
+}
+
+TEST_F(ProjectSetupTest, nestedPythonProjectFilesAloneGiveNoPythonNextToABuild) {
+  touch("pom.xml");
+  touch("tools/pyproject.toml");
+  touch("tools/requirements.txt");
+  touch("tools/release.py");
+
+  EXPECT_FALSE(detectBuild(folder()).python);
+}
+
+TEST_F(ProjectSetupTest, detectsPythonFromLooseSourcesWithoutAnotherBuild) {
+  touch("shop/__init__.py");
+  touch("shop/models.py");
+
+  const DetectedBuild build = detectBuild(folder());
+
+  EXPECT_TRUE(build.python);
+  EXPECT_EQ(JavaBuildKind::None, build.java);
+  EXPECT_FALSE(build.typeScript);
+}
+
+// A Java or TypeScript project with a few Python scripts is no Python project; a Python project file makes it one.
+TEST_F(ProjectSetupTest, loosePythonScriptsNextToABuildGiveNoPython) {
+  touch("build.gradle");
+  touch("scripts/release.py");
+  touch("scripts/bump_version.py");
+  EXPECT_FALSE(detectBuild(folder()).python);
+
+  fs::remove_all(mRoot);
+  touch("tsconfig.json");
+  touch("scripts/release.py");
+  EXPECT_FALSE(detectBuild(folder()).python);
+
+  // plain Java sources with a script stay a plain Java project, as before
+  fs::remove_all(mRoot);
+  touch("src/Main.java");
+  touch("scripts/release.py");
+  EXPECT_FALSE(detectBuild(folder()).python);
+}
+
+TEST_F(ProjectSetupTest, pythonSourcesInEnvironmentsAndBuildOutputAreNoPythonProject) {
+  for(const char* path : {".venv/lib/site.py",
+                          "venv/lib/site.py",
+                          "node_modules/x/gyp.py",
+                          "build/gen.py",
+                          "target/classes/gen.py",
+                          ".gradle/x.py",
+                          ".sourcetrail/x.py",
+                          "__pycache__/x.py"}) {
+    touch(path);
+  }
+  EXPECT_FALSE(detectBuild(folder()).python);
+}
+
+TEST_F(ProjectSetupTest, detectsPythonNextToGradleAndTypeScript) {
+  touch("build.gradle");
+  touch("tsconfig.json");
+  touch("requirements.txt");
+
+  const DetectedBuild build = detectBuild(folder());
+
+  EXPECT_EQ(JavaBuildKind::Gradle, build.java);
+  EXPECT_TRUE(build.typeScript);
+  EXPECT_TRUE(build.python);
 }
 
 TEST_F(ProjectSetupTest, projectFileIsNamedAfterTheFolder) {
@@ -347,6 +425,38 @@ TEST_F(ProjectSetupTest, createTypeScriptOnlyProject) {
   EXPECT_FALSE(typeScript->getTsconfigPath().isAbsolute());
 }
 
+TEST_F(ProjectSetupTest, createPythonOnlyProject) {
+  touch("pyproject.toml");
+
+  const auto groups = sourceGroups(createProject(folder(), detectBuild(folder())));
+
+  ASSERT_EQ(1U, groups.size());
+  auto python = std::dynamic_pointer_cast<SourceGroupSettingsPython>(groups.front());
+  ASSERT_TRUE(python);
+  EXPECT_EQ("Python", python->getName());
+  EXPECT_EQ(folder(), python->getProjectRootExpandedAndAbsolute());
+  // relative, so the checkout can move
+  EXPECT_FALSE(python->getProjectRoot().isAbsolute());
+  EXPECT_FALSE(python->getProjectRoot().empty());
+  // the indexer finds the environment itself
+  EXPECT_TRUE(python->getInterpreterPath().empty());
+}
+
+TEST_F(ProjectSetupTest, createWritesJavaTypeScriptAndPythonGroups) {
+  touch("pom.xml");
+  touch("tsconfig.json");
+  touch("setup.py");
+
+  const auto groups = sourceGroups(createProject(folder(), detectBuild(folder())));
+
+  ASSERT_EQ(3U, groups.size());
+  EXPECT_TRUE(groupOf<SourceGroupSettingsJavaMaven>(groups));
+  EXPECT_TRUE(groupOf<SourceGroupSettingsTypeScript>(groups));
+  auto python = groupOf<SourceGroupSettingsPython>(groups);
+  ASSERT_TRUE(python);
+  EXPECT_EQ(folder(), python->getProjectRootExpandedAndAbsolute());
+}
+
 TEST_F(ProjectSetupTest, addTypeScriptGroupKeepsTheJavaGroup) {
   touch("pom.xml");
   const FilePath projectFile = createProject(folder(), {.java = JavaBuildKind::Maven});
@@ -366,6 +476,37 @@ TEST_F(ProjectSetupTest, addTypeScriptGroupFailsWithoutAProject) {
   touch("tsconfig.json");
   EXPECT_FALSE(addTypeScriptGroup(projectFileFor(folder()), folder()));
   EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+
+TEST_F(ProjectSetupTest, addPythonGroupKeepsTheOtherGroups) {
+  touch("build.gradle");
+  touch("tsconfig.json");
+  const FilePath projectFile = createProject(folder(), detectBuild(folder()));
+  touch("requirements.txt");
+
+  ASSERT_TRUE(addPythonGroup(projectFile, folder()));
+
+  const auto groups = sourceGroups(projectFile);
+  ASSERT_EQ(3U, groups.size());
+  EXPECT_TRUE(groupOf<SourceGroupSettingsJavaGradle>(groups));
+  EXPECT_TRUE(groupOf<SourceGroupSettingsTypeScript>(groups));
+  auto python = groupOf<SourceGroupSettingsPython>(groups);
+  ASSERT_TRUE(python);
+  EXPECT_EQ(folder(), python->getProjectRootExpandedAndAbsolute());
+}
+
+TEST_F(ProjectSetupTest, addPythonGroupFailsWithoutAProject) {
+  touch("pyproject.toml");
+  EXPECT_FALSE(addPythonGroup(projectFileFor(folder()), folder()));
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+
+TEST_F(ProjectSetupTest, pythonRootIsTheFolderAProjectFolderNamedSourcetrailSitsIn) {
+  EXPECT_EQ(FilePath{L".."}, pythonRootFor(FilePath{(mRoot / ".sourcetrail").wstring()}));
+  EXPECT_EQ(FilePath{L".."}, pythonRootFor(FilePath{(mRoot / ".sourcetrail").wstring() + L"/"}));
+  // elsewhere the project folder itself
+  EXPECT_TRUE(pythonRootFor(folder()).empty());
+  EXPECT_TRUE(pythonRootFor(FilePath{}).empty());
 }
 
 TEST_F(ProjectSetupTest, rootTsconfigIsTheOneNextToTheProjectFolder) {
@@ -429,6 +570,38 @@ TEST_F(ProjectSetupTest, openOrCreateOffersTypeScriptForAnExistingProjectWithout
 
   ASSERT_TRUE(addTypeScriptGroup(projectFile, folder()));
   EXPECT_FALSE(openOrCreateProject(folder(), [] { return true; }).canAddTypeScript);
+}
+
+TEST_F(ProjectSetupTest, openOrCreateOffersPythonForAnExistingProjectWithoutIt) {
+  touch("build.gradle");
+  const FilePath projectFile = createProject(folder(), {.java = JavaBuildKind::Gradle});
+  touch("scripts/release.py");
+  EXPECT_FALSE(openOrCreateProject(folder(), [] { return true; }).canAddPython);
+  touch("pyproject.toml");
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [] { return true; });
+
+  EXPECT_EQ(projectFile, choice.projectFile);
+  EXPECT_FALSE(choice.created);
+  EXPECT_TRUE(choice.canAddPython);
+  EXPECT_FALSE(choice.canAddTypeScript);
+
+  ASSERT_TRUE(addPythonGroup(projectFile, folder()));
+  EXPECT_FALSE(openOrCreateProject(folder(), [] { return true; }).canAddPython);
+}
+
+TEST_F(ProjectSetupTest, openOrCreateCreatesAPythonOnlyProjectWithoutAsking) {
+  touch("app.py");
+  bool asked = false;
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [&asked] { return asked = true; });
+
+  EXPECT_FALSE(asked);
+  EXPECT_TRUE(choice.created);
+  EXPECT_FALSE(choice.needsSetup);
+  EXPECT_FALSE(choice.canAddPython);
+  EXPECT_TRUE(choice.build.python);
+  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsPython>(onlySourceGroup(choice.projectFile)));
 }
 
 TEST_F(ProjectSetupTest, openOrCreateCreatesATypeScriptOnlyProjectWithoutAsking) {

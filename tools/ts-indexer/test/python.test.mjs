@@ -296,11 +296,14 @@ describe('Python projects', () => {
   });
 
   test('skippedFoldersAreNotIndexed', () => {
+    // Gradle, Maven and IDE output too: a Python part next to a Java build
     const { dir, run, index } = indexCopy('pyskip', { 'build/lib/shop/models.py': 'class Copy:\n    pass\n',
-      'dist/x.py': 'y = 1\n' });
+      'dist/x.py': 'y = 1\n', 'target/classes/gen.py': 'y = 1\n', '.gradle/x.py': 'y = 1\n', 'out/x.py': 'y = 1\n',
+      '.idea/x.py': 'y = 1\n' });
     try {
       assert.equal(run.code, 0, run.stderr);
-      const skipped = "SELECT count(*) AS n FROM file WHERE path LIKE '%/build/%' OR path LIKE '%/dist/%'";
+      const skipped = "SELECT count(*) AS n FROM file WHERE path LIKE '%/build/%' OR path LIKE '%/dist/%'"
+        + " OR path LIKE '%/target/%' OR path LIKE '%/.gradle/%' OR path LIKE '%/out/%' OR path LIKE '%/.idea/%'";
       assert.equal(index.db.prepare(skipped).get().n, 0);
     } finally {
       index?.close();

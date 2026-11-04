@@ -6,6 +6,7 @@
 
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithSourcePaths.h"
 #include "utilityGradleCache.h"
@@ -73,8 +74,10 @@ public:
     }
   }
 
-  // The root and every directory below it the TypeScript group walks, with its trigger files.
-  void typeScriptTree(const QString& root) {
+  // The root and every directory below it a TypeScript or Python group walks, with its trigger files.
+  void wholeGroupTree(const QString& root,
+                      bool (*isUnwalkedDirectory)(const std::wstring& name),
+                      bool (*isTriggerFile)(const FilePath& filePath)) {
     if(!QFileInfo(root).isDir() || excluded(root)) {
       return;
     }
@@ -83,10 +86,10 @@ public:
     while(it.hasNext()) {
       const QString path = it.next();
       if(it.fileInfo().isDir()) {
-        if(!SourceGroupSettingsTypeScript::isUnwalkedDirectory(it.fileName().toStdWString())) {
-          typeScriptTree(path);
+        if(!isUnwalkedDirectory(it.fileName().toStdWString())) {
+          wholeGroupTree(path, isUnwalkedDirectory, isTriggerFile);
         }
-      } else if(SourceGroupSettingsTypeScript::isTriggerFile(FilePath(path.toStdWString()))) {
+      } else if(isTriggerFile(FilePath(path.toStdWString()))) {
         file(path);
       }
     }
@@ -181,7 +184,15 @@ std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vect
       continue;
     }
     if(const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
-      paths.typeScriptTree(toQString(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory()));
+      paths.wholeGroupTree(toQString(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory()),
+                           &SourceGroupSettingsTypeScript::isUnwalkedDirectory,
+                           &SourceGroupSettingsTypeScript::isTriggerFile);
+      continue;
+    }
+    if(const auto python = std::dynamic_pointer_cast<SourceGroupSettingsPython>(group)) {
+      paths.wholeGroupTree(toQString(python->getProjectRootExpandedAndAbsolute()),
+                           &SourceGroupSettingsPython::isUnwalkedDirectory,
+                           &SourceGroupSettingsPython::isTriggerFile);
       continue;
     }
     const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);

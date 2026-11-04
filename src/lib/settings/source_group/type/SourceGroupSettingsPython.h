@@ -28,12 +28,16 @@ public:
         name == L"Pipfile.lock";
   }
 
-  // Folders below the Python project whose files the indexer leaves out (build output, environments, caches), and
-  // which the search for trigger files leaves out.
+  // Folders below the Python project whose files the indexer leaves out (build output, environments, caches; Gradle,
+  // Maven and IDE output for a Python part next to a Java build), and which the search for trigger files leaves out.
   static bool isUnwalkedDirectory(const std::wstring& name) {
     return name == L"node_modules" || name == L".sourcetrail" || name == L"build" || name == L"dist" || name == L".git" ||
-        name == L".venv" || name == L"venv" || name == L"__pycache__" || name == L".tox" || name == L".mypy_cache";
+        name == L".venv" || name == L"venv" || name == L"__pycache__" || name == L".tox" || name == L".mypy_cache" ||
+        name == L".gradle" || name == L"target" || name == L"out" || name == L".idea";
   }
+
+  // The interpreter of a .venv or venv in `root`, as the indexer looks for it; empty without one.
+  static FilePath findEnvironmentInterpreter(const FilePath& root);
 
   // A project has one Python source group: the enabled Python groups after the first, which the wizard refuses and a
   // refresh skips.
@@ -68,6 +72,9 @@ public:
   bool equalsSettings(const SourceGroupSettingsBase* other) override;
 
 private:
+  // Upstream Sourcetrail's Python source group: its source paths and environment.
+  void loadUpstreamSettings(const ConfigManager* config);
+
   FilePath m_projectRoot;
   FilePath m_interpreterPath;
 };

@@ -504,8 +504,8 @@ void QtMainWindow::hideStartScreen() {
   m_windowStack.clearWindows();
 }
 
-// With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build and
-// its TypeScript project.
+// With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build, its
+// TypeScript project and its Python project.
 void QtMainWindow::newProject() {
 #if BUILD_JAVA_LANGUAGE_PACKAGE
   const QString folder = QtFileDialog::getExistingDirectory(this, tr("Select the Project Folder"), FilePath());
@@ -517,7 +517,9 @@ void QtMainWindow::newProject() {
   const ProjectChoice choice = openOrCreateProject(FilePath(folder.toStdWString()), [this, &folder, &declined]() {
     QMessageBox msgBox(this);
     msgBox.setText(tr("No Gradle or Maven build found"));
-    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle, pom.xml or tsconfig.json at its top level.</p>"
+    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle, pom.xml, tsconfig.json or Python project "
+                                 "(pyproject.toml, setup.py, setup.cfg, requirements.txt, or only Python sources) at "
+                                 "its top level.</p>"
                                  "<p>You can create a plain Java project and fill in its class path, or cancel.</p>")
                                   .arg(folder.toHtmlEscaped()));
     QAbstractButton* plainJava = msgBox.addButton(tr("Plain Java Project"), QMessageBox::AcceptRole);
@@ -549,32 +551,48 @@ void QtMainWindow::newProject() {
     return;
   }
 
-  bool addedTypeScript = false;
-  if(choice.canAddTypeScript) {
+  // Offers a part the folder has and its project lacks; true when it was added.
+  const auto offer = [this, &choice, &folder](const QString& language,
+                                              const QString& reason,
+                                              bool (*add)(const FilePath& projectFile, const FilePath& folder)) {
     QMessageBox msgBox(this);
-    msgBox.setText(tr("Add TypeScript to the project?"));
-    msgBox.setInformativeText(tr("<p>%1 has a tsconfig.json, which its project does not index yet.</p>"
-                                 "<p>Adding it indexes the TypeScript too and links its HTTP calls to the Spring "
-                                 "handlers. You can remove it again in the project settings.</p>")
-                                  .arg(folder.toHtmlEscaped()));
-    QAbstractButton* addTypeScript = msgBox.addButton(tr("Add TypeScript"), QMessageBox::AcceptRole);
+    msgBox.setText(tr("Add %1 to the project?").arg(language));
+    msgBox.setInformativeText(reason.arg(folder.toHtmlEscaped()));
+    QAbstractButton* addButton = msgBox.addButton(tr("Add %1").arg(language), QMessageBox::AcceptRole);
     msgBox.addButton(tr("Open As Is"), QMessageBox::RejectRole);
     msgBox.exec();
-    if(msgBox.clickedButton() == addTypeScript) {
-      addedTypeScript = addTypeScriptGroup(choice.projectFile, FilePath(folder.toStdWString()));
-      if(addedTypeScript) {
-        MessageStatus(L"Added TypeScript to project: " + choice.projectFile.wstr()).dispatch();
-      } else {
-        QMessageBox::warning(
-            this,
-            tr("Could not add TypeScript"),
-            tr("Sourcetrail was unable to write %1.").arg(QString::fromStdWString(choice.projectFile.wstr()).toHtmlEscaped()));
-      }
+    if(msgBox.clickedButton() != addButton) {
+      return false;
     }
+    if(!add(choice.projectFile, FilePath(folder.toStdWString()))) {
+      QMessageBox::warning(
+          this,
+          tr("Could not add %1").arg(language),
+          tr("Sourcetrail was unable to write %1.").arg(QString::fromStdWString(choice.projectFile.wstr()).toHtmlEscaped()));
+      return false;
+    }
+    MessageStatus(L"Added " + language.toStdWString() + L" to project: " + choice.projectFile.wstr()).dispatch();
+    return true;
+  };
+
+  bool added = false;
+  if(choice.canAddTypeScript) {
+    added = offer(tr("TypeScript"),
+                  tr("<p>%1 has a tsconfig.json, which its project does not index yet.</p>"
+                     "<p>Adding it indexes the TypeScript too and links its HTTP calls to the Spring "
+                     "handlers. You can remove it again in the project settings.</p>"),
+                  &addTypeScriptGroup);
+  }
+  if(choice.canAddPython) {
+    added = offer(tr("Python"),
+                  tr("<p>%1 has a Python project, which its project does not index yet.</p>"
+                     "<p>Adding it indexes the Python too. You can remove it again in the project settings.</p>"),
+                  &addPythonGroup) ||
+        added;
   }
 
   // the project may be the one already loaded, which reloads only with its settings changed
-  MessageLoadProject(choice.projectFile, addedTypeScript).dispatch();
+  MessageLoadProject(choice.projectFile, added).dispatch();
   m_windowStack.clearWindows();
 #else
   newCustomProject();

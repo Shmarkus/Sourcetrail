@@ -67,6 +67,7 @@ if(ENABLE_UNIT_TEST)
   # fixtures.
   target_compile_definitions(
     st_test PRIVATE ST_APP_PATH="$<TARGET_FILE:st>" ST_LOMBOK_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/lombok"
-                    ST_TS_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring")
+                    ST_TS_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring"
+                    ST_PY_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/python")
   add_dependencies(st_test st)
 endif()

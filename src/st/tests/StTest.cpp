@@ -38,6 +38,7 @@
 #include "NodeKind.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
+#include "SourceGroupPython.h"
 #include "StArchitecture.h"
 #include "StClient.h"
 #include "StFreshness.h"
@@ -2418,10 +2419,213 @@ TEST(StIndex, javaOnlyOutputUnchanged) {
        "private final Caller caller = new Caller();\n"}};
   const StRun status = fixture.st({"status"});
   EXPECT_EQ(std::string::npos, status.out.find("typescript")) << status.out;
+  EXPECT_EQ(std::string::npos, status.out.find("python")) << status.out;
   for(const auto& [arguments, out] : golden) {
     const StRun run = fixture.st(arguments);
     EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
     EXPECT_EQ(out, run.out) << arguments.join(' ').toStdString() << '\n' << run.err;
     EXPECT_EQ(std::string::npos, run.err.find("checked indexed files only")) << run.err;
   }
+}
+
+namespace {
+// A Python project at <base>/repo, in a source group next to a plain Java one over <base>/java (which checks its
+// indexed files), with its project file at <base>/prj/x.srctrlprj; every file older than five minutes ago.
+void pythonFixture(const QString& base, ProjectSettings* settings) {
+  const QString repo = base + "/repo";
+  write(repo + "/pyproject.toml", "[project]\nname = \"shop\"\n");
+  write(repo + "/shop/__init__.py", "");
+  write(repo + "/shop/models.py", "class User: pass\n");
+  write(repo + "/shop/notes.txt", "");
+  write(repo + "/.venv/lib/site.py", "");
+  write(repo + "/target/classes/gen.py", "");
+  write(base + "/java/A.java", "class A {}");
+  write(base + "/prj/x.srctrlprj",
+        QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups>"
+                "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status>"
+                "<python><project_root>" +
+                repo +
+                "</project_root></python></source_group_py>"
+                "<source_group_j><name>Java</name><type>Java Source Group</type><status>enabled</status>"
+                "<source_paths><source_path>" +
+                base +
+                "/java</source_path></source_paths>"
+                "<source_extensions><source_extension>.java</source_extension></source_extensions></source_group_j>"
+                "</source_groups><version>8</version></config>\n")
+            .toUtf8());
+  ASSERT_TRUE(settings->load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+}
+
+void age(const QString& folder) {
+  const auto past = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(10);
+  std::filesystem::last_write_time(folder.toStdString(), past);
+  for(const auto& entry : std::filesystem::recursive_directory_iterator(folder.toStdString())) {
+    std::filesystem::last_write_time(entry.path(), past);
+  }
+}
+}    // namespace
+
+// A Python group is stale when its inputs record differs: a source, a project file, a new or a deleted source; not
+// for files in environments, Gradle or Maven output, or other files. Its files are not counted again with the indexed
+// files the Java group falls back to.
+TEST(St, freshnessOfAPythonGroupFollowsItsInputs) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString repo = base + "/repo";
+  ProjectSettings settings;
+  pythonFixture(base, &settings);
+  const TimeStamp indexedAt(boost::posix_time::second_clock::local_time() - boost::posix_time::minutes(5));
+  const std::vector<FilePath> indexed = {FilePath((repo + "/shop/__init__.py").toStdWString()),
+                                         FilePath((repo + "/shop/models.py").toStdWString()),
+                                         FilePath((base + "/java/A.java").toStdWString())};
+  st::GroupInputs inputs;
+  // as a refresh leaves it: the files older than the index, the inputs record stored
+  const auto refreshed = [&]() {
+    age(base);
+    inputs = {{"py", SourceGroupPython::getInputsRecord(FilePath(repo.toStdWString()), [](const FilePath&) {})}};
+  };
+  const auto changes = [&]() { return st::checkFreshness(settings, indexedAt, indexed, inputs).changedFiles; };
+
+  refreshed();
+  ASSERT_EQ(0U, changes());
+  write(repo + "/shop/notes.txt", "changed");
+  write(repo + "/.venv/lib/site.py", "changed");
+  write(repo + "/target/classes/gen.py", "changed");
+  write(repo + "/.gradle/gen.py", "");
+  EXPECT_EQ(0U, changes());
+
+  write(repo + "/shop/models.py", "class User:\n    name = 'a'\n");
+  EXPECT_EQ(1U, changes());
+  refreshed();
+  EXPECT_EQ(0U, changes());
+
+  write(repo + "/pyproject.toml", "[project]\nname = \"store\"\n");
+  EXPECT_EQ(1U, changes());
+  refreshed();
+
+  write(repo + "/requirements-dev.txt", "pytest\n");
+  EXPECT_EQ(1U, changes());
+  refreshed();
+
+  // a deletion changes the record; the indexed file is not counted again for the Java group's fallback
+  ASSERT_TRUE(QFile::remove(repo + "/shop/models.py"));
+  EXPECT_EQ(1U, changes());
+
+  // without a stored record (a skipped run) only the trigger files changed since count
+  write(repo + "/shop/models.py", "class User: pass\n");
+  EXPECT_EQ(1U, st::checkFreshness(settings, indexedAt, indexed, {{"py", ""}}).changedFiles);
+  age(base);
+  EXPECT_EQ(0U, st::checkFreshness(settings, indexedAt, indexed, {{"py", ""}}).changedFiles);
+}
+
+TEST(St, watchPathsCoverThePythonProject) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString repo = base + "/repo";
+  ProjectSettings settings;
+  pythonFixture(base, &settings);
+
+  const std::vector<QString> paths = st::watchPaths(settings, {});
+  const std::set<QString> watched(paths.begin(), paths.end());
+  for(const QString& expected : {repo, repo + "/shop", repo + "/pyproject.toml", repo + "/shop/models.py"}) {
+    EXPECT_TRUE(watched.count(expected)) << expected.toStdString();
+  }
+  for(const QString& path : watched) {
+    SCOPED_TRACE(path.toStdString());
+    EXPECT_FALSE(path.contains("/.venv"));
+    EXPECT_FALSE(path.contains("/target"));
+    EXPECT_FALSE(path.endsWith(".txt"));
+  }
+}
+
+namespace {
+const QString kPythonGroup = QStringLiteral(
+    "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status></source_group_py>");
+}    // namespace
+
+// A Python project: a .py or project file edit makes the index stale and the next query refreshes it; `st status`
+// shows how the Python part was last indexed.
+TEST(StIndex, stalenessSeesPythonEdits) {
+  if(!typeScriptIndexerStaged()) {
+    GTEST_SKIP() << "the SCIP indexer is not staged (no npm at configure time)";
+  }
+  const FixtureCopy fixture(ST_PY_FIXTURE, "shop.srctrlprj", kPythonGroup);
+  StRun run = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  // the group's one source file, its root folder
+  EXPECT_EQ("indexed 1 files, 0 errors\n", run.out) << run.err;
+  run = fixture.st({"status"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t0\n")) << run.out;
+  EXPECT_NE(std::string::npos, run.out.find("\npython\tindexed\n")) << run.out;
+  EXPECT_EQ(std::string::npos, run.out.find("typescript")) << run.out;
+
+  run = fixture.st({"callers", "shop.models.User.greet", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("shop.services.OrderService.place")) << run.out;
+
+  // Modification times are compared in whole seconds.
+  QThread::sleep(2);
+  QFile services(fixture.root() + "/shop/services.py");
+  ASSERT_TRUE(services.open(QIODevice::Append));
+  services.write("\n\ndef count_items(cart):\n    return len(cart)\n");
+  services.close();
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t1\n")) << run.out;
+  run = fixture.st({"find", "count_items"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("refreshed 1 files")) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("shop.services.count_items")) << run.out;
+  EXPECT_NE(std::string::npos, fixture.st({"status"}).out.find("stale_files\t0\n"));
+
+  QThread::sleep(2);
+  QFile pyproject(fixture.root() + "/pyproject.toml");
+  ASSERT_TRUE(pyproject.open(QIODevice::Append));
+  pyproject.write("\n");
+  pyproject.close();
+  EXPECT_NE(std::string::npos, fixture.st({"status"}).out.find("stale_files\t1\n"));
+  run = fixture.st({"find", "count_items"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, fixture.st({"status"}).out.find("stale_files\t0\n"));
+
+  // Files outside the Python project's inputs leave it fresh.
+  QThread::sleep(2);
+  write(fixture.root() + "/notes.txt", "notes\n");
+  write(fixture.root() + "/.venv/lib/site.py", "\n");
+  write(fixture.root() + "/target/generated.py", "\n");
+  EXPECT_NE(std::string::npos, fixture.st({"status"}).out.find("stale_files\t0\n"));
+}
+
+// A Python part that cannot run says why, on the query that refreshes and in `st status`, and is not retried until
+// its inputs change.
+TEST(StIndex, missingPythonRootIsReportedOnceNotRefreshedAgain) {
+  if(!typeScriptIndexerStaged()) {
+    GTEST_SKIP() << "the SCIP indexer is not staged (no npm at configure time)";
+  }
+  const FixtureCopy fixture(ST_PY_FIXTURE,
+                            "shop.srctrlprj",
+                            "<source_group_py><name>Python</name><type>Python Source Group</type>"
+                            "<status>enabled</status><python><project_root>backend</project_root></python>"
+                            "</source_group_py>");
+  QDir(fixture.root()).mkdir("backend");
+  write(fixture.root() + "/backend/app.py", "def main():\n    pass\n");
+  StRun run = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  EXPECT_EQ(0, fixture.st({"find", "main"}).exitCode);
+
+  QThread::sleep(2);
+  ASSERT_TRUE(QDir(fixture.root() + "/backend").removeRecursively());
+  run = fixture.st({"find", "main"});
+  EXPECT_NE(std::string::npos, run.err.find("Python skipped: backend not found: " + (fixture.root() + "/backend").toStdString() + "\n"))
+      << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("refreshed ")) << run.err;
+  EXPECT_EQ(1, run.exitCode) << run.out << run.err;
+
+  run = fixture.st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t0\n")) << run.out << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("\npython\tbroken: Python skipped: backend not found: ")) << run.out;
+  run = fixture.st({"find", "main"});
+  EXPECT_EQ(std::string::npos, run.err.find("refreshed")) << run.err;
 }

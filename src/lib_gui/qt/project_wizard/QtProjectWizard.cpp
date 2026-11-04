@@ -15,6 +15,8 @@
 #include "QtProjectWizardContentCustomCommand.h"
 #include "QtProjectWizardContentExtensions.h"
 #include "QtProjectWizardContentGroup.h"
+#include "QtProjectWizardContentPathPythonInterpreter.h"
+#include "QtProjectWizardContentPathPythonRoot.h"
 #include "QtProjectWizardContentPathsExclude.h"
 #include "QtProjectWizardContentPathsSource.h"
 #include "QtProjectWizardContentPathTsconfig.h"
@@ -26,6 +28,7 @@
 #include "QtProjectWizardContentUnloadable.h"
 #include "ResourcePaths.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsUnloadable.h"
 #include "type/MessageLoadProject.h"
@@ -71,22 +74,26 @@
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
 namespace {
-// One TypeScript source group per project (see SourceGroupSettingsTypeScript::getUnsupportedGroups): says so and returns
-// false when `groups` hold a second enabled one.
-bool checkOneTypeScriptGroup(QWidget* parent, const std::vector<std::shared_ptr<SourceGroupSettings>>& groups) {
-  const auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
-  if(unsupported.empty()) {
-    return true;
+// One TypeScript and one Python source group per project (see SourceGroupSettingsTypeScript::getUnsupportedGroups and
+// SourceGroupSettingsPython::getUnsupportedGroups): says so and returns false when `groups` hold a second enabled one.
+bool checkOneGroupPerLanguage(QWidget* parent, const std::vector<std::shared_ptr<SourceGroupSettings>>& groups) {
+  for(const auto& [language, unsupported] :
+      {std::pair{QStringLiteral("TypeScript"), SourceGroupSettingsTypeScript::getUnsupportedGroups(groups)},
+       std::pair{QStringLiteral("Python"), SourceGroupSettingsPython::getUnsupportedGroups(groups)}}) {
+    if(unsupported.empty()) {
+      continue;
+    }
+    QMessageBox msgBox(parent);
+    msgBox.setText(QStringLiteral("Only one %1 Source Group").arg(language));
+    msgBox.setInformativeText(
+        QStringLiteral("<p>A project can have only one enabled %1 source group, and \"%2\" would be a second one.</p>"
+                       "<p>Remove or disable it, or edit the project's existing %1 source group instead.</p>")
+            .arg(language, QString::fromStdString(unsupported.front()->getName()).toHtmlEscaped()));
+    msgBox.addButton(QStringLiteral("Ok"), QMessageBox::ButtonRole::AcceptRole);
+    msgBox.exec();
+    return false;
   }
-  QMessageBox msgBox(parent);
-  msgBox.setText(QStringLiteral("Only one TypeScript Source Group"));
-  msgBox.setInformativeText(
-      QStringLiteral("<p>A project can have only one enabled TypeScript source group, and \"%1\" would be a second one.</p>"
-                     "<p>Remove or disable it, or edit the project's existing TypeScript source group instead.</p>")
-          .arg(QString::fromStdString(unsupported.front()->getName()).toHtmlEscaped()));
-  msgBox.addButton(QStringLiteral("Ok"), QMessageBox::ButtonRole::AcceptRole);
-  msgBox.exec();
-  return false;
+  return true;
 }
 
 #if BUILD_CXX_LANGUAGE_PACKAGE
@@ -271,6 +278,14 @@ void addSourceGroupContents<SourceGroupSettingsTypeScript>(QtProjectWizardConten
                                                            std::shared_ptr<SourceGroupSettingsTypeScript> settings,
                                                            QtProjectWizardWindow* window) {
   group->addContent(new QtProjectWizardContentPathTsconfig(settings, window));
+}
+
+template <>
+void addSourceGroupContents<SourceGroupSettingsPython>(QtProjectWizardContentGroup* group,
+                                                       std::shared_ptr<SourceGroupSettingsPython> settings,
+                                                       QtProjectWizardWindow* window) {
+  group->addContent(new QtProjectWizardContentPathPythonRoot(settings, window));
+  group->addContent(new QtProjectWizardContentPathPythonInterpreter(settings, window));
 }
 
 template <>
@@ -578,6 +593,8 @@ void QtProjectWizard::selectedSourceGroupChanged(int index) {
     addSourceGroupContents(summary, settings, this);
   } else if(auto settingsTypeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {
     addSourceGroupContents(summary, settingsTypeScript, this);
+  } else if(auto settingsPython = std::dynamic_pointer_cast<SourceGroupSettingsPython>(group)) {
+    addSourceGroupContents(summary, settingsPython, this);
   } else if(auto settingsUnloadable = std::dynamic_pointer_cast<SourceGroupSettingsUnloadable>(group)) {
     addSourceGroupContents(summary, settingsUnloadable, this);
   }
@@ -825,13 +842,27 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
     std::vector<std::shared_ptr<SourceGroupSettings>> groups = m_allSourceGroupSettings;
     groups.push_back(typeScriptSettings);
-    if(!checkOneTypeScriptGroup(this, groups)) {
+    if(!checkOneGroupPerLanguage(this, groups)) {
       cancelSourceGroup();
       return;
     }
     settings = typeScriptSettings;
   } break;
-  case SOURCE_GROUP_PYTHON:
+  case SOURCE_GROUP_PYTHON: {
+    auto pythonSettings = std::make_shared<SourceGroupSettingsPython>(sourceGroupId, m_projectSettings.get());
+    pythonSettings->setName("Python");
+#if BUILD_JAVA_LANGUAGE_PACKAGE
+    // starts with the folder a project folder named .sourcetrail sits in
+    pythonSettings->setProjectRoot(pythonRootFor(m_projectSettings->getProjectDirectoryPath()));
+#endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+    std::vector<std::shared_ptr<SourceGroupSettings>> groups = m_allSourceGroupSettings;
+    groups.push_back(pythonSettings);
+    if(!checkOneGroupPerLanguage(this, groups)) {
+      cancelSourceGroup();
+      return;
+    }
+    settings = pythonSettings;
+  } break;
   case SOURCE_GROUP_UNKNOWN:
     break;
   }
@@ -855,7 +886,7 @@ void QtProjectWizard::createSourceGroup(std::shared_ptr<SourceGroupSettings> set
 }
 
 void QtProjectWizard::createProject() {
-  if(!checkOneTypeScriptGroup(this, m_allSourceGroupSettings)) {
+  if(!checkOneGroupPerLanguage(this, m_allSourceGroupSettings)) {
     return;
   }
 

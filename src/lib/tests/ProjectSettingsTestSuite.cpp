@@ -1,3 +1,6 @@
+#include <filesystem>
+#include <fstream>
+
 #include <gtest/gtest.h>
 
 #include "language_packages.h"
@@ -189,13 +192,128 @@ TEST(ProjectSettings, pythonTriggerFilesAndSkippedFolders) {
   for(const wchar_t* name : {L"a/b.pyc", L"a/b.pyi", L"notes.txt", L"Pipfile", L"package.json", L"a/b.ts"}) {
     EXPECT_FALSE(SourceGroupSettingsPython::isTriggerFile(FilePath(name))) << FilePath(name).str();
   }
+  // Gradle, Maven and IDE output too, so that a Python part next to a Java build leaves its generated files alone
   for(const wchar_t* name : {L"node_modules", L".sourcetrail", L"build", L"dist", L".git", L".venv", L"venv",
-                             L"__pycache__", L".tox", L".mypy_cache"}) {
+                             L"__pycache__", L".tox", L".mypy_cache", L".gradle", L"target", L"out", L".idea"}) {
     EXPECT_TRUE(SourceGroupSettingsPython::isUnwalkedDirectory(name)) << FilePath(name).str();
   }
-  for(const wchar_t* name : {L"src", L"tests", L"target", L"shop"}) {
+  for(const wchar_t* name : {L"src", L"tests", L"shop", L"output", L"targets"}) {
     EXPECT_FALSE(SourceGroupSettingsPython::isUnwalkedDirectory(name)) << FilePath(name).str();
   }
+}
+
+namespace {
+// A project file in a fresh folder below the temporary directory, loaded; the folder holds `paths` (a trailing / makes
+// a folder, anything else an empty file).
+class PythonProjectOnDisk {
+public:
+  PythonProjectOnDisk(const std::string& group, const std::vector<std::string>& paths) {
+    const auto* info = testing::UnitTest::GetInstance()->current_test_info();
+    mRoot = std::filesystem::temp_directory_path() / "sourcetrail-project-settings" / info->name();
+    std::filesystem::remove_all(mRoot);
+    std::filesystem::create_directories(mRoot);
+    for(const std::string& path : paths) {
+      std::filesystem::create_directories((mRoot / path).parent_path());
+      if(!path.ends_with('/')) {
+        std::ofstream{mRoot / path} << "\n";
+      }
+    }
+    std::ofstream{mRoot / "old.srctrlprj"} << "<config><version>8</version><source_groups>" << group << "</source_groups></config>";
+    EXPECT_TRUE(mSettings.load(FilePath{(mRoot / "old.srctrlprj").wstring()}));
+  }
+
+  ~PythonProjectOnDisk() {
+    std::filesystem::remove_all(mRoot.parent_path());
+  }
+
+  std::shared_ptr<SourceGroupSettingsPython> python() const {
+    const auto groups = mSettings.getAllSourceGroupSettings();
+    EXPECT_EQ(1U, groups.size());
+    return groups.empty() ? nullptr : std::dynamic_pointer_cast<SourceGroupSettingsPython>(groups.front());
+  }
+
+  FilePath path(const std::string& relative) const {
+    return FilePath{(mRoot / relative).wstring()};
+  }
+
+private:
+  std::filesystem::path mRoot;
+  ProjectSettings mSettings;
+};
+
+std::string upstreamPythonGroup(const std::string& sourcePaths, const std::string& environment) {
+  return "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status>"
+         "<source_paths>" +
+      sourcePaths + "</source_paths><python_environment_path>" + environment +
+      "</python_environment_path><source_extensions><source_extension>.py</source_extension></source_extensions>"
+      "<exclude_filters><exclude_filter>**/migrations/**</exclude_filter></exclude_filters></source_group_py>";
+}
+}    // namespace
+
+// Upstream Sourcetrail's Python source group named its source paths and an environment (a folder or an interpreter):
+// its project root becomes the folder holding the source paths, its interpreter the environment's.
+TEST(ProjectSettings, migratesAnUpstreamPythonSourceGroup) {
+  const PythonProjectOnDisk project(
+      upstreamPythonGroup("<source_path>backend/app</source_path><source_path>backend/tools</source_path>", "backend/.venv"),
+      {"backend/app/", "backend/tools/", "backend/.venv/bin/python"});
+
+  const auto python = project.python();
+  ASSERT_TRUE(python);
+  EXPECT_EQ(L"backend", python->getProjectRoot().wstr());
+  EXPECT_EQ(project.path("backend"), python->getProjectRootExpandedAndAbsolute());
+  EXPECT_EQ(L"backend/.venv/bin/python", python->getInterpreterPath().wstr());
+  EXPECT_EQ(project.path("backend/.venv/bin/python"), python->getInterpreterPathExpandedAndAbsolute());
+}
+
+// A source path that is a package (it has an __init__.py) lies inside the project: its modules are named from the
+// folder holding it.
+TEST(ProjectSettings, migratesAnUpstreamPythonPackageSourcePathToTheFolderHoldingIt) {
+  const PythonProjectOnDisk project(
+      upstreamPythonGroup("<source_path>shop</source_path>", "/usr/bin/python3"), {"shop/__init__.py", "shop/models.py"});
+
+  const auto python = project.python();
+  ASSERT_TRUE(python);
+  // the project folder
+  EXPECT_TRUE(python->getProjectRoot().empty());
+  // an interpreter stays the interpreter
+  EXPECT_EQ(L"/usr/bin/python3", python->getInterpreterPath().wstr());
+}
+
+TEST(ProjectSettings, migratesAnUpstreamPythonSourceGroupWithoutAnEnvironment) {
+  const PythonProjectOnDisk project(upstreamPythonGroup("<source_path>src</source_path>", ""), {"src/app.py"});
+
+  const auto python = project.python();
+  ASSERT_TRUE(python);
+  EXPECT_EQ(L"src", python->getProjectRoot().wstr());
+  EXPECT_TRUE(python->getInterpreterPath().empty());
+}
+
+// Once saved, the group is a Python source group of this fork, whatever upstream keys the file still holds.
+TEST(ProjectSettings, aPythonProjectRootWinsOverUpstreamKeys) {
+  const PythonProjectOnDisk project(
+      "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status>"
+      "<python><project_root></project_root></python>"
+      "<source_paths><source_path>backend</source_path></source_paths>"
+      "<python_environment_path>backend/.venv</python_environment_path></source_group_py>",
+      {"backend/"});
+
+  const auto python = project.python();
+  ASSERT_TRUE(python);
+  EXPECT_TRUE(python->getProjectRoot().empty());
+  EXPECT_TRUE(python->getInterpreterPath().empty());
+}
+
+// What the wizard shows while the interpreter is left to the indexer.
+TEST(ProjectSettings, findsTheEnvironmentInterpreterOfAPythonRoot) {
+  const PythonProjectOnDisk project(
+      "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status>"
+      "<python><project_root>app</project_root></python></source_group_py>",
+      {"app/shop/__init__.py", "plain/x.py", "both/.venv/bin/python", "both/venv/bin/python", "venv/venv/bin/python"});
+
+  EXPECT_EQ(project.path("both/.venv/bin/python"), SourceGroupSettingsPython::findEnvironmentInterpreter(project.path("both")));
+  EXPECT_EQ(project.path("venv/venv/bin/python"), SourceGroupSettingsPython::findEnvironmentInterpreter(project.path("venv")));
+  EXPECT_TRUE(SourceGroupSettingsPython::findEnvironmentInterpreter(project.path("plain")).empty());
+  EXPECT_TRUE(SourceGroupSettingsPython::findEnvironmentInterpreter(project.python()->getProjectRootExpandedAndAbsolute()).empty());
 }
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE

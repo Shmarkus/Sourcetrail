@@ -134,6 +134,10 @@ add_files(
   qt/network/QtTcpWrapper.h
   qt/project_wizard/content/path/QtProjectWizardContentPath.cpp
   qt/project_wizard/content/path/QtProjectWizardContentPath.h
+  qt/project_wizard/content/path/QtProjectWizardContentPathPythonInterpreter.cpp
+  qt/project_wizard/content/path/QtProjectWizardContentPathPythonInterpreter.h
+  qt/project_wizard/content/path/QtProjectWizardContentPathPythonRoot.cpp
+  qt/project_wizard/content/path/QtProjectWizardContentPathPythonRoot.h
   qt/project_wizard/content/path/QtProjectWizardContentPathTsconfig.cpp
   qt/project_wizard/content/path/QtProjectWizardContentPathTsconfig.h
   qt/project_wizard/content/paths/QtProjectWizardContentPaths.cpp

@@ -34,4 +34,4 @@ Use `st` (Sourcetrail CLI) for Java structure, and for TypeScript in an Angular 
 - **No index, or one from an older version** (exit 4): run `st index --full` once in the project folder. Later
   queries refresh changed files on their own; `st index` does the same on demand.
 - **Faster:** `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).
-- More detail is in "For agents" in `<path to Sourcetrail README.md>`. You don't need it to start.
+- More detail is in "For agents" in `https://github.com/Shmarkus/Sourcetrail/blob/master/README.md`. You don't need it to start.

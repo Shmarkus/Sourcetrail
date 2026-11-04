@@ -5,8 +5,10 @@ import subprocess
 import tempfile
 import unittest
 
-from stbench.arms import (path_hiding_st, path_with_st, readme_agent_section, copy_without_sourcetrail, build_prompt,
-                          claude_args)
+from stbench.arms import (ST_README_URL, path_hiding_st, path_with_st, readme_agent_section, copy_without_sourcetrail,
+                          build_prompt, claude_args, st_note)
+
+SNIPPET = os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "agents", "st-claude-md-snippet.md")
 
 
 def make_executable(path):
@@ -73,6 +75,14 @@ class ReadmeSectionTest(unittest.TestCase):
     def test_missing_section_raises(self):
         with self.assertRaises(ValueError):
             readme_agent_section("# nothing\n")
+
+
+class StNoteTest(unittest.TestCase):
+    def test_points_the_snippets_readme_link_at_the_copy(self):
+        with open(SNIPPET, encoding="utf-8") as handle:
+            note = st_note(handle.read(), "/work/st-README.md")
+        self.assertIn('"For agents" in `/work/st-README.md`', note)
+        self.assertNotIn(ST_README_URL, note)
 
 
 class CopyWithoutSourcetrailTest(unittest.TestCase):

@@ -6,6 +6,7 @@ import os
 import shutil
 
 ST_SECTION_HEADING = "## `st`: code navigation for agents"
+ST_README_URL = "https://github.com/Shmarkus/Sourcetrail/blob/master/README.md"
 _IGNORED_DIRS = {"sourcetrail_dependencies", "build", ".gradle", "target", ".idea", "out"}
 _IGNORED_SUFFIXES = (".srctrlprj", ".srctrldb", ".srctrlbm", ".srctrlst", ".srctrldb_tmp", ".srctrlprj.lock")
 _IGNORED_PREFIXES = (".st-serve.log", ".st-refresh.log")
@@ -72,8 +73,8 @@ def copy_without_sourcetrail(source: str, target: str) -> None:
 
 
 def st_note(snippet: str, readme_copy: str) -> str:
-    """The CLAUDE.md snippet with its README placeholder pointing at a copy of the README's `st` section."""
-    return snippet.replace("<path to Sourcetrail README.md>", readme_copy)
+    """The CLAUDE.md snippet with its README link pointing at a copy of the README's `st` section."""
+    return snippet.replace(ST_README_URL, readme_copy)
 
 
 BASE_TOOLS = ["Bash", "Read", "Grep", "Glob"]

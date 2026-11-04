@@ -10,7 +10,8 @@ class DialogView;
 // Rebuilds the endpoint layer of a mixed Java + TypeScript index: runs the bundled linker (ts-indexer's link.mjs) on the
 // database being built, which links the frontend's HTTP calls (the TypeScript group's sidecar) to the Spring handlers
 // in the index through HTTP.<VERB> <path> nodes. Its summary becomes a status line; its unlinked calls go to a log.
-// Without a sidecar it only removes the layer, for a project that no longer has a TypeScript group.
+// Without a sidecar it only removes the layer, for a project that no longer has a TypeScript group; with a sidecar
+// path but no file there (the TypeScript group was not indexed) it does nothing and says so.
 class TaskLinkEndpoints : public Task {
 public:
   // Set on the blackboard once the refresh has cleared the files referencing the changed ones (its second pass).

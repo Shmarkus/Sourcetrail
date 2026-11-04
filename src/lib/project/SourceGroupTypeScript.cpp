@@ -7,6 +7,7 @@
 
 #include <system_error>
 
+#include "FileSystem.h"
 #include "IndexerCommandCustom.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
@@ -120,20 +121,29 @@ std::vector<std::shared_ptr<IndexerCommand>> SourceGroupTypeScript::getIndexerCo
   if(missing) {
     // Recorded like a failed run: reported on every refresh, re-run once the inputs change (the tsconfig is back).
     command->setNotRun(tsconfig.fileName() + L" not found: " + tsconfig.wstr());
-    command->setFinishedHandler([id = getId(), inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord()](
+    command->setFinishedHandler([id = getId(),
+                                 inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord(),
+                                 httpCalls = getHttpCallsFilePath()](
                                     IndexerCommandCustom::Result, const std::wstring& status, PersistentStorage& storage) {
       storage.setSourceGroupInputs(id, inputs);
       storage.setSourceGroupFailure(id, utility::encodeToUtf8(status));
+      FileSystem::remove(httpCalls);
     });
     return {command};
   }
   // Taken before the run, so that an edit during it is seen by the next refresh. A skipped run (a missing
-  // prerequisite) is retried on every refresh, a failed one only once its inputs changed.
-  command->setFinishedHandler([id = getId(), inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord()](
+  // prerequisite) is retried on every refresh, a failed one only once its inputs changed. Unless the run succeeded, no
+  // HTTP calls sidecar is left (the indexer removes it first, but may not have started): nothing is linked from it.
+  command->setFinishedHandler([id = getId(),
+                               inputs = inputs != info.wholeGroupInputs.end() ? inputs->second : getInputsRecord(),
+                               httpCalls = getHttpCallsFilePath()](
                                   IndexerCommandCustom::Result result, const std::wstring& status, PersistentStorage& storage) {
     storage.setSourceGroupInputs(id, result == IndexerCommandCustom::Result::Skipped ? std::string() : inputs);
     storage.setSourceGroupFailure(
         id, result == IndexerCommandCustom::Result::Failed ? utility::encodeToUtf8(status) : std::string());
+    if(result != IndexerCommandCustom::Result::Succeeded) {
+      FileSystem::remove(httpCalls);
+    }
   });
   return {command};
 }

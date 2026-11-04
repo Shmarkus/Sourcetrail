@@ -46,6 +46,13 @@ Task::TaskState TaskLinkEndpoints::doUpdate(std::shared_ptr<Blackboard> blackboa
     MessageStatus(L"Endpoint linking skipped: indexing was interrupted").dispatch();
     return STATE_SUCCESS;
   }
+  if(!mHttpCallsFilePath.empty() && !mHttpCallsFilePath.recheckExists()) {
+    // Left by the TypeScript group's last successful run only: it was skipped or failed, here or before.
+    const std::wstring status = L"Endpoint linking skipped: TypeScript was not indexed";
+    LOG_WARNING(status);
+    MessageStatus(status).dispatch();
+    return STATE_SUCCESS;
+  }
 
   std::vector<std::wstring> arguments{ResourcePaths::getEndpointLinkerFilePath().wstr(), L"--db", mDatabaseFilePath.wstr()};
   if(mHttpCallsFilePath.empty()) {

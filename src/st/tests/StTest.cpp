@@ -2130,6 +2130,9 @@ TEST(StIndex, missingTsconfigIsReportedOnceNotRefreshedAgain) {
       run.err.find("TypeScript skipped: tsconfig.json not found: " + (fixture.root() + "/tsconfig.json").toStdString() + "\n"))
       << run.err;
   EXPECT_NE(std::string::npos, run.err.find("refreshed ")) << run.err;
+  // Nothing is linked from the HTTP calls of the TypeScript that is gone.
+  EXPECT_NE(std::string::npos, run.err.find("Endpoint linking skipped: TypeScript was not indexed\n")) << run.err;
+  EXPECT_EQ(std::string::npos, run.err.find("link: ")) << run.err;
   // The TypeScript part is gone, the Java part stays.
   EXPECT_EQ(1, run.exitCode) << run.out << run.err;
   EXPECT_EQ(0, fixture.st({"find", "com.acme.shop.OrderService"}).exitCode);

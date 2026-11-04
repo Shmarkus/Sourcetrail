@@ -50,6 +50,10 @@ and Python support returns in a later release. Windows and macOS builds are not 
       `[0-9]*` or `v[0-9]*`. A build of a tag reports that tag; other builds report the nearest one reachable (now
       `2.0.0-fork`). A checkout without tags (a shallow CI clone) reports `1.0.0`.
 * __JDK 21__ and __Maven__, to build the Java indexer (`java_indexer/`) and to run the Java tests.
+* __Node.js 22.5 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`). The build stages it with its
+  dependencies (`npm ci --omit=dev`) into `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged,
+  TypeScript source groups cannot index and their tests are skipped. The indexer's own tests:
+  `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`.
 
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by
 `scripts/fork/bootstrap.sh`.
@@ -85,6 +89,10 @@ Packaging needs `patchelf`, `file`, `objdump`, ImageMagick's `convert`, and `lib
 bundled. Build and package on an Ubuntu 22.04 host (CI does the same): the script rejects binaries that need a glibc
 newer than 2.35.
 
+The package ships the TypeScript indexer with its production `node_modules` (`share/data/ts-indexer`), so the build must
+have staged it (npm on `PATH` at configure time); the script stops otherwise. Node.js itself is not shipped: it is a
+prerequisite on the machine that indexes TypeScript.
+
 # Java projects and `st`
 
 ## New Java projects
@@ -104,6 +112,53 @@ in `git status`. `st` finds the project from anywhere in the folder.
 groups, or several groups in one project).
 
 An index written by an older version is recognized as outdated and indexed again in full, from the GUI or from `st`.
+
+## TypeScript and the frontend–backend link
+
+A folder with a `tsconfig.json` at its top level gets its TypeScript indexed into the same index as its Java: modules,
+classes, interfaces, functions, methods and fields, with their calls, usages, type uses, inheritance, overrides,
+imports and decorators. In an Angular + Spring app in one folder, each frontend HTTP call is then linked to its Spring
+handler, so a call chain runs from an Angular component through the HTTP request into the backend and back.
+
+**Prerequisites.** Node.js 22.5 or newer on `PATH`, and the project's own `node_modules`: run `npm install` in the
+project first (the indexer resolves types through them). Without either, the Java still indexes and the TypeScript step
+reports one line instead, `TypeScript skipped: cannot run "node": ...` or `TypeScript skipped: ... node_modules missing
+...; run npm install`; nothing of the TypeScript is half-written. A TypeScript run that fails for another reason reports
+`TypeScript failed (exit code N): ...` and the rest of the refresh still completes.
+
+**Projects.** New Project on a folder with a `tsconfig.json` and a Gradle or Maven build creates both source groups in
+one project; with a `tsconfig.json` and no Java build it creates a TypeScript-only project (no HTTP link: there is no
+backend in the index). On a folder whose existing project has no TypeScript yet, New Project offers to add it. New
+Custom Project and Edit Project have a "TypeScript" source group type whose one setting is the `tsconfig.json`. To turn
+TypeScript off, untick the group's "active" status in the project settings rather than removing the group: a removed
+group is offered again the next time New Project sees the `tsconfig.json`.
+
+One TypeScript project per folder: the root `tsconfig.json` with its `references`. Names start at the webapp root
+taken from the tsconfig's `baseUrl` or `rootDir` (`app.orders.order.service.OrderService.list`, no `src.main.webapp.`
+prefix); directories are packages, files modules, code at a module's top level is `<module>.toplevel()`. Layouts with
+several independent apps (Nx, several root tsconfigs) are reported as unsupported.
+
+**The link.** Each Spring handler gets an endpoint node, `HTTP.<VERB> <path>` with path variables as `{}`, at its mapping
+annotation, called by the handler's frontend callers and calling the handler. A frontend call is linked when its verb and
+URL match exactly one handler. The URL may be built from string literals, template strings and `+`, with one level of
+constants: a `this.<field>` set once (`resourceUrl`), a `const` in scope, a single-return helper method of the same
+class, or `getEndpointFor('api/...')`. A refresh that re-indexed TypeScript or a Java file with Spring mappings prints
+`link: N linked, A ambiguous, U unresolved`.
+
+What is not linked:
+- A URL the analysis cannot resolve, or one matching no handler or several (ambiguous): no link, never a guess; the call
+  counts as unresolved or ambiguous.
+- Prefixes from configuration (`server.servlet.context-path`, a gateway prefix, a base-URL constant beyond one level).
+- Angular HTML templates (`(click)="save()"`, bindings, child components) and Angular routes: upstream answers end at
+  the component class.
+- A frontend and backend in different folders or indexes; Feign clients are an edge, never followed into the service
+  they call. JavaScript-only projects (no `tsconfig.json`) are not indexed.
+
+**Refresh.** A Java-only edit never runs the TypeScript step (the linking step may run, well under a second). A change to
+a `.ts`/`.tsx` file, a `tsconfig*.json`, `package.json` or the lockfile re-indexes the TypeScript group only, never the
+Java. On a private Angular + Spring app of 327 TypeScript files the TypeScript step takes about 3.5 s; on a Maven project
+the whole refresh takes about 10 s, because Maven's preparation runs on every refresh. Measurements:
+`docs/superpowers/specs/2026-11-03-typescript-indexing-results.md`.
 
 ## `st`: code navigation for agents
 
@@ -237,6 +292,13 @@ its endpoint, called from the frontend or not.
   (`java.lang.String.length()`, `JpaRepository` from a jar). Without it the output is as it always was.
 - Freshness covers the TypeScript group: a changed, new or deleted `.ts`/`.tsx` file, `tsconfig*.json`, `package.json`
   or lockfile makes the index stale, and the next query refreshes it as usual.
+- A refresh passes on the indexer's `TypeScript skipped: ...`, `TypeScript failed (exit code N): ...` and
+  `link: N linked, A ambiguous, U unresolved` lines on stderr. In a project with an active TypeScript group, `st status`
+  ends with a `typescript` row: `indexed`, `broken: <status>` (its last run failed, or its tsconfig is gone), or
+  `not indexed; st index shows why` (skipped, for example without Node or `node_modules`). Java-only projects print
+  neither.
+- What is and is not linked, and the prerequisites: [TypeScript and the frontend–backend
+  link](#typescript-and-the-frontendbackend-link).
 
 `--edges call,usage,type-usage,override,inheritance,import,annotation` picks the links `path` and `impact` follow (an unknown
 name exits 64). Defaults: `path` `call,usage,override`; `impact` `call,usage,type-usage,override,inheritance,annotation`.

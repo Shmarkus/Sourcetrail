@@ -28,6 +28,9 @@ Use `st` (Sourcetrail CLI) for Java structure, and for TypeScript in an Angular 
   pass its full key as `st find <name>` prints it.
 - **When you grep,** skip Sourcetrail's delombok copies: `grep -r --exclude-dir=sourcetrail_dependencies
   --exclude-dir=.sourcetrail ...`, or `rg -g '!sourcetrail_dependencies' ...`.
+- **TypeScript needs Node.js and the project's `node_modules`.** Without them `st` prints `TypeScript skipped: ...` and
+  answers for the Java only; run `npm install`, then `st index`. Frontend calls linked to the backend show as
+  `HTTP.GET /api/orders` (kind `endpoint`); a call whose URL is not resolved has no link.
 - **No index, or one from an older version** (exit 4): run `st index --full` once in the project folder. Later
   queries refresh changed files on their own; `st index` does the same on demand.
 - **Faster:** `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).

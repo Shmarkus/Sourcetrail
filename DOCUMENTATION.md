@@ -32,6 +32,10 @@ C++ support is powered by [Clang 11.0.0](https://clang.llvm.org/). For more Info
 
 Sourcetrail includes support for Java 12 and lower which is powered by [Eclipse JDT](https://github.com/eclipse/eclipse.jdt.core). If you encounter any issues while using Sourcetrail on a Java project, please let us know by providing a minimal example in our [bug tracker](https://github.com/CoatiSoftware/SourcetrailBugTracker).
 
+### TypeScript
+
+Sourcetrail indexes TypeScript projects that have a `tsconfig.json`, powered by [scip-typescript](https://github.com/sourcegraph/scip-typescript). Indexing needs Node.js 22.5 or newer and the project's `node_modules` (run `npm install` first). In an Angular + Spring application kept in one folder, each frontend HTTP call is linked to the Spring handler it reaches, so call graphs run from the frontend into the backend and back. Angular HTML templates, JavaScript-only projects and frontends in a different folder than their backend are not covered. See "TypeScript and the frontend–backend link" in the project README for details.
+
 ### Python
 
 Sourcetrail includes support for Python 2 and Python 3 which is powered by our open-source [SourcetrailPythonIndexer](https://github.com/CoatiSoftware/SourcetrailPythonIndexer). If you encounter any issues while using Sourcetrail on a Python project, please let us know by providing a minimal example in our [bug tracker](https://github.com/CoatiSoftware/SourcetrailPythonIndexer/issues).

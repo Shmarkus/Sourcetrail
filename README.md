@@ -23,7 +23,7 @@ and lets you browse its symbols and their relationships in a graph next to the c
   [not indexed yet](DOCUMENTATION.md#st-known-limits).
 - **TypeScript:** projects with a `tsconfig.json`. In an Angular + Spring app in one folder, frontend HTTP calls are
   linked to their Spring handlers.
-- **Not available:** C/C++ indexing is off, and Python support returns in a later release.
+- **Work in progress:** C/C++ and Python indexing are not in the current builds.
 
 ## Getting started
 
@@ -35,7 +35,7 @@ and lets you browse its symbols and their relationships in a graph next to the c
    detects Gradle, Maven and TypeScript from the folder. Start indexing, and `st` then works from anywhere in that
    folder.
 
-Java indexing needs a JDK, set in the preferences. TypeScript needs Node.js 22.13 or newer and the project's
+Java indexing needs JDK 21 or newer, set in the preferences. TypeScript needs Node.js 22.13 or newer and the project's
 `node_modules`.
 
 To give an agent `st`, add [this snippet](docs/agents/st-claude-md-snippet.md) to your project's `CLAUDE.md`.

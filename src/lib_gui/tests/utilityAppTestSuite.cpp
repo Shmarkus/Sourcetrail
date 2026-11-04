@@ -1,10 +1,12 @@
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 
 #include <gtest/gtest.h>
 
 #include "FilePath.h"
 #include "utilityApp.h"
+#include "utilityString.h"
 
 TEST(utilityAppTestSuite, searchPath) {
 #ifdef D_WINDOWS
@@ -62,3 +64,17 @@ TEST(utilityAppTestSuite, executeProcessReturnsWhenAShortProcessExitsInsteadOfWa
   }
   EXPECT_EQ(0U, slow);
 }
+
+#ifndef D_WINDOWS
+TEST(utilityAppTestSuite, executeProcessPassesNonAsciiArgumentsAndWorkingDirectory) {
+  const std::filesystem::path directory = std::filesystem::temp_directory_path() / L"utilityAppTestSuite-ünïcödé";
+  std::filesystem::create_directories(directory);
+
+  const utility::ProcessOutput output = utility::executeProcess(
+      L"/bin/sh", {L"-c", L"printf %s \"$PWD:$1\"", L"_", L"väärtus-ü"}, FilePath(directory.wstring()));
+  std::filesystem::remove(directory);
+
+  EXPECT_EQ(0, output.exitCode) << utility::encodeToUtf8(output.error);
+  EXPECT_EQ(directory.wstring() + L":väärtus-ü", output.output);
+}
+#endif

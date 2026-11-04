@@ -4,14 +4,20 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
+#include <random>
 #include <sstream>
 
 #include <QByteArray>
 
 #include <gtest/gtest.h>
 
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
+
 #include "FilePath.h"
 #include "FileSystem.h"
+#include "utilityDelombokPathAliases.h"
 #include "utilityGradle.h"
 #include "utilityGradleCache.h"
 
@@ -227,6 +233,7 @@ struct FakeDelombok {
   std::vector<std::vector<FilePath>> runs;
   std::vector<std::vector<FilePath>> sourcePaths;
   bool failOnFiles = false;
+  bool failOnDirectories = false;
 
   static void copy(const std::filesystem::path& from, const std::filesystem::path& to) {
     std::filesystem::create_directories(to.parent_path());
@@ -239,25 +246,29 @@ struct FakeDelombok {
   }
 
   utility::DelombokRunner runner() {
-    return [this](const std::vector<FilePath>& inputs, const std::vector<FilePath>& sourcePath, const FilePath& outputDirectory) {
+    return [this](const std::vector<FilePath>& inputs,
+                  const std::vector<FilePath>& sourcePath,
+                  const FilePath& outputDirectory) -> utility::DelombokFailure {
       runs.push_back(inputs);
       sourcePaths.push_back(sourcePath);
       const std::filesystem::path out(outputDirectory.str());
       for(const FilePath& input : inputs) {
         const std::filesystem::path in(input.str());
-        if(std::filesystem::is_directory(in)) {
+        if(std::filesystem::is_directory(in) && failOnDirectories) {
+          return L"fake delombok failed on a directory";
+        } else if(std::filesystem::is_directory(in)) {
           for(const auto& entry : std::filesystem::recursive_directory_iterator(in)) {
             if(entry.is_regular_file()) {
               copy(entry.path(), out / entry.path().lexically_relative(in));
             }
           }
         } else if(failOnFiles) {
-          return false;
+          return L"fake delombok failed on a file";
         } else {
           copy(in, out / in.filename());
         }
       }
-      return true;
+      return std::nullopt;
     };
   }
 
@@ -292,8 +303,8 @@ struct DelombokFixture : public GradleCacheFixture {
     fingerprint = utility::gradleBuildFingerprint(project);
   }
 
-  bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false) const {
-    return utility::delombokSourceSet(roots, target, project, fingerprint, fake.runner(), wholeTree);
+  bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false, std::wstring* failure = nullptr) const {
+    return utility::delombokSourceSet(roots, target, project, fingerprint, fake.runner(), wholeTree, failure);
   }
 
   bool run(FakeDelombok& fake) const {
@@ -611,9 +622,117 @@ TEST(GradleCache, DelombokFallsBackToTheWholeTreeWhenAnIncrementalRunFails) {
 
   fake.failOnFiles = true;
   f.edit("a/src/main/java/pkg/A.java", "class A { long x; }");
-  ASSERT_TRUE(f.run(fake));
+  std::wstring failure;
+  ASSERT_TRUE(f.run(fake, f.delombok, false, &failure));
+  // The fallback succeeded, so there is nothing to report.
+  EXPECT_EQ(L"", failure);
 
   ASSERT_TRUE(fake.runs.size() == 3);
   ASSERT_TRUE(fake.lastRunWasWholeTree());
   ASSERT_TRUE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A { long x; }");
+}
+
+TEST(GradleCache, DelombokReportsWhyTheWholeTreeRunAfterAFailedIncrementalRunFailed) {
+  DelombokFixture f;
+  FakeDelombok fake;
+  ASSERT_TRUE(f.run(fake));
+
+  fake.failOnFiles = true;
+  fake.failOnDirectories = true;
+  f.edit("a/src/main/java/pkg/A.java", "class A { long x; }");
+  std::wstring failure;
+  EXPECT_FALSE(f.run(fake, f.delombok, false, &failure));
+
+  ASSERT_TRUE(fake.runs.size() == 3);
+  EXPECT_EQ(L"fake delombok failed on a directory", failure);
+}
+
+namespace {
+// A directory of its own below the system's temporary directory, with a non-ASCII and an ASCII project inside.
+struct DelombokPathAliasesFixture {
+  DelombokPathAliasesFixture()
+      : root(std::filesystem::temp_directory_path() / ("DelombokPathAliases-" + std::to_string(std::random_device()())))
+      , temporary(root / "tmp")
+      , nonAscii(root / L"ünï" / "x" / L"cödé" / "app" / "src")
+      , ascii(root / "plain" / "app" / "src") {
+    std::filesystem::create_directories(temporary);
+    std::filesystem::create_directories(nonAscii);
+    std::filesystem::create_directories(ascii);
+  }
+
+  ~DelombokPathAliasesFixture() {
+    std::filesystem::remove_all(root);
+  }
+
+  size_t aliasDirectories() const {
+    return static_cast<size_t>(
+        std::distance(std::filesystem::directory_iterator(temporary), std::filesystem::directory_iterator()));
+  }
+
+  std::filesystem::path root;
+  std::filesystem::path temporary;
+  std::filesystem::path nonAscii;
+  std::filesystem::path ascii;
+};
+
+bool isAscii(const std::wstring& text) {
+  return std::all_of(text.begin(), text.end(), [](wchar_t c) { return c <= 0x7F; });
+}
+
+// Routes the default logger into a string stream while it lives.
+struct CapturedLog {
+  CapturedLog() : previous(spdlog::default_logger()) {
+    auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(stream));
+    logger->set_level(spdlog::level::trace);
+    spdlog::set_default_logger(logger);
+  }
+
+  ~CapturedLog() {
+    spdlog::set_default_logger(previous);
+  }
+
+  std::ostringstream stream;
+  std::shared_ptr<spdlog::logger> previous;
+};
+}    // namespace
+
+TEST(DelombokPathAliases, aNonAsciiPathGoesThroughAnAsciiLinkToItsDeepestNonAsciiDirectory) {
+  const DelombokPathAliasesFixture f;
+  std::filesystem::path alias;
+  {
+    const utility::DelombokPathAliases aliases({FilePath(f.nonAscii.wstring())}, f.temporary);
+    const FilePath mapped = aliases.map(FilePath(f.nonAscii.wstring()));
+
+    EXPECT_TRUE(isAscii(mapped.wstr())) << mapped.str();
+    EXPECT_TRUE(std::filesystem::equivalent(mapped.wstr(), f.nonAscii));
+    // The link is to "cödé", so a lombok.config in app/ still applies.
+    alias = std::filesystem::path(mapped.wstr()).parent_path().parent_path();
+    EXPECT_TRUE(std::filesystem::is_symlink(alias));
+    EXPECT_EQ(f.root / L"ünï" / "x" / L"cödé", std::filesystem::read_symlink(alias));
+    // Another path below the same directory takes the same link.
+    EXPECT_EQ(alias / "app", std::filesystem::path(aliases.map(FilePath((f.nonAscii.parent_path()).wstring())).wstr()));
+#ifndef _WIN32
+    const auto permissions = std::filesystem::status(alias.parent_path()).permissions();
+    EXPECT_EQ(std::filesystem::perms::owner_all, permissions & std::filesystem::perms::all);
+#endif
+  }
+  EXPECT_FALSE(std::filesystem::exists(alias.parent_path()));
+  EXPECT_EQ(0U, f.aliasDirectories());
+}
+
+TEST(DelombokPathAliases, anAsciiPathStaysAsItIs) {
+  const DelombokPathAliasesFixture f;
+  const utility::DelombokPathAliases aliases({FilePath(f.ascii.wstring())}, f.temporary);
+
+  EXPECT_EQ(f.ascii.wstring(), aliases.map(FilePath(f.ascii.wstring())).wstr());
+  EXPECT_EQ(0U, f.aliasDirectories());
+}
+
+TEST(DelombokPathAliases, aLinkThatCannotBeMadeLeavesThePathAsItIsWithAWarning) {
+  const DelombokPathAliasesFixture f;
+  const CapturedLog log;
+  const utility::DelombokPathAliases aliases({FilePath(f.nonAscii.wstring())}, f.root / "missing");
+
+  EXPECT_EQ(FilePath(f.nonAscii.wstring()).wstr(), aliases.map(FilePath(f.nonAscii.wstring())).wstr());
+  EXPECT_NE(std::string::npos, log.stream.str().find("delombok gets them as they are")) << log.stream.str();
 }

@@ -43,6 +43,7 @@ public:
                                                 std::shared_ptr<DialogView> dialogView) const;
 
   std::string getId() const;
+  std::string getName() const;
   SourceGroupType getType() const;
   LanguageType getLanguage() const;
   SourceGroupStatusType getStatus() const;

@@ -387,6 +387,11 @@ void Project::refresh(std::shared_ptr<DialogView> dialogView, RefreshMode refres
   for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
     if(sourceGroup->getStatus() == SOURCE_GROUP_STATUS_ENABLED &&
        !sourceGroup->prepareIndexing(refreshMode == RefreshMode::AllFiles)) {
+      // Not every failure reports itself; without an error status the indexing would just stop.
+      const std::wstring status = L"Indexing stopped: preparing the source group \"" +
+          utility::decodeFromUtf8(sourceGroup->getName()) + L"\" failed.";
+      LOG_ERROR(status);
+      MessageStatus(status, true, false).dispatch();
       m_refreshStage = RefreshStageType::NONE;
       return;
     }

@@ -41,6 +41,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # The TypeScript indexer runs on Node (22.5 or newer); CMake stages it with npm, and its tests run on node.
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       # Not setup-java's own Maven cache: it globs the whole checkout and fails (ELOOP) on the self-referencing
       # symlinks under bin/test/data, even with cache-dependency-path set.
       - name: Cache the Maven repository
@@ -81,6 +87,11 @@ jobs:
           eval "$(scripts/fork/bootstrap.sh --env)"
           mkdir -p "$RUNNER_TEMP/home"
           HOME="$RUNNER_TEMP/home" QT_QPA_PLATFORM=offscreen ctest --preset fork_release
+
+      - name: Test the TypeScript indexer
+        run: |
+          npm ci --prefix tools/ts-indexer --no-audit --no-fund
+          node --test tools/ts-indexer
 
       - name: Package
         run: ./setup/Linux/createPackages.sh

@@ -24,6 +24,12 @@ if [ ! -f "$DATA_DIR/java/lib/java-indexer.jar" ]; then
 	echo "createPackages.sh: $DATA_DIR/java/lib/java-indexer.jar is missing; build with the Java language package" >&2
 	exit 1
 fi
+# The TypeScript indexer with its production node_modules, staged by the build when npm is found. Node.js itself is
+# a runtime prerequisite and is not shipped.
+if [ ! -f "$DATA_DIR/ts-indexer/index.mjs" ] || [ ! -d "$DATA_DIR/ts-indexer/node_modules" ]; then
+	echo "createPackages.sh: $DATA_DIR/ts-indexer is missing or has no node_modules; configure and build with npm on PATH" >&2
+	exit 1
+fi
 
 
 # create AppDir
@@ -42,7 +48,7 @@ cp setup/Linux/data/sourcetrail.desktop AppDir/usr/share/applications/
 cp setup/Linux/data/sourcetrail-mime.xml AppDir/usr/share/mime/packages/
 
 mkdir AppDir/usr/share/data
-for DIR in color_schemes syntax_highlighting_rules fonts gui java fallback license
+for DIR in color_schemes syntax_highlighting_rules fonts gui java ts-indexer fallback license
 do
 	cp -R "$DATA_DIR/$DIR" AppDir/usr/share/data/
 done

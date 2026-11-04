@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Requires a JDK 21 JAVA_HOME. Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
+# Requires a JDK 21 JAVA_HOME, and Node.js 22.5+ on PATH for the TypeScript section (skipped without node).
+# Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
 die() { echo "st-smoke.sh: $*" >&2; exit 2; }
 [ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"
 st="$(realpath "$1")"
@@ -525,5 +526,34 @@ for _ in $(seq 50); do kill -0 "$server_pid" 2> /dev/null || break; sleep 0.1; d
 wait "$server_pid" 2> /dev/null || true
 server_pid=
 [ ! -e "$socket" ] || assert "socket left behind after SIGTERM"
+
+# TypeScript: the Angular + Spring fixture, both halves indexed and linked; both questions across the link.
+if command -v node > /dev/null; then
+    cp -R "$root/testing/cli/angular-spring" "$work/shop"
+    # Older than the index, so the queries below do not refresh it.
+    find "$work/shop" -exec touch -d '1 minute ago' {} +
+    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<config><source_groups>' \
+        '<source_group_java><name>Java</name><type>Java Source Group from Gradle</type><status>enabled</status><java_standard>21</java_standard><source_extensions><source_extension>.java</source_extension></source_extensions><gradle><project_file_path>build.gradle</project_file_path><should_index_tests>1</should_index_tests></gradle></source_group_java>' \
+        '<source_group_ts><name>TypeScript</name><type>TypeScript Source Group</type><status>enabled</status><typescript><tsconfig_path>tsconfig.json</tsconfig_path></typescript></source_group_ts>' \
+        '</source_groups><version>8</version></config>' > "$work/shop/shop.srctrlprj"
+    cd "$work/shop"
+    run 0 index --full
+    [ "$(cat "$work/out")" = "indexed 17 files, 0 errors" ] || assert "TypeScript fixture: st index --full printed: $(cat "$work/out")"
+    contains 'link: 3 linked, 0 ambiguous, 1 unresolved' err
+    run 0 status
+    contains $'typescript\tindexed' out
+    # From an Angular method to the repository it reaches through the backend.
+    run 0 callees OrderListComponent.load --depth 0 --boundaries --no-source
+    [ "$(cat "$work/out")" = $'repositories:\nOrderRepository.findAll (JpaRepository)\tmethod, depth 5\tsrc/main/java/com/acme/shop/OrderService.java:17' ] \
+        || assert "callees --boundaries printed: $(cat "$work/out")"
+    # From a Spring service method to the Angular code that calls it.
+    run 0 callers com.acme.shop.OrderService.list --depth 0 --side frontend --no-source
+    contains 'callers: 8 (project shop)' err
+    contains $'app.orders.order-list.component.OrderListComponent.load()\tmethod, depth 4\tsrc/main/webapp/app/orders/order-list.component.ts:13' out
+    ! grep -q '^com\.acme\.' "$work/out" || assert "callers --side frontend listed Java code: $(cat "$work/out")"
+    cd "$work/project"
+else
+    echo "st-smoke.sh: node not found, TypeScript section skipped" >&2
+fi
 
 echo "st smoke passed"

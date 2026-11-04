@@ -71,6 +71,24 @@
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
 
 namespace {
+// One TypeScript source group per project (see SourceGroupSettingsTypeScript::getUnsupportedGroups): says so and returns
+// false when `groups` hold a second enabled one.
+bool checkOneTypeScriptGroup(QWidget* parent, const std::vector<std::shared_ptr<SourceGroupSettings>>& groups) {
+  const auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
+  if(unsupported.empty()) {
+    return true;
+  }
+  QMessageBox msgBox(parent);
+  msgBox.setText(QStringLiteral("Only one TypeScript Source Group"));
+  msgBox.setInformativeText(
+      QStringLiteral("<p>A project can have only one enabled TypeScript source group, and \"%1\" would be a second one.</p>"
+                     "<p>Remove or disable it, or edit the project's existing TypeScript source group instead.</p>")
+          .arg(QString::fromStdString(unsupported.front()->getName()).toHtmlEscaped()));
+  msgBox.addButton(QStringLiteral("Ok"), QMessageBox::ButtonRole::AcceptRole);
+  msgBox.exec();
+  return false;
+}
+
 #if BUILD_CXX_LANGUAGE_PACKAGE
 
 bool applicationSettingsContainVisualStudioHeaderSearchPaths() {
@@ -805,6 +823,12 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
       typeScriptSettings->setTsconfigPath(utility::getAsRelativeIfShorter(tsconfig, m_projectSettings->getProjectDirectoryPath()));
     }
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
+    std::vector<std::shared_ptr<SourceGroupSettings>> groups = m_allSourceGroupSettings;
+    groups.push_back(typeScriptSettings);
+    if(!checkOneTypeScriptGroup(this, groups)) {
+      cancelSourceGroup();
+      return;
+    }
     settings = typeScriptSettings;
   } break;
   case SOURCE_GROUP_UNKNOWN:
@@ -830,6 +854,10 @@ void QtProjectWizard::createSourceGroup(std::shared_ptr<SourceGroupSettings> set
 }
 
 void QtProjectWizard::createProject() {
+  if(!checkOneTypeScriptGroup(this, m_allSourceGroupSettings)) {
+    return;
+  }
+
   FilePath path = m_projectSettings->getFilePath();
 
   m_projectSettings->setVersion(ProjectSettings::VERSION);

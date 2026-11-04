@@ -127,8 +127,11 @@ Freshness checkFreshness(const ProjectSettings& settings,
   Freshness freshness;
   bool fallback = false;
   std::vector<FilePath> typeScriptRoots;
-  for(const auto& group : settings.getAllSourceGroupSettings()) {
-    if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED) {
+  const auto groups = settings.getAllSourceGroupSettings();
+  // A refresh skips these, whatever changed in them.
+  const auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
+  for(const auto& group : groups) {
+    if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED || std::ranges::find(unsupported, group) != unsupported.end()) {
       continue;
     }
     if(const auto typeScript = std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(group)) {

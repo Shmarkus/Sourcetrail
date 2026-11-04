@@ -652,8 +652,8 @@ int inspect(const st::Io& io,
 // The indexer's TypeScript and endpoint linking status lines, which a refresh otherwise keeps to itself.
 void printTypeScriptStatus(const st::Io& io, const QByteArray& status) {
   static const QRegularExpression lines(QStringLiteral(
-      "(TypeScript (?:skipped|failed)[^\\n]*|Endpoint linking (?:skipped|failed)[^\\n]*|link: \\d+ linked, \\d+ ambiguous, \\d+ "
-      "unresolved)"));
+      "(TypeScript(?: skipped| failed|: only one)[^\\n]*|Endpoint linking (?:skipped|failed)[^\\n]*|"
+      "link: \\d+ linked, \\d+ ambiguous, \\d+ unresolved)"));
   for(auto it = lines.globalMatch(QString::fromUtf8(status)); it.hasNext();) {
     io.err << it.next().captured(1).toStdString() << '\n';
   }

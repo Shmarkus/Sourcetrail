@@ -27,6 +27,7 @@
 #include "RefreshInfoGenerator.h"
 #include "SourceGroup.h"
 #include "SourceGroupFactory.h"
+#include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupStatusType.h"
 #include "SourceGroupTypeScript.h"
 #include "StorageCache.h"
@@ -90,6 +91,15 @@ bool changesEndpointLayer(const std::set<FilePath>& clearedFilePaths,
     const std::string text = TextAccess::createFromFile(path)->getText();
     return text.find("Mapping") != std::string::npos && std::regex_search(text, mapping);
   });
+}
+
+// The project's source groups, but for the TypeScript groups after the first: one TypeScript group per project.
+std::vector<std::shared_ptr<SourceGroup>> createSupportedSourceGroups(const ProjectSettings& settings) {
+  std::vector<std::shared_ptr<SourceGroupSettings>> groups = settings.getAllSourceGroupSettings();
+  for(const std::shared_ptr<SourceGroupSettings>& unsupported : SourceGroupSettingsTypeScript::getUnsupportedGroups(groups)) {
+    std::erase(groups, unsupported);
+  }
+  return SourceGroupFactory::getInstance()->createSourceGroups(groups);
 }
 
 }    // namespace
@@ -223,7 +233,7 @@ void Project::load(const std::shared_ptr<DialogView>& dialogView) {
     m_state = ProjectStateType::DB_CORRUPTED;
   }
 
-  m_sourceGroups = SourceGroupFactory::getInstance()->createSourceGroups(m_settings->getAllSourceGroupSettings());
+  m_sourceGroups = createSupportedSourceGroups(*m_settings);
 
   if(canLoad) {
     m_storage->setMode(SqliteIndexStorage::STORAGE_MODE_READ);
@@ -359,7 +369,13 @@ void Project::refresh(std::shared_ptr<DialogView> dialogView, RefreshMode refres
 
   m_settings->reload();
 
-  m_sourceGroups = SourceGroupFactory::getInstance()->createSourceGroups(m_settings->getAllSourceGroupSettings());
+  m_sourceGroups = createSupportedSourceGroups(*m_settings);
+  for(const std::shared_ptr<SourceGroupSettings>& unsupported :
+      SourceGroupSettingsTypeScript::getUnsupportedGroups(m_settings->getAllSourceGroupSettings())) {
+    const std::wstring status = SourceGroupSettingsTypeScript::getUnsupportedGroupStatus(*unsupported);
+    LOG_WARNING(status);
+    MessageStatus(status).dispatch();
+  }
 
   if(needsFullRefresh || fullRefresh) {
     refreshMode = RefreshMode::AllFiles;

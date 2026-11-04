@@ -2144,6 +2144,45 @@ TEST(StIndex, missingTsconfigIsReportedOnceNotRefreshedAgain) {
   EXPECT_EQ(std::string::npos, run.err.find("refreshed")) << run.err;
 }
 
+// One TypeScript source group per project: a refresh indexes and links the first, and skips the others with a status
+// line. (They would share the HTTP calls sidecar: the last one run would decide the links.)
+TEST(StIndex, secondTypeScriptGroupIsSkipped) {
+  if(!typeScriptIndexerStaged()) {
+    GTEST_SKIP() << "the TypeScript indexer is not staged (no npm at configure time)";
+  }
+  ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "indexing the fixture's Java half needs a JDK 21 JAVA_HOME";
+  const FixtureCopy fixture(ST_TS_FIXTURE,
+                            "shop.srctrlprj",
+                            kMixedGroups +
+                                "<source_group_ts2><name>Second TypeScript</name><type>TypeScript Source Group</type>"
+                                "<status>enabled</status><typescript><tsconfig_path>second/tsconfig.json</tsconfig_path>"
+                                "</typescript></source_group_ts2>");
+  write(fixture.root() + "/second/tsconfig.json", R"({"compilerOptions": {"strict": true}, "include": ["*.ts"]})");
+  write(fixture.root() + "/second/second.ts", "export const SECOND_ONLY = 1;\n");
+  const std::string skipped =
+      "TypeScript: only one TypeScript source group per project is supported; skipping Second TypeScript\n";
+  StRun run = fixture.st({"index", "--full"});
+  ASSERT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find(skipped)) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("link: 3 linked, 0 ambiguous, 1 unresolved\n")) << run.err;
+  EXPECT_EQ(1, fixture.st({"find", "SECOND_ONLY"}).exitCode);
+  run = fixture.st({"callers", "com.acme.shop.OrderResource.list", "--depth", "2", "--no-source"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("app.orders.order.service.OrderService.list()")) << run.out;
+
+  // A refresh says so too.
+  QThread::sleep(2);
+  QFile service(fixture.root() + "/src/main/webapp/app/orders/order.service.ts");
+  ASSERT_TRUE(service.open(QIODevice::Append));
+  service.write("\n");
+  service.close();
+  run = fixture.st({"find", "OrderListComponent"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find(skipped + "link: 3 linked, 0 ambiguous, 1 unresolved\nrefreshed "))
+      << run.err;
+  EXPECT_NE(std::string::npos, fixture.st({"status"}).out.find("stale_files\t0\n"));
+}
+
 // With no TypeScript in a project, callees, supers and deps print what they printed before st knew TypeScript.
 TEST(StIndex, javaOnlyOutputUnchanged) {
   ASSERT_FALSE(qgetenv("JAVA_HOME").isEmpty()) << "st index needs a JDK 21 JAVA_HOME";

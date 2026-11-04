@@ -82,6 +82,30 @@ TEST(ProjectSettings, loadsAndSavesTypeScriptSourceGroup) {
   EXPECT_EQ("TypeScript Source Group", sourceGroupTypeToString(saved->getType()));
 }
 
+TEST(ProjectSettings, onlyTheFirstEnabledTypeScriptGroupIsSupported) {
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.loadFromString(
+      "<config><version>8</version><source_groups>"
+      "<source_group_a><name>Old</name><type>TypeScript Source Group</type><status>disabled</status>"
+      "<typescript><tsconfig_path>old/tsconfig.json</tsconfig_path></typescript></source_group_a>"
+      "<source_group_b><name>Web</name><type>TypeScript Source Group</type><status>enabled</status>"
+      "<typescript><tsconfig_path>web/tsconfig.json</tsconfig_path></typescript></source_group_b>"
+      "<source_group_c><name>Admin</name><type>TypeScript Source Group</type><status>enabled</status>"
+      "<typescript><tsconfig_path>admin/tsconfig.json</tsconfig_path></typescript></source_group_c>"
+      "</source_groups></config>"));
+
+  auto groups = settings.getAllSourceGroupSettings();
+  const auto unsupported = SourceGroupSettingsTypeScript::getUnsupportedGroups(groups);
+  ASSERT_EQ(1, unsupported.size());
+  EXPECT_EQ("Admin", unsupported.front()->getName());
+  EXPECT_EQ(L"TypeScript: only one TypeScript source group per project is supported; skipping Admin",
+            SourceGroupSettingsTypeScript::getUnsupportedGroupStatus(*unsupported.front()));
+
+  // a disabled one is no second group, so a single enabled one is fine
+  groups.pop_back();
+  EXPECT_TRUE(SourceGroupSettingsTypeScript::getUnsupportedGroups(groups).empty());
+}
+
 #if BUILD_JAVA_LANGUAGE_PACKAGE
 TEST(ProjectSettings, migratesVersion1JavaMavenProjectToMavenSourceGroup) {
   ProjectSettings settings;

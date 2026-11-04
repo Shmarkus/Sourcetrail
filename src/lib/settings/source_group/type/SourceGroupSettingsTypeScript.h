@@ -1,7 +1,9 @@
 #ifndef SOURCE_GROUP_SETTINGS_TYPESCRIPT_H
 #define SOURCE_GROUP_SETTINGS_TYPESCRIPT_H
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "FilePath.h"
 #include "SourceGroupSettingsWithComponents.h"
@@ -35,6 +37,13 @@ public:
     return isExcludedDirectory(name) || name == L".git" || name == L"build" || name == L"target" || name == L"dist" ||
         name == L".angular" || name == L"coverage";
   }
+
+  // A project has one TypeScript source group (the groups would share the HTTP calls sidecar and the endpoint layer):
+  // the enabled TypeScript groups after the first, which the wizard refuses and a refresh skips.
+  static std::vector<std::shared_ptr<SourceGroupSettings>> getUnsupportedGroups(
+      const std::vector<std::shared_ptr<SourceGroupSettings>>& groups);
+  // The status line for a skipped group.
+  static std::wstring getUnsupportedGroupStatus(const SourceGroupSettings& group);
 
   FilePath getTsconfigPath() const {
     return m_tsconfigPath;

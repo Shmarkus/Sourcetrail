@@ -1542,6 +1542,13 @@ folder: `build.gradle`, `build.gradle.kts` or `settings.gradle` means Gradle, wh
 tests included and opens it with the usual "Start Indexing" dialog. Without a build file it offers a plain Java project
 and opens the project settings so that you can fill in the class path. The JDK is the one in the preferences.
 
+The project's Java standard comes from the root build file, read as text (Gradle and Maven do not run). In
+`build.gradle(.kts)` that is `sourceCompatibility`, else the toolchain's `JavaLanguageVersion.of(N)` or
+`jvmToolchain(N)`, else `targetCompatibility`, else any `JavaVersion.VERSION_N`. In `pom.xml` it is
+`<maven.compiler.release>`, else the compiler plugin's `<release>`, else `<maven.compiler.source>`, else
+`<java.version>`; a `${property}` value is looked up in the same `pom.xml`. A version above 25 becomes 25. Without one,
+or for a plain Java project, the standard is 21. You can change it in the project settings.
+
 The project lives in `<folder>/.sourcetrail/<folder name>.srctrlprj`. The index database, bookmarks and Sourcetrail's
 dependency and delombok copies sit next to it. `.sourcetrail/` contains its own `.gitignore` (`*`), so none of it shows up
 in `git status`. `st` finds the project from anywhere in the folder.

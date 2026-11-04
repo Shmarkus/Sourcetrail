@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <regex>
+#include <sstream>
 
 #include <system_error>
 
@@ -12,6 +15,7 @@
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
 #include "SourceGroupSettingsTypeScript.h"
+#include "utilityString.h"
 #include "utilityUuid.h"
 
 namespace fs = std::filesystem;
@@ -21,9 +25,8 @@ namespace {
 constexpr auto ProjectFolderName = L".sourcetrail";
 constexpr auto TsconfigName = L"tsconfig.json";
 
-// Newest first, as the source group settings list them; an auto-created project has no one to ask, and the newest
-// level reads the widest range of code.
-constexpr auto JavaStandard = L"21";
+// The Java standard of a project whose build names no Java version.
+constexpr auto DefaultJavaStandard = 21;
 
 fs::path toPath(const FilePath& path) {
   return fs::path{path.wstr()}.lexically_normal();
@@ -53,6 +56,133 @@ fs::path gradleFile(const fs::path& folder) {
   return {};
 }
 
+std::string readFile(const fs::path& path) {
+  std::ifstream file{path, std::ios::binary};
+  return {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+}
+
+// The text without what lies between each opening and the following closing marker, markers included.
+std::string withoutComments(std::string text, const std::string& opening, const std::string& closing) {
+  for(size_t start = text.find(opening); start != std::string::npos; start = text.find(opening, start)) {
+    const size_t end = text.find(closing, start + opening.size());
+    text.erase(start, end == std::string::npos ? std::string::npos : end + closing.size() - start);
+  }
+  return text;
+}
+
+// "25" and "VERSION_25" give 25, "1.8" and "VERSION_1_8" give 8; anything else gives 0.
+int javaLevel(std::string value) {
+  if(value.starts_with("VERSION_")) {
+    value.erase(0, 8);
+  }
+  if(value.starts_with("1.") || value.starts_with("1_")) {
+    value.erase(0, 2);
+  }
+  if(value.empty() || value.size() > 3 || !std::ranges::all_of(value, [](char c) { return c >= '0' && c <= '9'; })) {
+    return 0;
+  }
+  return std::stoi(value);
+}
+
+// The Java version a root build.gradle(.kts) names, or 0: the source compatibility, else the toolchain's language
+// version, else the target compatibility, else any JavaVersion.VERSION_<n>. Plain text matching, line by line, without
+// comments; Gradle does not run.
+int gradleJavaLevel(const fs::path& folder) {
+  // a value: 25, '1.8', "21", JavaVersion.VERSION_17
+  const std::string value = R"([=(\s]\s*(?:JavaVersion\.)?['"]?(VERSION_[0-9_]+|[0-9]+(?:\.[0-9]+)?)\b)";
+  const std::regex patterns[] = {
+      std::regex{R"(\bsourceCompatibility\s*)" + value},
+      std::regex{R"(\b(?:JavaLanguageVersion\.of|jvmToolchain)\s*\(\s*['"]?([0-9]+)\b)"},
+      std::regex{R"(\btargetCompatibility\s*)" + value},
+      std::regex{R"(\bJavaVersion\.(VERSION_[0-9_]+)\b)"},
+  };
+
+  for(const auto* name : {L"build.gradle", L"build.gradle.kts"}) {
+    if(!isFile(folder / name)) {
+      continue;
+    }
+    std::vector<std::string> lines;
+    std::istringstream text{withoutComments(readFile(folder / name), "/*", "*/")};
+    for(std::string line; std::getline(text, line);) {
+      // a // that starts the line or follows a blank, so that "https://" stays
+      for(size_t slashes = line.find("//"); slashes != std::string::npos; slashes = line.find("//", slashes + 2)) {
+        if(slashes == 0 || line[slashes - 1] == ' ' || line[slashes - 1] == '\t') {
+          line.erase(slashes);
+          break;
+        }
+      }
+      lines.push_back(std::move(line));
+    }
+
+    for(const std::regex& pattern : patterns) {
+      for(const std::string& line : lines) {
+        // std::regex recurses per character; a build script line is short
+        if(line.size() > 1000) {
+          continue;
+        }
+        if(std::smatch match; std::regex_search(line, match, pattern) && javaLevel(match[1].str()) > 0) {
+          return javaLevel(match[1].str());
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+// The text of the first <tag>...</tag> in the XML, trimmed; empty when there is none.
+std::string xmlValue(const std::string& xml, const std::string& tag) {
+  const std::string opening = "<" + tag + ">";
+  const size_t start = xml.find(opening);
+  if(start == std::string::npos) {
+    return {};
+  }
+  const size_t end = xml.find("</" + tag + ">", start);
+  if(end == std::string::npos) {
+    return {};
+  }
+  std::string value = xml.substr(start + opening.size(), end - start - opening.size());
+  const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  while(!value.empty() && blank(value.back())) {
+    value.pop_back();
+  }
+  const auto first = std::ranges::find_if_not(value, blank);
+  return {first, value.end()};
+}
+
+// The Java version the root pom.xml names, or 0: maven.compiler.release, else the compiler plugin's <release>, else
+// maven.compiler.source, else java.version. A value ${name} is the pom's <name>; Maven does not run.
+int mavenJavaLevel(const fs::path& folder) {
+  if(!isFile(folder / "pom.xml")) {
+    return 0;
+  }
+  const std::string pom = withoutComments(readFile(folder / "pom.xml"), "<!--", "-->");
+  for(const auto* tag : {"maven.compiler.release", "release", "maven.compiler.source", "java.version"}) {
+    std::string value = xmlValue(pom, tag);
+    if(value.starts_with("${") && value.ends_with("}")) {
+      value = xmlValue(pom, value.substr(2, value.size() - 3));
+    }
+    if(const int level = javaLevel(value); level > 0) {
+      return level;
+    }
+  }
+  return 0;
+}
+
+// The Java standard for a new source group: the version the build names, at most the newest one Sourcetrail
+// supports, else DefaultJavaStandard.
+std::wstring javaStandardFor(const fs::path& folder, JavaBuildKind kind, const SourceGroupSettingsWithJavaStandard& settings) {
+  int level = 0;
+  if(kind == JavaBuildKind::Gradle) {
+    level = gradleJavaLevel(folder);
+  } else if(kind == JavaBuildKind::Maven) {
+    level = mavenJavaLevel(folder);
+  }
+  if(level <= 0) {
+    level = DefaultJavaStandard;
+  }
+  return std::to_wstring(std::min(level, javaLevel(utility::encodeToUtf8(settings.getAvailableJavaStandards().front()))));
+}
+
 // Relative to the project file's directory, so the checkout can move.
 FilePath relativeToProject(const fs::path& path, const fs::path& projectDirectory) {
   return FilePath{path.lexically_relative(projectDirectory).wstring()};
@@ -70,7 +200,7 @@ std::shared_ptr<SourceGroupSettings> createJavaSourceGroup(const fs::path& folde
     settings->setName("Gradle");
     settings->setGradleProjectFilePath(relativeToProject(gradleFile(folder), projectDirectory));
     settings->setShouldIndexGradleTests(true);
-    settings->setJavaStandard(JavaStandard);
+    settings->setJavaStandard(javaStandardFor(folder, kind, *settings));
     return settings;
   }
   case JavaBuildKind::Maven: {
@@ -78,7 +208,7 @@ std::shared_ptr<SourceGroupSettings> createJavaSourceGroup(const fs::path& folde
     settings->setName("Maven");
     settings->setMavenProjectFilePath(relativeToProject(folder / "pom.xml", projectDirectory));
     settings->setShouldIndexMavenTests(true);
-    settings->setJavaStandard(JavaStandard);
+    settings->setJavaStandard(javaStandardFor(folder, kind, *settings));
     return settings;
   }
   case JavaBuildKind::None: {
@@ -87,7 +217,7 @@ std::shared_ptr<SourceGroupSettings> createJavaSourceGroup(const fs::path& folde
     // absolute: the settings page checks it before .sourcetrail/ exists, which a relative ".." needs
     settings->setSourcePaths({FilePath{folder.wstring()}});
     settings->setExcludeFilterStrings({L"**/" + std::wstring{ProjectFolderName} + L"/**"});
-    settings->setJavaStandard(JavaStandard);
+    settings->setJavaStandard(javaStandardFor(folder, kind, *settings));
     return settings;
   }
   }

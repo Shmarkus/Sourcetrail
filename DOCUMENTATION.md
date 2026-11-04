@@ -290,6 +290,7 @@ On every start of Sourcetrail you are shown the start window. It allows for crea
 * Clicking `Open Project` will let you open an existing Sourcetrail project by choosing from a file dialog.
 * Clicking on one of the `Recent Projects` will open this project. The list shows a maximum of 7 items ordered by recent first.
 * Pressing `ESC` will close the window.
+* Clicking `View on GitHub` will open the project's GitHub page in your web browser.
 
 
 ### Path List Box

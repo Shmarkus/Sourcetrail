@@ -23,7 +23,8 @@
 #include <gtest/gtest.h>
 
 // Indexes copies of the Angular + Spring fixture with the built Sourcetrail, headless: a project of its Gradle half and
-// a TypeScript source group for its Angular half. Shared by the TypeScript test suites.
+// a TypeScript source group for its Angular half, and a Python source group for the folder. Shared by the TypeScript and
+// Python test suites.
 inline const QString kJavaGroup = QStringLiteral(
     "<source_group_java><name>Java</name><type>Java Source Group from Gradle</type><status>enabled</status>"
     "<java_standard>21</java_standard><source_extensions><source_extension>.java</source_extension></source_extensions>"
@@ -32,6 +33,9 @@ inline const QString kJavaGroup = QStringLiteral(
 inline const QString kTypeScriptGroup = QStringLiteral(
     "<source_group_ts><name>TypeScript</name><type>TypeScript Source Group</type><status>enabled</status>"
     "<typescript><tsconfig_path>tsconfig.json</tsconfig_path></typescript></source_group_ts>");
+inline const QString kPythonGroup = QStringLiteral(
+    "<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status>"
+    "<python><project_root>.</project_root></python></source_group_py>");
 
 inline const QChar kColumnSeparator(0x1f);
 
@@ -97,10 +101,11 @@ protected:
     }
   }
 
-  void writeProject(const QString& name, bool java, bool typeScript) {
+  void writeProject(const QString& name, bool java, bool typeScript, bool python = false) {
     write(mRoot + "/" + name + ".srctrlprj",
           "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<config><source_groups>" + (java ? kJavaGroup : QString()) +
-              (typeScript ? kTypeScriptGroup : QString()) + "</source_groups><version>8</version></config>\n");
+              (typeScript ? kTypeScriptGroup : QString()) + (python ? kPythonGroup : QString()) +
+              "</source_groups><version>8</version></config>\n");
   }
 
   RunResult index(const QString& name, bool full, const QString& path = QString()) {

@@ -831,6 +831,7 @@ void QtProjectWizard::selectedProjectType(SourceGroupType sourceGroupType) {
     }
     settings = typeScriptSettings;
   } break;
+  case SOURCE_GROUP_PYTHON:
   case SOURCE_GROUP_UNKNOWN:
     break;
   }

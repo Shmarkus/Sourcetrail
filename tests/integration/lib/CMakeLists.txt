@@ -38,8 +38,9 @@ foreach(test_name IN LISTS test_lib_names)
 endforeach()
 
 if(BUILD_JAVA_LANGUAGE_PACKAGE)
-  # Run the built Sourcetrail on copies of the Angular + Spring fixture; the Java half needs a JDK 21 JAVA_HOME.
-  foreach(suite IN ITEMS TypeScriptSourceGroupTestSuite EndpointLinkingTestSuite)
+  # Run the built Sourcetrail on copies of the Angular + Spring fixture (with the Python one); the Java half needs a JDK 21
+  # JAVA_HOME.
+  foreach(suite IN ITEMS TypeScriptSourceGroupTestSuite EndpointLinkingTestSuite PythonSourceGroupTestSuite)
     add_sourcetrail_test(
       NAME
       ${suite}
@@ -56,7 +57,8 @@ if(BUILD_JAVA_LANGUAGE_PACKAGE)
       "${CMAKE_BINARY_DIR}/test/")
     target_compile_definitions(
       ${suite} PRIVATE SOURCETRAIL_APP_PATH="$<TARGET_FILE:Sourcetrail>"
-                       TS_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring")
+                       TS_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring"
+                       PY_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/python")
     add_dependencies(${suite} Sourcetrail)
   endforeach()
 endif()

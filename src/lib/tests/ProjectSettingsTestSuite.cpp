@@ -3,6 +3,7 @@
 #include "language_packages.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettings.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithSourcePaths.h"
 #if BUILD_JAVA_LANGUAGE_PACKAGE
@@ -29,6 +30,9 @@ void PrintTo(LanguageType type, std::ostream* ostream) {
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   case LANGUAGE_TYPESCRIPT:
     *ostream << "LANGUAGE_TYPESCRIPT";
+    break;
+  case LANGUAGE_PYTHON:
+    *ostream << "LANGUAGE_PYTHON";
     break;
   case LANGUAGE_CUSTOM:
     *ostream << "LANGUAGE_CUSTOM";
@@ -105,6 +109,93 @@ TEST(ProjectSettings, onlyTheFirstEnabledTypeScriptGroupIsSupported) {
   // a disabled one is no second group, so a single enabled one is fine
   groups.pop_back();
   EXPECT_TRUE(SourceGroupSettingsTypeScript::getUnsupportedGroups(groups).empty());
+}
+
+TEST(ProjectSettings, loadsAndSavesPythonSourceGroup) {
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.loadFromString(
+      "<config><version>8</version><source_groups><source_group_py><name>Python</name>"
+      "<type>Python Source Group</type><status>enabled</status>"
+      "<python><project_root>backend</project_root><interpreter_path>.venv/bin/python</interpreter_path></python>"
+      "</source_group_py></source_groups></config>"));
+
+  const auto allSourceGroupSettings = settings.getAllSourceGroupSettings();
+  ASSERT_EQ(1, allSourceGroupSettings.size());
+  const auto python = std::dynamic_pointer_cast<SourceGroupSettingsPython>(allSourceGroupSettings.front());
+  ASSERT_TRUE(python);
+  EXPECT_EQ(SOURCE_GROUP_PYTHON, python->getType());
+  EXPECT_EQ(LANGUAGE_PYTHON, getLanguageTypeForSourceGroupType(python->getType()));
+  EXPECT_EQ(L"backend", python->getProjectRoot().wstr());
+  EXPECT_EQ(L".venv/bin/python", python->getInterpreterPath().wstr());
+
+  python->setProjectRoot(FilePath(L"."));
+  python->setInterpreterPath(FilePath());
+  settings.setAllSourceGroupSettings({python});
+  const auto saved = std::dynamic_pointer_cast<SourceGroupSettingsPython>(settings.getAllSourceGroupSettings().front());
+  ASSERT_TRUE(saved);
+  EXPECT_EQ(L".", saved->getProjectRoot().wstr());
+  EXPECT_TRUE(saved->getInterpreterPath().empty());
+  EXPECT_EQ("Python Source Group", sourceGroupTypeToString(saved->getType()));
+
+  const auto copy = std::dynamic_pointer_cast<SourceGroupSettingsPython>(saved->createCopy());
+  EXPECT_TRUE(copy->equalsSettings(saved.get()));
+  copy->setInterpreterPath(FilePath(L"python3.12"));
+  EXPECT_FALSE(copy->equalsSettings(saved.get()));
+}
+
+TEST(ProjectSettings, pythonProjectRootDefaultsToTheProjectFolder) {
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.loadFromString(
+      "<config><version>8</version><source_groups><source_group_py><name>Python</name>"
+      "<type>Python Source Group</type><status>enabled</status></source_group_py></source_groups></config>"));
+  const auto python = std::dynamic_pointer_cast<SourceGroupSettingsPython>(settings.getAllSourceGroupSettings().front());
+  ASSERT_TRUE(python);
+  EXPECT_EQ(settings.getProjectDirectoryPath().wstr(), python->getProjectRootExpandedAndAbsolute().wstr());
+  EXPECT_TRUE(python->getInterpreterPathExpandedAndAbsolute().empty());
+}
+
+TEST(ProjectSettings, onlyTheFirstEnabledPythonGroupIsSupported) {
+  ProjectSettings settings;
+  ASSERT_TRUE(settings.loadFromString(
+      "<config><version>8</version><source_groups>"
+      "<source_group_a><name>Web</name><type>TypeScript Source Group</type><status>enabled</status>"
+      "<typescript><tsconfig_path>web/tsconfig.json</tsconfig_path></typescript></source_group_a>"
+      "<source_group_b><name>Old</name><type>Python Source Group</type><status>disabled</status>"
+      "<python><project_root>old</project_root></python></source_group_b>"
+      "<source_group_c><name>Backend</name><type>Python Source Group</type><status>enabled</status>"
+      "<python><project_root>backend</project_root></python></source_group_c>"
+      "<source_group_d><name>Tools</name><type>Python Source Group</type><status>enabled</status>"
+      "<python><project_root>tools</project_root></python></source_group_d>"
+      "</source_groups></config>"));
+
+  auto groups = settings.getAllSourceGroupSettings();
+  // a TypeScript group next to a Python one is fine
+  EXPECT_TRUE(SourceGroupSettingsTypeScript::getUnsupportedGroups(groups).empty());
+  const auto unsupported = SourceGroupSettingsPython::getUnsupportedGroups(groups);
+  ASSERT_EQ(1, unsupported.size());
+  EXPECT_EQ("Tools", unsupported.front()->getName());
+  EXPECT_EQ(L"Python: only one Python source group per project is supported; skipping Tools",
+            SourceGroupSettingsPython::getUnsupportedGroupStatus(*unsupported.front()));
+
+  groups.pop_back();
+  EXPECT_TRUE(SourceGroupSettingsPython::getUnsupportedGroups(groups).empty());
+}
+
+TEST(ProjectSettings, pythonTriggerFilesAndSkippedFolders) {
+  for(const wchar_t* name : {L"a/b.py", L"pyproject.toml", L"setup.py", L"setup.cfg", L"requirements.txt",
+                             L"requirements-dev.txt", L"poetry.lock", L"uv.lock", L"Pipfile.lock"}) {
+    EXPECT_TRUE(SourceGroupSettingsPython::isTriggerFile(FilePath(name))) << FilePath(name).str();
+  }
+  for(const wchar_t* name : {L"a/b.pyc", L"a/b.pyi", L"notes.txt", L"Pipfile", L"package.json", L"a/b.ts"}) {
+    EXPECT_FALSE(SourceGroupSettingsPython::isTriggerFile(FilePath(name))) << FilePath(name).str();
+  }
+  for(const wchar_t* name : {L"node_modules", L".sourcetrail", L"build", L"dist", L".git", L".venv", L"venv",
+                             L"__pycache__", L".tox", L".mypy_cache"}) {
+    EXPECT_TRUE(SourceGroupSettingsPython::isUnwalkedDirectory(name)) << FilePath(name).str();
+  }
+  for(const wchar_t* name : {L"src", L"tests", L"target", L"shop"}) {
+    EXPECT_FALSE(SourceGroupSettingsPython::isUnwalkedDirectory(name)) << FilePath(name).str();
+  }
 }
 
 #if BUILD_JAVA_LANGUAGE_PACKAGE

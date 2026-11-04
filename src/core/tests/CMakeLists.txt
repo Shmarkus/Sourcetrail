@@ -271,6 +271,7 @@ add_sourcetrail_test(
   UtilityFileFileSystemTestSuite.cpp
   DEPS
   Sourcetrail::core::utility::file::FileSystem
+  Sourcetrail::core::utility::file::utilityFile
   Sourcetrail::core::utility::file::FileManager
   Sourcetrail::core::utility::file::FilePathFilter
   Sourcetrail::core::utility::utility

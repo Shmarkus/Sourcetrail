@@ -1865,10 +1865,11 @@ Python indexing are work in progress and not in the current builds. Windows and 
       `[0-9]*` or `v[0-9]*`. A build of a tag reports that tag; other builds report the nearest one reachable (now
       `2.0.0-fork`). A checkout without tags (a shallow CI clone) reports `1.0.0`.
 * __JDK 21__ and __Maven__, to build the Java indexer (`java_indexer/`) and to run the Java tests.
-* __Node.js 22.13 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`). The build stages it with its
-  dependencies (`npm ci --omit=dev`) into `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged,
-  TypeScript source groups cannot index and their tests are skipped. The indexer's own tests:
-  `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`.
+* __Node.js 22.13 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`), which also indexes Python
+  (`--language python`, with scip-python). The build stages it with its dependencies (`npm ci --omit=dev`) into
+  `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged, TypeScript source groups cannot index and
+  their tests are skipped. The indexer's own tests: `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`
+  (the Python tests that need a virtualenv skip without `python3`).
 
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by
 `scripts/fork/bootstrap.sh`.

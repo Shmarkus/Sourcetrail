@@ -1,6 +1,7 @@
 # Stages tools/ts-indexer with its runtime dependencies (npm ci --omit=dev) into bin/app/data/ts-indexer, where the
-# TypeScript source group runs it from (build/app/data links to bin/app/data). Node.js runs it at indexing time.
-# Without npm nothing is staged: TypeScript source groups then fail to run, and their tests skip.
+# TypeScript source group runs it from (build/app/data links to bin/app/data); it indexes Python too (--language
+# python). Node.js runs it at indexing time. Without npm nothing is staged: TypeScript source groups then fail to run,
+# and their tests skip.
 find_program(NPM_EXECUTABLE npm)
 if(NOT NPM_EXECUTABLE)
   message(WARNING "npm not found: the TypeScript indexer is not staged and TypeScript source groups cannot index")
@@ -15,6 +16,8 @@ set(TS_INDEXER_SCRIPTS
     http.mjs
     index.mjs
     link.mjs
+    pyright.mjs
+    python.mjs
     sqlite.mjs)
 set(TS_INDEXER_MANIFESTS package.json package-lock.json)
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Indexes a TypeScript project into a Sourcetrail database: runs scip-typescript on the project's tsconfig, converts
 // its SCIP index into Sourcetrail rows and writes the project's HttpClient calls to a JSON sidecar.
+// With `--language python`, indexes a Python project the same way with scip-python.
 //
 // Exit codes: 0 indexed; 1 failed; 2 bad usage or tool not installed; 3 the project's node_modules are missing, or
 // Node is too old for node:sqlite; 4 several TypeScript apps in one folder.
@@ -19,6 +20,8 @@ process.on('warning', warning => {
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const USAGE = 'ts-indexer: usage: index.mjs --project <dir> --tsconfig <path> --out <db> [--append] [--http-out <file>]';
+const PYTHON_USAGE = 'scip-indexer: usage: index.mjs --language python --project <dir> --out <db> [--append] '
+  + '[--python <python3>]';
 const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'target', 'out', 'coverage', 'bin', 'obj']);
 
 class Failure extends Error {
@@ -49,11 +52,11 @@ function parseArguments(argv) {
 }
 
 // node:sqlite is there without a flag from Node 22.13 on.
-async function checkNodeVersion() {
+async function checkNodeVersion(tool = 'ts-indexer') {
   try {
     await import('node:sqlite');
   } catch {
-    throw new Failure(3, `ts-indexer: Node.js 22.13 or newer is required (found ${process.version})`);
+    throw new Failure(3, `${tool}: Node.js 22.13 or newer is required (found ${process.version})`);
   }
 }
 
@@ -230,7 +233,140 @@ async function main(argv) {
   }
 }
 
-main(process.argv.slice(2)).catch(e => {
-  process.stderr.write(`${e instanceof Failure ? e.message : `ts-indexer: ${e.stack ?? e}`}\n`);
+// ---- Python ----
+
+function parsePythonArguments(argv) {
+  const options = { append: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const value = () => {
+      if (i + 1 >= argv.length) throw new Failure(2, PYTHON_USAGE);
+      return argv[++i];
+    };
+    if (arg === '--project') options.project = path.resolve(value());
+    else if (arg === '--out') options.out = path.resolve(value());
+    else if (arg === '--python') options.python = value();
+    else if (arg === '--append') options.append = true;
+    else throw new Failure(2, PYTHON_USAGE);
+  }
+  if (!options.project || !options.out) throw new Failure(2, PYTHON_USAGE);
+  return options;
+}
+
+function loadPythonTools() {
+  const require = createRequire(path.join(toolDir, 'index.mjs'));
+  try {
+    const scipPython = require.resolve('@sourcegraph/scip-python/index.js');
+    return {
+      scip: require('@sourcegraph/scip-typescript/dist/src/scip.js').scip,
+      scipPython,
+      dist: path.join(path.dirname(scipPython), 'dist'),
+    };
+  } catch {
+    throw new Failure(2, `scip-indexer: dependencies missing in ${toolDir}; run npm ci`);
+  }
+}
+
+const isExecutable = file => {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+};
+
+const onPath = name => (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, name));
+
+// The interpreter whose site-packages library imports resolve against: --python (a path, or a name on PATH), else
+// the active virtualenv, a .venv or venv in the project, python3 on PATH. {python} or {missing: what was looked for}.
+function findPython(options) {
+  if (options.python) {
+    const python = (options.python.includes(path.sep) ? [path.resolve(options.python)] : onPath(options.python))
+      .find(isExecutable);
+    return python ? { python } : { missing: options.python };
+  }
+  const candidates = [];
+  if (process.env.VIRTUAL_ENV) candidates.push(path.join(process.env.VIRTUAL_ENV, 'bin', 'python'));
+  for (const venv of ['.venv', 'venv']) candidates.push(path.join(options.project, venv, 'bin', 'python'));
+  const python = [...candidates, ...onPath('python3')].find(isExecutable);
+  return python ? { python } : { missing: 'python3' };
+}
+
+// scip-python (Pyright) asks `python3` on PATH for its search paths: a folder whose only python3 runs the chosen
+// interpreter (a wrapper, not a link, so that a virtualenv stays one), or none.
+function interpreterPath(scratch, python) {
+  const bin = path.join(scratch, 'bin');
+  fs.mkdirSync(bin);
+  if (python) {
+    const quoted = `'${python.replaceAll("'", "'\\''")}'`;
+    fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\nexec ${quoted} "$@"\n`, { mode: 0o755 });
+  }
+  return bin;
+}
+
+function runScipPython(scipPython, project, bin, environment, output) {
+  const r = spawnSync(process.execPath,
+    [scipPython, 'index', '--cwd', project, '--output', output, '--quiet', '--project-name', path.basename(project),
+      '--project-version', '0', '--environment', environment],
+    { cwd: project, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PATH: bin } });
+  if (r.status !== 0 || !fs.existsSync(output)) {
+    throw new Failure(1, `scip-indexer: scip-python failed (${r.error?.message ?? `exit ${r.status}`})\n`
+      + `${r.stderr ?? ''}${r.stdout ?? ''}`.trim());
+  }
+}
+
+async function mainPython(argv) {
+  const options = parsePythonArguments(argv);
+  await checkNodeVersion('scip-indexer');
+  const { scip, scipPython, dist } = loadPythonTools();
+  if (!fs.existsSync(options.project)) throw new Failure(2, `scip-indexer: ${options.project} not found`);
+  const { python, missing } = findPython(options);
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-indexer-'));
+  try {
+    const scipFile = path.join(scratch, 'index.scip');
+    // Library symbols are named from their module path, so the distributions they come from need not be listed
+    // (scip-python would otherwise ask pip for them).
+    const environment = path.join(scratch, 'environment.json');
+    fs.writeFileSync(environment, '[]\n');
+    runScipPython(scipPython, options.project, interpreterPath(scratch, python), environment, scipFile);
+    const index = scip.Index.deserializeBinary(fs.readFileSync(scipFile));
+
+    const { IndexWriter } = await import('./sqlite.mjs');
+    const { convertPython } = await import('./python.mjs');
+    const { loadPythonParser } = await import('./pyright.mjs');
+    const parser = loadPythonParser(dist);
+    const writer = new IndexWriter(options.out, { append: options.append, language: 'python' });
+    let result;
+    try {
+      result = convertPython({ index, projectRoot: options.project, writer, parser });
+      writer.finish();
+    } catch (e) {
+      writer.abort();
+      if (!writer.append) fs.rmSync(options.out, { force: true });
+      throw e;
+    }
+    if (missing) process.stdout.write(`scip-indexer: ${missing} not found; library symbols unresolved\n`);
+    process.stdout.write(`scip-indexer: ${result.files} files, ${result.errors} errors\n`);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// --language typescript (the default) or python, anywhere on the command line
+function dispatch(argv) {
+  const i = argv.indexOf('--language');
+  if (i < 0) return main(argv);
+  const language = argv[i + 1];
+  const rest = [...argv.slice(0, i), ...argv.slice(i + 2)];
+  if (language === 'typescript') return main(rest);
+  if (language === 'python') return mainPython(rest);
+  return Promise.reject(new Failure(2, `ts-indexer: unknown language ${language ?? ''}; typescript or python`));
+}
+
+const tool = process.argv[process.argv.indexOf('--language') + 1] === 'python' ? 'scip-indexer' : 'ts-indexer';
+dispatch(process.argv.slice(2)).catch(e => {
+  process.stderr.write(`${e instanceof Failure ? e.message : `${tool}: ${e.stack ?? e}`}\n`);
   process.exitCode = e instanceof Failure ? e.code : 1;
 });

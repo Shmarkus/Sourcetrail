@@ -27,11 +27,21 @@ void saveMavenSourceDirectories(const FilePath& outputDirectory,
                                 const std::string& fingerprint,
                                 const std::vector<FilePath>& sourceDirectories);
 
-// Written only after generate-sources and copy-dependencies both succeeded, with the jars the copy left behind.
-void markMavenDependenciesExported(const FilePath& outputDirectory, const std::string& fingerprint);
+// Written only after generate-sources, copy-dependencies and the effective POM all succeeded, with the jars the copy
+// left behind and the source directories that existed then (generated ones included).
+void markMavenDependenciesExported(const FilePath& outputDirectory,
+                                   const std::string& fingerprint,
+                                   const std::vector<FilePath>& existingSourceDirectories,
+                                   const std::vector<std::wstring>& warnings);
 
-// True when the last export was for this fingerprint and every jar it recorded is still there.
-bool mavenDependenciesUpToDate(const FilePath& outputDirectory, const std::string& fingerprint);
+// True when the last export was for this fingerprint and every jar and source directory it recorded is still there.
+// Then sets warnings, when given, to the warnings of that export.
+bool mavenDependenciesUpToDate(const FilePath& outputDirectory,
+                               const std::string& fingerprint,
+                               std::vector<std::wstring>* warnings = nullptr);
+
+// The warnings of the last export, whatever the fingerprint; nullopt when Maven never completed one.
+std::optional<std::vector<std::wstring>> loadMavenWarnings(const FilePath& outputDirectory);
 
 void removeMavenDependenciesExported(const FilePath& outputDirectory);
 

@@ -69,37 +69,91 @@ std::wstring getErrorMessageFromMavenOutput(std::shared_ptr<const TextAccess> ma
 }
 
 std::vector<std::wstring> getMavenArgs(const FilePath& settingsFilePath) {
-  std::vector<std::wstring> args;
+  // batch mode prints no colours, so the [ERROR] prefix check sees Maven's errors
+  std::vector<std::wstring> args = {L"-B"};
   if(!settingsFilePath.empty() && settingsFilePath.exists()) {
     args.push_back(L"--settings \"" + settingsFilePath.wstr() + L"\"");
   }
   return args;
 }
 
-// Every directory the effective POM names, existing or not; nullopt when Maven failed.
+struct MavenRun {
+  std::wstring errorMessage;    // empty when Maven succeeded
+  // one line naming the goal, the module and the first error; empty when Maven could not be run at all
+  std::wstring warning;
+};
+
+std::wstring describeFailure(const std::wstring& goal, std::shared_ptr<const TextAccess> mavenOutput, int exitCode) {
+  std::string firstError;
+  std::string module;
+  for(const std::string& line : mavenOutput->getAllLines()) {
+    const std::string trimmedLine = utility::trim(line);
+    std::string text;
+    if(utility::isPrefix<std::string>("[ERROR]", trimmedLine) || utility::isPrefix<std::string>("[FATAL]", trimmedLine)) {
+      text = utility::trim(trimmedLine.substr(7));
+    }
+    if(firstError.empty()) {
+      firstError = text;
+    }
+    if(const size_t position = text.find("on project "); module.empty() && position != std::string::npos) {
+      const std::string rest = text.substr(position + 11);
+      module = rest.substr(0, rest.find_first_of(": "));
+    }
+  }
+  return L"Maven: " + goal + L" failed in " + (module.empty() ? L"the project" : utility::decodeFromUtf8(module)) + L": " +
+      (firstError.empty() ? L"exit code " + std::to_wstring(exitCode) : utility::decodeFromUtf8(firstError)) +
+      L"; indexing with partial results";
+}
+
+// Runs Maven with the given goal and its arguments. Fails when Maven could not be run, printed an error or exited
+// with a non-zero code.
+MavenRun runMaven(const FilePath& mavenPath,
+                  const FilePath& settingsFilePath,
+                  const FilePath& projectDirectoryPath,
+                  const std::vector<std::wstring>& goalArgs) {
+  utility::setJavaHomeVariableIfNotExists();
+
+  std::vector<std::wstring> args = getMavenArgs(settingsFilePath);
+  utility::append(args, goalArgs);
+
+  const auto process = utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000);
+  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(utility::encodeToUtf8(process.output));
+
+  MavenRun run;
+  if(outputAccess->isEmpty()) {
+    run.errorMessage =
+        L"Sourcetrail was unable to locate Maven on this machine.\n"
+        "Please make sure to provide the correct Maven Path in the preferences.";
+    return run;
+  }
+
+  run.errorMessage = getErrorMessageFromMavenOutput(outputAccess);
+  if(run.errorMessage.empty() && process.exitCode != 0) {
+    run.errorMessage = L"The Maven command \"" + goalArgs.front() + L"\" failed with exit code " +
+        std::to_wstring(process.exitCode) + L".";
+  }
+  if(!run.errorMessage.empty()) {
+    run.warning = describeFailure(goalArgs.front(), outputAccess, process.exitCode);
+  }
+  return run;
+}
+
+// Every directory the effective POM names, existing or not; nullopt, with errorMessage set, when Maven failed.
 std::optional<std::vector<FilePath>> getCandidateDirectoriesFromEffectivePom(const FilePath& mavenPath,
                                                                              const FilePath& settingsFilePath,
                                                                              const FilePath& projectDirectoryPath,
                                                                              const FilePath& outputDirectoryPath,
-                                                                             bool addTestDirectories) {
-  utility::setJavaHomeVariableIfNotExists();
-
+                                                                             bool addTestDirectories,
+                                                                             std::wstring& errorMessage) {
   FilePath outputPath = outputDirectoryPath.getConcatenated(FilePath("/effective-pom.xml"));
 
-  auto args = getMavenArgs(settingsFilePath);
-  args.push_back(L"help:effective-pom");
-  args.push_back(L"-Doutput=" + outputPath.wstr());
-
-  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(
-      utility::encodeToUtf8(utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000).output));
-
-  const std::wstring errorMessage = getErrorMessageFromMavenOutput(outputAccess);
+  errorMessage =
+      runMaven(mavenPath, settingsFilePath, projectDirectoryPath, {L"help:effective-pom", L"-Doutput=" + outputPath.wstr()}).errorMessage;
   if(!errorMessage.empty()) {
-    MessageStatus(errorMessage, true, false).dispatch();
-    Application::getInstance()->handleDialog(errorMessage);
     return std::nullopt;
-  } else if(!outputPath.exists()) {
+  } else if(!outputPath.recheckExists()) {
     LOG_ERROR("Maven effective-pom didn't generate an output file: {}", outputPath.str());
+    errorMessage = L"Maven effective-pom didn't generate an output file: " + outputPath.wstr();
     return std::nullopt;
   }
 
@@ -157,43 +211,13 @@ std::vector<FilePath> filterExistingDirectories(const std::vector<FilePath>& unc
 
 namespace utility {
 std::wstring mavenGenerateSources(const FilePath& mavenPath, const FilePath& settingsFilePath, const FilePath& projectDirectoryPath) {
-  utility::setJavaHomeVariableIfNotExists();
-
-  auto args = getMavenArgs(settingsFilePath);
-  args.push_back(L"generate-sources");
-
-  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(
-      utility::encodeToUtf8(utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000).output));
-
-  if(outputAccess->isEmpty()) {
-    return L"Sourcetrail was unable to locate Maven on this machine.\n"
-           "Please make sure to provide the correct Maven Path in the preferences.";
+  const MavenRun run = runMaven(mavenPath, settingsFilePath, projectDirectoryPath, {L"generate-sources"});
+  if(run.warning.empty()) {
+    return run.errorMessage;
   }
-
-  return getErrorMessageFromMavenOutput(outputAccess);
-}
-
-bool mavenCopyDependencies(const FilePath& mavenPath,
-                           const FilePath& settingsFilePath,
-                           const FilePath& projectDirectoryPath,
-                           const FilePath& outputDirectoryPath) {
-  utility::setJavaHomeVariableIfNotExists();
-
-  auto args = getMavenArgs(settingsFilePath);
-  args.push_back(L"dependency:copy-dependencies");
-  args.push_back(L"-DoutputDirectory=" + outputDirectoryPath.wstr());
-
-  std::shared_ptr<TextAccess> outputAccess = TextAccess::createFromString(
-      utility::encodeToUtf8(utility::executeProcess(mavenPath.wstr(), args, projectDirectoryPath, true, 60000).output));
-
-  const std::wstring errorMessage = getErrorMessageFromMavenOutput(outputAccess);
-  if(!errorMessage.empty()) {
-    MessageStatus(errorMessage, true, false).dispatch();
-    Application::getInstance()->handleDialog(errorMessage);
-    return false;
-  }
-
-  return !outputAccess->isEmpty();
+  LOG_WARNING(run.errorMessage);
+  MessageStatus(run.warning).dispatch();
+  return {};
 }
 
 std::vector<FilePath> mavenGetAllDirectoriesFromEffectivePom(const FilePath& mavenPath,
@@ -201,22 +225,28 @@ std::vector<FilePath> mavenGetAllDirectoriesFromEffectivePom(const FilePath& mav
                                                              const FilePath& projectDirectoryPath,
                                                              const FilePath& outputDirectoryPath,
                                                              bool addTestDirectories) {
-  return filterExistingDirectories(getCandidateDirectoriesFromEffectivePom(
-                                       mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories)
-                                       .value_or(std::vector<FilePath>()));
+  std::wstring errorMessage;
+  const std::optional<std::vector<FilePath>> candidates = getCandidateDirectoriesFromEffectivePom(
+      mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories, errorMessage);
+  if(!candidates) {
+    LOG_ERROR(L"{}", errorMessage);
+    return {};
+  }
+  return filterExistingDirectories(*candidates);
 }
 
-bool mavenPrepareProject(const FilePath& mavenPath,
-                         const FilePath& settingsFilePath,
-                         const FilePath& projectDirectoryPath,
-                         const FilePath& outputDirectoryPath,
-                         bool addTestDirectories,
-                         bool fullRefresh,
-                         const std::function<void(const std::wstring&)>& onStep) {
+MavenPreparation mavenPrepareProject(const FilePath& mavenPath,
+                                     const FilePath& settingsFilePath,
+                                     const FilePath& projectDirectoryPath,
+                                     const FilePath& outputDirectoryPath,
+                                     bool addTestDirectories,
+                                     bool fullRefresh,
+                                     const std::function<void(const std::wstring&)>& onStep) {
+  MavenPreparation preparation;
   const std::string fingerprint = mavenBuildFingerprint(mavenPath, settingsFilePath, projectDirectoryPath, addTestDirectories);
-  if(!fullRefresh && mavenDependenciesUpToDate(outputDirectoryPath, fingerprint)) {
+  if(!fullRefresh && mavenDependenciesUpToDate(outputDirectoryPath, fingerprint, &preparation.warnings)) {
     LOG_INFO("Maven build files unchanged, reusing generated sources and exported dependencies.");
-    return true;
+    return preparation;
   }
 
   // a run that fails half way must not leave a marker claiming its outputs are current
@@ -226,28 +256,47 @@ bool mavenPrepareProject(const FilePath& mavenPath,
     removeMavenDependenciesExported(outputDirectoryPath);
   }
 
-  onStep(L"Generating Source Files");
-  const std::wstring errorMessage = mavenGenerateSources(mavenPath, settingsFilePath, projectDirectoryPath);
-  if(!errorMessage.empty()) {
-    MessageStatus(errorMessage, true, false).dispatch();
-    Application::getInstance()->handleDialog(errorMessage);
-    return false;
+  // Like a build without Sourcetrail, a failing module (one whose sibling modules are not installed, say) leaves the
+  // others' outputs in place: that is a warning, indexed with what there is.
+  const std::vector<std::pair<std::wstring, std::vector<std::wstring>>> steps = {
+      {L"Generating Source Files", {L"generate-sources"}},
+      {L"Exporting Dependencies", {L"dependency:copy-dependencies", L"-DoutputDirectory=" + outputDirectoryPath.wstr()}}};
+  for(const auto& [description, goalArgs] : steps) {
+    onStep(description);
+    const MavenRun run = runMaven(mavenPath, settingsFilePath, projectDirectoryPath, goalArgs);
+    if(run.errorMessage.empty()) {
+      continue;
+    } else if(run.warning.empty()) {
+      preparation.errorMessage = run.errorMessage;
+      return preparation;
+    }
+    LOG_WARNING(run.errorMessage);
+    preparation.warnings.push_back(run.warning);
   }
 
-  onStep(L"Exporting Dependencies");
-  if(!mavenCopyDependencies(mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath)) {
-    return false;
+  // without the source directories there is nothing to index. The marker records which ones existed, so that a
+  // `mvn clean` runs generate-sources again.
+  std::optional<std::vector<FilePath>> candidates = loadMavenSourceDirectories(outputDirectoryPath, fingerprint);
+  if(!candidates) {
+    onStep(L"Fetching Source Directories");
+    candidates = getCandidateDirectoriesFromEffectivePom(
+        mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories, preparation.errorMessage);
+    if(!candidates) {
+      return preparation;
+    }
+    saveMavenSourceDirectories(outputDirectoryPath, fingerprint, *candidates);
   }
 
-  markMavenDependenciesExported(outputDirectoryPath, fingerprint);
-  return true;
+  markMavenDependenciesExported(outputDirectoryPath, fingerprint, filterExistingDirectories(*candidates), preparation.warnings);
+  return preparation;
 }
 
 std::vector<FilePath> mavenGetSourceDirectories(const FilePath& mavenPath,
                                                 const FilePath& settingsFilePath,
                                                 const FilePath& projectDirectoryPath,
                                                 const FilePath& outputDirectoryPath,
-                                                bool addTestDirectories) {
+                                                bool addTestDirectories,
+                                                std::wstring& errorMessage) {
   const std::string fingerprint = mavenBuildFingerprint(mavenPath, settingsFilePath, projectDirectoryPath, addTestDirectories);
   if(const std::optional<std::vector<FilePath>> cached = loadMavenSourceDirectories(outputDirectoryPath, fingerprint)) {
     LOG_INFO("Maven build files unchanged, reusing the source directories of the effective POM.");
@@ -255,7 +304,7 @@ std::vector<FilePath> mavenGetSourceDirectories(const FilePath& mavenPath,
   }
 
   const std::optional<std::vector<FilePath>> candidates = getCandidateDirectoriesFromEffectivePom(
-      mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories);
+      mavenPath, settingsFilePath, projectDirectoryPath, outputDirectoryPath, addTestDirectories, errorMessage);
   if(!candidates) {
     return {};
   }

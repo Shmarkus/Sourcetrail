@@ -116,8 +116,15 @@ copied dependencies, as long as every jar recorded after the last copy is still 
 read from the effective POM. A full refresh (`st index --full`, or "All files" in the GUI) always runs Maven. The cache
 (`sourcetrail-maven-*.cache`) sits next to the copied jars in the source group's dependency directory. Because
 `generate-sources` is skipped too, sources generated from inputs other than POMs (an OpenAPI or WSDL file, say) are
-regenerated only by a full refresh or after touching a `pom.xml`. Neither does the cache see changes outside the
-project, such as a new SNAPSHOT of a dependency or of a parent POM in a repository: a full refresh picks them up.
+regenerated only by a full refresh or after touching a `pom.xml`; a source directory that is gone (after
+`mvn clean`, say) runs Maven again. Neither does the cache see changes outside the project folder, such as a module
+outside it (`<module>../x</module>`) or a new SNAPSHOT of a dependency or of a parent POM in a repository: a full
+refresh picks them up. Maven runs in batch mode. Only a Maven that cannot be run or a failing `help:effective-pom`
+(no source directories) fails the refresh. A `generate-sources` or `dependency:copy-dependencies` that prints an
+`[ERROR]` line or exits with a non-zero code (in a multi-module project whose modules depend on each other and are not
+installed, say) is a warning, `Maven: <goal> failed in <module>: <first error>; indexing with partial results`, and
+the index is built from what Maven left; the warning is shown again by every refresh that reuses that run, and
+`st status` prints it in its `maven` row (otherwise `maven ok`). `st`'s auto-refresh also watches these build files.
 On a private Maven project of 22 modules and 5.5k Java files (Nov 4, 2026, 3 runs each, medians), a refresh with no
 changes went from 13.1 s to 5.1 s and one after a one-line Java edit from 39 s to 24 s; the rest is loading the index
 (2 s), finding changed files (3 s) and, after an edit, the class path (about 4 s, once per indexing pass), the Java
@@ -384,7 +391,7 @@ location in a statement delombok joined onto one line maps to the original line 
 original line print the original path without a line, `src/.../Order.java (generated)`; if there is no original file, the
 row keeps the delombok `path:line` and the kind column gets `(generated)`. `--no-generated` (every command except `path`) drops those rows.
 
-**Auto-refresh.** Before each query `st` compares source (and Gradle build file) times with the last index
+**Auto-refresh.** Before each query `st` compares source (and Gradle or Maven build file) times with the last index
 and incrementally re-indexes if they changed, printing `refreshed N files in X.Ys` on stderr. The
 `<project>.srctrlst` marker beside the project file records the last refresh so edits made during one are not lost.
 `--no-refresh` skips this and exits 5 when stale; `--wait <ms>` bounds the wait for the project lock (default 30000).

@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "ScopedFunctor.h"
 #include "SourceGroupSettingsJavaMaven.h"
+#include "type/MessageStatus.h"
 #include "utility.h"
 #include "utilityJava.h"
 #include "utilityMaven.h"
@@ -69,16 +70,26 @@ bool SourceGroupJavaMaven::prepareMavenData(bool fullRefresh) {
       }
     });
 
-    return utility::mavenPrepareProject(mavenPath,
-                                        mavenSettingsPath,
-                                        projectRootPath,
-                                        m_settings->getMavenDependenciesDirectoryPath(),
-                                        m_settings->getShouldIndexMavenTests(),
-                                        fullRefresh,
-                                        [&dialogView, &dialogShown](const std::wstring& step) {
-                                          dialogView->showUnknownProgressDialog(L"Preparing Project", L"Maven\n" + step);
-                                          dialogShown = true;
-                                        });
+    const utility::MavenPreparation preparation = utility::mavenPrepareProject(
+        mavenPath,
+        mavenSettingsPath,
+        projectRootPath,
+        m_settings->getMavenDependenciesDirectoryPath(),
+        m_settings->getShouldIndexMavenTests(),
+        fullRefresh,
+        [&dialogView, &dialogShown](const std::wstring& step) {
+          dialogView->showUnknownProgressDialog(L"Preparing Project", L"Maven\n" + step);
+          dialogShown = true;
+        });
+    for(const std::wstring& warning : preparation.warnings) {
+      LOG_WARNING(warning);
+      MessageStatus(warning).dispatch();
+    }
+    if(!preparation.errorMessage.empty()) {
+      MessageStatus(preparation.errorMessage, true, false).dispatch();
+      Application::getInstance()->handleDialog(preparation.errorMessage);
+      return false;
+    }
   }
 
   return true;
@@ -94,13 +105,19 @@ std::vector<FilePath> SourceGroupJavaMaven::doGetAllSourcePaths() const {
     const FilePath mavenSettingsPath = m_settings->getMavenSettingsFilePathExpandedAndAbsolute();
     const FilePath projectRootPath = m_settings->getMavenProjectFilePathExpandedAndAbsolute().getParentDirectory();
 
+    std::wstring errorMessage;
     sourcePaths = utility::mavenGetSourceDirectories(mavenPath,
                                                      mavenSettingsPath,
                                                      projectRootPath,
                                                      m_settings->getMavenDependenciesDirectoryPath(),
-                                                     m_settings->getShouldIndexMavenTests());
+                                                     m_settings->getShouldIndexMavenTests(),
+                                                     errorMessage);
 
     dialogView->hideUnknownProgressDialog();
+    if(!errorMessage.empty()) {
+      MessageStatus(errorMessage, true, false).dispatch();
+      Application::getInstance()->handleDialog(errorMessage);
+    }
   }
   return sourcePaths;
 }

@@ -6,6 +6,13 @@
 #include <fstream>
 #include <set>
 
+#if defined(_WIN32)
+#  include <process.h>
+#  define getpid _getpid
+#else
+#  include <unistd.h>
+#endif
+
 #include "logging.h"
 #include "utilityString.h"
 
@@ -13,7 +20,7 @@ namespace utility {
 namespace {
 const char* const SOURCES_FILE_NAME = "sourcetrail-maven-sources.cache";
 const char* const EXPORTED_FILE_NAME = "sourcetrail-maven-exported.cache";
-const char* const CACHE_VERSION = "1";
+const char* const CACHE_VERSION = "2";    // 2: an end line, source directories in the export marker
 
 const std::set<std::string> SKIPPED_DIRECTORY_NAMES = {"target", "node_modules", ".git", ".sourcetrail"};
 
@@ -28,7 +35,8 @@ std::filesystem::path getExportedPath(const FilePath& outputDirectory) {
 void writeFileAtomically(const std::filesystem::path& path, const std::string& content) {
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
-  const std::filesystem::path temporaryPath = path.string() + ".tmp";
+  // one temporary file per process, so that two refreshes writing at once cannot interleave
+  const std::filesystem::path temporaryPath = path.string() + "." + std::to_string(getpid()) + ".tmp";
   {
     std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
     stream << content;
@@ -43,15 +51,17 @@ void writeFileAtomically(const std::filesystem::path& path, const std::string& c
   }
 }
 
-// The entries of a cache file, or nullopt when it is missing or was written by another version or for another
-// fingerprint.
-std::optional<std::vector<std::vector<std::string>>> readCache(const std::filesystem::path& path, const std::string& fingerprint) {
+// The entries of a cache file, or nullopt when it is missing, cut short (no end line) or was written by another
+// version or for another fingerprint.
+std::optional<std::vector<std::vector<std::string>>> readCache(const std::filesystem::path& path,
+                                                               const std::optional<std::string>& fingerprint) {
   std::ifstream stream(path, std::ios::binary);
   if(!stream) {
     return std::nullopt;
   }
 
   bool versionOk = false;
+  bool ended = false;
   std::string storedFingerprint;
   std::vector<std::vector<std::string>> entries;
   std::string line;
@@ -60,7 +70,12 @@ std::optional<std::vector<std::vector<std::string>>> readCache(const std::filesy
     if(parts.empty()) {
       continue;
     }
-    if(parts[0] == "version" && parts.size() == 2) {
+    if(ended) {
+      return std::nullopt;
+    }
+    if(parts[0] == "end" && parts.size() == 1) {
+      ended = true;
+    } else if(parts[0] == "version" && parts.size() == 2) {
       versionOk = parts[1] == CACHE_VERSION;
     } else if(parts[0] == "fp" && parts.size() >= 2) {
       storedFingerprint += line.substr(3) + "\n";
@@ -69,7 +84,7 @@ std::optional<std::vector<std::vector<std::string>>> readCache(const std::filesy
     }
   }
 
-  if(!versionOk || storedFingerprint != fingerprint) {
+  if(!ended || !versionOk || (fingerprint && storedFingerprint != *fingerprint)) {
     return std::nullopt;
   }
   return entries;
@@ -166,10 +181,13 @@ void saveMavenSourceDirectories(const FilePath& outputDirectory,
   for(const FilePath& directory : sourceDirectories) {
     out += "root\t" + directory.str() + "\n";
   }
-  writeFileAtomically(getSourcesPath(outputDirectory), out);
+  writeFileAtomically(getSourcesPath(outputDirectory), out + "end\n");
 }
 
-void markMavenDependenciesExported(const FilePath& outputDirectory, const std::string& fingerprint) {
+void markMavenDependenciesExported(const FilePath& outputDirectory,
+                                   const std::string& fingerprint,
+                                   const std::vector<FilePath>& existingSourceDirectories,
+                                   const std::vector<std::wstring>& warnings) {
   const std::filesystem::path directory(outputDirectory.str());
   std::error_code ec;
   std::filesystem::create_directories(directory, ec);
@@ -186,23 +204,63 @@ void markMavenDependenciesExported(const FilePath& outputDirectory, const std::s
   for(const std::string& jar : jars) {
     out += "jar\t" + jar + "\n";
   }
-  writeFileAtomically(getExportedPath(outputDirectory), out);
+  for(const FilePath& directory : existingSourceDirectories) {
+    out += "dir\t" + directory.str() + "\n";
+  }
+  for(const std::wstring& warning : warnings) {
+    std::string line = encodeToUtf8(warning);
+    std::replace_if(
+        line.begin(), line.end(), [](char c) { return c == '\t' || c == '\n' || c == '\r'; }, ' ');
+    out += "warning\t" + line + "\n";
+  }
+  writeFileAtomically(getExportedPath(outputDirectory), out + "end\n");
 }
 
-bool mavenDependenciesUpToDate(const FilePath& outputDirectory, const std::string& fingerprint) {
+bool mavenDependenciesUpToDate(const FilePath& outputDirectory, const std::string& fingerprint, std::vector<std::wstring>* warnings) {
   const auto entries = readCache(getExportedPath(outputDirectory), fingerprint);
   if(!entries) {
     return false;
   }
 
+  std::vector<std::wstring> storedWarnings;
   for(const std::vector<std::string>& parts : *entries) {
     std::error_code ec;
-    if(parts[0] != "jar" || parts.size() != 2 ||
-       !std::filesystem::is_regular_file(std::filesystem::path(outputDirectory.str()) / parts[1], ec)) {
+    if(parts.size() != 2) {
+      return false;
+    } else if(parts[0] == "warning") {
+      storedWarnings.push_back(decodeFromUtf8(parts[1]));
+    } else if(parts[0] == "jar") {
+      if(!std::filesystem::is_regular_file(std::filesystem::path(outputDirectory.str()) / parts[1], ec)) {
+        return false;
+      }
+    } else if(parts[0] == "dir") {
+      // gone after a `mvn clean`, say, for generated sources
+      if(!std::filesystem::is_directory(std::filesystem::path(parts[1]), ec)) {
+        LOG_INFO("Maven source directory missing, running Maven again: {}", parts[1]);
+        return false;
+      }
+    } else {
       return false;
     }
   }
+  if(warnings) {
+    *warnings = storedWarnings;
+  }
   return true;
+}
+
+std::optional<std::vector<std::wstring>> loadMavenWarnings(const FilePath& outputDirectory) {
+  const auto entries = readCache(getExportedPath(outputDirectory), std::nullopt);
+  if(!entries) {
+    return std::nullopt;
+  }
+  std::vector<std::wstring> warnings;
+  for(const std::vector<std::string>& parts : *entries) {
+    if(parts[0] == "warning" && parts.size() == 2) {
+      warnings.push_back(decodeFromUtf8(parts[1]));
+    }
+  }
+  return warnings;
 }
 
 void removeMavenDependenciesExported(const FilePath& outputDirectory) {

@@ -34,6 +34,10 @@ Freshness checkFreshness(const ProjectSettings& settings,
                          const std::vector<FilePath>& indexedFiles,
                          const GroupInputs& inputs = {});
 
+// One "maven\t..." row per enabled Maven source group for `st status`: "ok", each warning of its last Maven run
+// (re-shown by every refresh that reuses it) or "not prepared; st index runs Maven".
+std::vector<std::string> mavenStatusRows(const ProjectSettings& settings);
+
 // st's last successful refresh: when it started and the index time it left behind.
 struct RefreshRecord {
   TimeStamp startedAt;

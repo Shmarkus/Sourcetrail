@@ -17,9 +17,11 @@
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
+#include "SourceGroupSettingsJavaMaven.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupTypeScript.h"
 #include "utilityGradleCache.h"
+#include "utilityMavenCache.h"
 #include "utilityString.h"
 
 namespace st {
@@ -139,6 +141,18 @@ Freshness checkFreshness(const ProjectSettings& settings,
       typeScriptRoots.push_back(typeScript->getTsconfigPathExpandedAndAbsolute().getParentDirectory());
       continue;
     }
+    if(const auto maven = std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(group)) {
+      // the files the Maven cache is keyed on; a refresh runs Maven again when one changed
+      const FilePath projectDirectory = maven->getMavenProjectFilePathExpandedAndAbsolute().getParentDirectory();
+      for(const FilePath& buildFile :
+          utility::mavenBuildFiles(projectDirectory, maven->getMavenSettingsFilePathExpandedAndAbsolute())) {
+        if(changedSince(buildFile, indexedAt)) {
+          freshness.changedFiles++;
+        }
+      }
+      fallback = true;
+      continue;
+    }
     const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);
     if(!gradle) {
       fallback = true;
@@ -187,6 +201,26 @@ Freshness checkFreshness(const ProjectSettings& settings,
   }
   freshness.stale = freshness.changedFiles > 0;
   return freshness;
+}
+
+std::vector<std::string> mavenStatusRows(const ProjectSettings& settings) {
+  std::vector<std::string> rows;
+  for(const auto& group : settings.getAllSourceGroupSettings()) {
+    const auto maven = std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(group);
+    if(!maven || group->getStatus() != SOURCE_GROUP_STATUS_ENABLED) {
+      continue;
+    }
+    const std::optional<std::vector<std::wstring>> warnings = utility::loadMavenWarnings(maven->getMavenDependenciesDirectoryPath());
+    if(!warnings) {
+      rows.push_back("maven\tnot prepared; st index runs Maven");
+    } else if(warnings->empty()) {
+      rows.push_back("maven\tok");
+    }
+    for(const std::wstring& warning : warnings.value_or(std::vector<std::wstring>())) {
+      rows.push_back("maven\t" + utility::encodeToUtf8(warning));
+    }
+  }
+  return rows;
 }
 
 std::optional<RefreshRecord> lastRefresh(const ProjectSettings& settings) {

@@ -514,3 +514,19 @@ TEST(MavenCache, ATruncatedCacheFileIsAMiss) {
   }
   ASSERT_EQ(ALL_GOALS, f.refresh(false));
 }
+
+TEST(MavenCache, TheSettingsFileIsPassedAsAnOptionAndItsOwnArgument) {
+  MavenCacheFixture f;
+  const FilePath settings = s_root.getConcatenated(L"team settings.xml");
+  MavenCacheFixture::writeAt(settings, "<settings/>");
+  ASSERT_TRUE(utility::mavenPrepareProject(f.maven, settings, f.project, f.output, false, false, [](const std::wstring&) {
+              }).errorMessage.empty());
+  for(const std::string& goal : {"generate-sources", "dependency:copy-dependencies", "help:effective-pom"}) {
+    const std::vector<std::string> arguments = f.argv(goal);
+    ASSERT_GE(arguments.size(), 4u) << goal;
+    ASSERT_EQ("-B", arguments[0]) << goal;
+    ASSERT_EQ("--settings", arguments[1]) << goal;
+    ASSERT_EQ(settings.str(), arguments[2]) << goal;
+    ASSERT_EQ(goal, arguments[3]) << goal;
+  }
+}

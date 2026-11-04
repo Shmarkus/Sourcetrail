@@ -72,7 +72,9 @@ std::vector<std::wstring> getMavenArgs(const FilePath& settingsFilePath) {
   // batch mode prints no colours, so the [ERROR] prefix check sees Maven's errors
   std::vector<std::wstring> args = {L"-B"};
   if(!settingsFilePath.empty() && settingsFilePath.exists()) {
-    args.push_back(L"--settings \"" + settingsFilePath.wstr() + L"\"");
+    // separate arguments: the process is started without a shell, so quotes would reach Maven as part of the path
+    args.push_back(L"--settings");
+    args.push_back(settingsFilePath.wstr());
   }
   return args;
 }

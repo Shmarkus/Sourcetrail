@@ -327,7 +327,7 @@ By pressing the pen icon in the bottom right corner you can open the plain text 
 
 The Preferences window lets you define settings for all projects. You can open the Preferences from the menu via [Edit/Preferences](#edit).
 
-<img src="docs/documentation/preferences_screen.png" width="800" alt="Preferences Screen">
+<img src="docs/documentation/preferences_screen.png" width="500" alt="Preferences Screen">
 
 | Setting | Description
 | --- | ---
@@ -350,6 +350,7 @@ The Preferences window lets you define settings for all projects. You can open t
 | Sourcetrail Port | Port number that Sourcetrail uses to listen for incoming messages from plugins.
 | Plugin Port | Port number that Sourcetrail sends outgoing messages to.
 | Indexer threads | Define how many parallel threads are used during indexing. Setting this value to `default` will cause Sourcetrail to detect the ideal number of threads based on the CPU and use as many threads for indexing.
+| Multi Process C/C++ Indexing | Work in progress, with C/C++ indexing. Enable C/C++ indexer threads to run in a different process. This prevents the application from crashing due to unforeseen exceptions while indexing.
 | Java Path | If you want to use Sourcetrail on Java source code, please specify the path to the `libjvm.so` of a JDK 21 or newer. You can either use the button below for automatic detection or add the path manually. For instructions on how to find it see [Finding Java Runtime Library Location](#finding-java-runtime-library-location).
 | JRE System Library | Add the jar files of your JRE System Library. These jars can be found inside your JRE install directory. You can either use the button below for automatic detection or add the paths manually.
 | Maven Path | Only required for indexing projects using Maven. Provide the location of your installed Maven executable. You can also use the auto detection.

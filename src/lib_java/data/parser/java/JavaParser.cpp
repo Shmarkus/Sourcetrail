@@ -64,7 +64,14 @@ JavaParser::JavaParser(std::shared_ptr<ParserClient> client, std::shared_ptr<Ind
 }
 
 JavaParser::~JavaParser() {
+  std::lock_guard<std::mutex> lock(s_parsersMutex);
   s_parsers.erase(m_id);
+}
+
+JavaParser* JavaParser::findParser(int parserId) {
+  std::lock_guard<std::mutex> lock(s_parsersMutex);
+  const auto it = s_parsers.find(parserId);
+  return it != s_parsers.end() ? it->second : nullptr;
 }
 
 void JavaParser::buildIndex(std::shared_ptr<IndexerCommandJava> indexerCommand) {
@@ -112,7 +119,7 @@ void JavaParser::buildIndex(const FilePath& sourceFilePath,
   }
 }
 
-int JavaParser::s_nextParserId = 0;
+std::atomic<int> JavaParser::s_nextParserId = 0;
 
 std::map<int, JavaParser*> JavaParser::s_parsers;
 

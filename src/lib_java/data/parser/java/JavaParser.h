@@ -1,6 +1,7 @@
 #ifndef JAVA_PARSER_H
 #define JAVA_PARSER_H
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -146,9 +147,8 @@ private:
 
 #define DEF_RELAYING_METHOD(NAME, PARAMETERS, ARGUMENTS)                                                                         \
   static void NAME(JNIEnv* env, jobject objectOrClass, jint parserId PARAMETERS) {                                               \
-    std::map<int, JavaParser*>::iterator it = s_parsers.find(int(parserId));                                                     \
-    if(it != s_parsers.end()) {                                                                                                  \
-      it->second->do##NAME(ARGUMENTS);                                                                                           \
+    if(JavaParser* parser = findParser(int(parserId))) {                                                                         \
+      parser->do##NAME(ARGUMENTS);                                                                                               \
     } else {                                                                                                                     \
       LOG_ERROR("parser with id {} not found", parserId);                                                                        \
     }                                                                                                                            \
@@ -184,9 +184,8 @@ private:
   DEF_RELAYING_METHOD_7(RecordError, jstring, jint, jint, jint, jint, jint, jint)
 
   static bool GetInterrupted(JNIEnv* env, jobject objectOrClass, jint parserId) {
-    std::map<int, JavaParser*>::iterator it = s_parsers.find(int(parserId));
-    if(it != s_parsers.end()) {
-      return it->second->doGetInterrupted();
+    if(JavaParser* parser = findParser(int(parserId))) {
+      return parser->doGetInterrupted();
     } else {
       LOG_ERROR("parser with id {} not found", parserId);
     }
@@ -194,7 +193,11 @@ private:
     return false;
   }
 
-  static int s_nextParserId;
+  // The parsers of all indexer threads; each thread's JVM callbacks look up their own parser while other threads add
+  // and remove theirs, so every access holds the mutex.
+  static JavaParser* findParser(int parserId);
+
+  static std::atomic<int> s_nextParserId;
   static std::map<int, JavaParser*> s_parsers;
   static std::mutex s_parsersMutex;
 

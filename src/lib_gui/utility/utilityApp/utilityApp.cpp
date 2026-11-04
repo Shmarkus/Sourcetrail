@@ -25,9 +25,35 @@ std::mutex sRunningProcessesMutex;    // NOLINT(cppcoreguidelines-avoid-non-cons
 
 std::set<std::shared_ptr<boost::process::child>> sRunningProcesses;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
+namespace {
+// boost.process converts wide strings with its own locale, which is the "C" locale outside Windows and fails on
+// any non-ASCII character. Outside Windows it gets UTF-8 instead, which it passes on unconverted.
+#if BOOST_OS_WINDOWS
+using NativeString = std::wstring;
+
+NativeString toNative(const std::wstring& text) {
+  return text;
+}
+
+std::filesystem::path fromNative(const boost::process::filesystem::path& path) {
+  return path.generic_wstring();
+}
+#else
+using NativeString = std::string;
+
+NativeString toNative(const std::wstring& text) {
+  return encodeToUtf8(text);
+}
+
+std::filesystem::path fromNative(const boost::process::filesystem::path& path) {
+  return path.generic_string();
+}
+#endif
+}    // namespace
+
 std::filesystem::path searchPath(const std::filesystem::path& bin, bool& isOk) {
   isOk = false;
-  auto searchPath = boost::process::search_path(bin.wstring()).generic_wstring();
+  auto searchPath = fromNative(boost::process::search_path(toNative(bin.wstring())));
   if(!searchPath.empty()) {
     isOk = true;
     return searchPath;
@@ -82,16 +108,23 @@ ProcessOutput executeProcess(const std::wstring& command,
       env["PATH"].append(entry);
     }
 
+    const NativeString executable = toNative(searchPath(command).wstring());
+    std::vector<NativeString> nativeArguments;
+    nativeArguments.reserve(arguments.size());
+    for(const std::wstring& argument : arguments) {
+      nativeArguments.push_back(toNative(argument));
+    }
+
     if(workingDirectory.empty()) {
-      process = std::make_shared<boost::process::child>(searchPath(command).wstring(),
-                                                        boost::process::args(arguments),
+      process = std::make_shared<boost::process::child>(executable,
+                                                        boost::process::args(nativeArguments),
                                                         env,
                                                         boost::process::std_in.close(),
                                                         (boost::process::std_out & boost::process::std_err) > asyncPipe);
     } else {
-      process = std::make_shared<boost::process::child>(searchPath(command).wstring(),
-                                                        boost::process::args(arguments),
-                                                        boost::process::start_dir(workingDirectory.wstr()),
+      process = std::make_shared<boost::process::child>(executable,
+                                                        boost::process::args(nativeArguments),
+                                                        boost::process::start_dir(toNative(workingDirectory.wstr())),
                                                         env,
                                                         boost::process::std_in.close(),
                                                         (boost::process::std_out & boost::process::std_err) > asyncPipe);
@@ -174,9 +207,9 @@ ProcessOutput executeProcess(const std::wstring& command,
     exitCode = process->exit_code();
   } catch(const boost::process::process_error& e) {
     ProcessOutput ret;
-    ret.error = decodeFromUtf8(e.code().message());
+    ret.error = decodeFromUtf8(e.what());
     ret.exitCode = e.code().value();
-    LOG_ERROR(L"Process error: {}", ret.error);
+    LOG_ERROR(L"Process error running \"{}\" in \"{}\": {}", command, workingDirectory.wstr(), ret.error);
 
     return ret;
   }

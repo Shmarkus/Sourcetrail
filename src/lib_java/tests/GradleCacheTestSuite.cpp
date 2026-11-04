@@ -233,6 +233,7 @@ struct FakeDelombok {
   std::vector<std::vector<FilePath>> runs;
   std::vector<std::vector<FilePath>> sourcePaths;
   bool failOnFiles = false;
+  bool failOnDirectories = false;
 
   static void copy(const std::filesystem::path& from, const std::filesystem::path& to) {
     std::filesystem::create_directories(to.parent_path());
@@ -245,25 +246,29 @@ struct FakeDelombok {
   }
 
   utility::DelombokRunner runner() {
-    return [this](const std::vector<FilePath>& inputs, const std::vector<FilePath>& sourcePath, const FilePath& outputDirectory) {
+    return [this](const std::vector<FilePath>& inputs,
+                  const std::vector<FilePath>& sourcePath,
+                  const FilePath& outputDirectory) -> utility::DelombokFailure {
       runs.push_back(inputs);
       sourcePaths.push_back(sourcePath);
       const std::filesystem::path out(outputDirectory.str());
       for(const FilePath& input : inputs) {
         const std::filesystem::path in(input.str());
-        if(std::filesystem::is_directory(in)) {
+        if(std::filesystem::is_directory(in) && failOnDirectories) {
+          return L"fake delombok failed on a directory";
+        } else if(std::filesystem::is_directory(in)) {
           for(const auto& entry : std::filesystem::recursive_directory_iterator(in)) {
             if(entry.is_regular_file()) {
               copy(entry.path(), out / entry.path().lexically_relative(in));
             }
           }
         } else if(failOnFiles) {
-          return false;
+          return L"fake delombok failed on a file";
         } else {
           copy(in, out / in.filename());
         }
       }
-      return true;
+      return std::nullopt;
     };
   }
 
@@ -298,8 +303,8 @@ struct DelombokFixture : public GradleCacheFixture {
     fingerprint = utility::gradleBuildFingerprint(project);
   }
 
-  bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false) const {
-    return utility::delombokSourceSet(roots, target, project, fingerprint, fake.runner(), wholeTree);
+  bool run(FakeDelombok& fake, const FilePath& target, bool wholeTree = false, std::wstring* failure = nullptr) const {
+    return utility::delombokSourceSet(roots, target, project, fingerprint, fake.runner(), wholeTree, failure);
   }
 
   bool run(FakeDelombok& fake) const {
@@ -617,11 +622,29 @@ TEST(GradleCache, DelombokFallsBackToTheWholeTreeWhenAnIncrementalRunFails) {
 
   fake.failOnFiles = true;
   f.edit("a/src/main/java/pkg/A.java", "class A { long x; }");
-  ASSERT_TRUE(f.run(fake));
+  std::wstring failure;
+  ASSERT_TRUE(f.run(fake, f.delombok, false, &failure));
+  // The fallback succeeded, so there is nothing to report.
+  EXPECT_EQ(L"", failure);
 
   ASSERT_TRUE(fake.runs.size() == 3);
   ASSERT_TRUE(fake.lastRunWasWholeTree());
   ASSERT_TRUE(readTree(f.delombok)["a_src_main_java/pkg/A.java"] == "// delomboked\nclass A { long x; }");
+}
+
+TEST(GradleCache, DelombokReportsWhyTheWholeTreeRunAfterAFailedIncrementalRunFailed) {
+  DelombokFixture f;
+  FakeDelombok fake;
+  ASSERT_TRUE(f.run(fake));
+
+  fake.failOnFiles = true;
+  fake.failOnDirectories = true;
+  f.edit("a/src/main/java/pkg/A.java", "class A { long x; }");
+  std::wstring failure;
+  EXPECT_FALSE(f.run(fake, f.delombok, false, &failure));
+
+  ASSERT_TRUE(fake.runs.size() == 3);
+  EXPECT_EQ(L"fake delombok failed on a directory", failure);
 }
 
 namespace {

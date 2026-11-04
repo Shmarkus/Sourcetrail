@@ -1862,14 +1862,15 @@ TEST(StIndex, fullIndexReportsFileCount) {
 }
 
 namespace {
-// Copies the Lombok fixture to <base>/<directory>/lombok and runs st with the given JVM there.
+// What st printed and returned.
 struct LombokRun {
   int exitCode = -1;
   QByteArray out;
   QByteArray err;
 };
 
-LombokRun indexLombokCopy(const QString& base, const QString& directory, const QByteArray& javaPath, const QStringList& args) {
+// Copies the Lombok fixture to <base>/<directory>/lombok, for st to index with the given JVM; returns the copy.
+std::filesystem::path copyLombokFixture(const QString& base, const QString& directory, const QByteArray& javaPath) {
   const std::filesystem::path project = (base + "/" + directory + "/lombok").toStdString();
   std::filesystem::create_directories(project.parent_path());
   std::filesystem::copy(ST_LOMBOK_FIXTURE, project, std::filesystem::copy_options::recursive);
@@ -1877,7 +1878,10 @@ LombokRun indexLombokCopy(const QString& base, const QString& directory, const Q
         "<config><indexing><indexer_thread_count>2</indexer_thread_count><multi_process_indexing>0</multi_process_indexing>"
         "<java><has_prefilled_java_path>1</has_prefilled_java_path><java_path>" +
             javaPath + "</java_path></java></indexing></config>\n");
+  return project;
+}
 
+LombokRun runStIn(const QString& base, const std::filesystem::path& project, const QStringList& args) {
   QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
   if(!environment.contains("GRADLE_USER_HOME")) {
     environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
@@ -1895,6 +1899,21 @@ LombokRun indexLombokCopy(const QString& base, const QString& directory, const Q
   }
   return {st.exitStatus() == QProcess::NormalExit ? st.exitCode() : -1, st.readAllStandardOutput(), st.readAllStandardError()};
 }
+
+LombokRun indexLombokCopy(const QString& base, const QString& directory, const QByteArray& javaPath, const QStringList& args) {
+  return runStIn(base, copyLombokFixture(base, directory, javaPath), args);
+}
+
+// A JDK whose JVM, which the Gradle import loads, is the real one, and whose java executable, which runs delombok,
+// runs the given shell script; returns its libjvm.so.
+QByteArray standInJdk(const QString& base, const QByteArray& javaHome, const QByteArray& script) {
+  QDir().mkpath(base + "/jdk/lib/server");
+  QDir().mkpath(base + "/jdk/bin");
+  QFile::link(QString::fromUtf8(javaHome) + "/lib/server/libjvm.so", base + "/jdk/lib/server/libjvm.so");
+  write(base + "/jdk/bin/java", "#!/bin/sh\n" + script);
+  QFile::setPermissions(base + "/jdk/bin/java", QFile::permissions(base + "/jdk/bin/java") | QFile::ExeOwner);
+  return (base + "/jdk/lib/server/libjvm.so").toUtf8();
+}
 }    // namespace
 
 // The processes the indexer runs, such as delombok, get the non-ASCII paths intact, and delombok keeps the package
@@ -1910,6 +1929,56 @@ TEST(StIndex, projectBelowANonAsciiDirectoryIndexesEveryFile) {
       base, QString::fromUtf8("ünïcödé"), javaHome + "/lib/server/libjvm.so", {"index", "--full", "--no-server"});
   EXPECT_EQ(0, run.exitCode) << run.err.toStdString();
   EXPECT_EQ("indexed 9 files, 0 errors\n", run.out.toStdString()) << run.err.toStdString();
+}
+
+// A delombok run that fails stops the indexing with an error status naming the reason, so `st index` fails with it.
+TEST(StIndex, failingDelombokFailsTheIndexWithItsReason) {
+  const QByteArray javaHome = qgetenv("JAVA_HOME");
+  ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QByteArray jvm = standInJdk(base, javaHome, "echo 'delombok stand-in: boom'\nexit 7\n");
+
+  const LombokRun run = indexLombokCopy(base, "project", jvm, {"index", "--full", "--no-server"});
+  EXPECT_EQ(1, run.exitCode) << run.err.toStdString();
+  EXPECT_FALSE(run.out.contains("indexed ")) << run.out.toStdString();
+  EXPECT_TRUE(run.err.contains("st: Indexing failed")) << run.err.toStdString();
+  EXPECT_TRUE(run.err.contains("ERROR: Delombok failed with exit code 7: delombok stand-in: boom")) << run.err.toStdString();
+  EXPECT_TRUE(run.err.contains("ERROR: Indexing stopped: preparing the source group \"CLI Lombok regression\" failed."))
+      << run.err.toStdString();
+}
+
+// Delombok of the changed files failing is no error when delombok of the whole tree, which follows, succeeds.
+TEST(StIndex, failedDelombokOfChangedFilesIsNoErrorWhenTheWholeTreeRunSucceeds) {
+  const QByteArray javaHome = qgetenv("JAVA_HOME");
+  ASSERT_FALSE(javaHome.isEmpty()) << "st index needs a JDK 21 JAVA_HOME";
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  // Only a run on directories, the whole tree, succeeds.
+  const QByteArray script =
+      "for a in \"$@\"; do case \"$a\" in *.java) echo 'stand-in: no files'; exit 7;; esac; done\n"
+      "exec '" +
+      javaHome + "/bin/java' \"$@\"\n";
+  const QByteArray jvm = standInJdk(base, javaHome, script);
+  const std::filesystem::path project = copyLombokFixture(base, "project", jvm);
+  LombokRun run = runStIn(base, project, {"index", "--full", "--no-server"});
+  ASSERT_EQ(0, run.exitCode) << run.err.toStdString();
+
+  // Modification times are compared in whole seconds.
+  QThread::sleep(2);
+  QFile person(QString::fromStdString((project / "src/main/java/example/Person.java").string()));
+  ASSERT_TRUE(person.open(QIODevice::Append));
+  person.write("\n// edited\n");
+  person.close();
+
+  run = runStIn(base, project, {"index", "--no-server", "--verbose"});
+  EXPECT_EQ(0, run.exitCode) << run.err.toStdString();
+  EXPECT_TRUE(run.out.startsWith("indexed ")) << run.out.toStdString();
+  EXPECT_TRUE(run.err.contains("Delombok of changed files failed")) << run.err.toStdString();
+  EXPECT_TRUE(run.err.contains("stand-in: no files")) << run.err.toStdString();
+  EXPECT_FALSE(run.err.contains("ERROR: ")) << run.err.toStdString();
 }
 
 namespace {

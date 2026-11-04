@@ -22,6 +22,10 @@ std::string SourceGroup::getId() const {
   return getSourceGroupSettings()->getId();
 }
 
+std::string SourceGroup::getName() const {
+  return getSourceGroupSettings()->getName();
+}
+
 SourceGroupType SourceGroup::getType() const {
   return getSourceGroupSettings()->getType();
 }

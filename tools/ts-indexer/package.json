@@ -9,7 +9,7 @@
     "sourcetrail-ts-indexer": "index.mjs"
   },
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.13"
   },
   "scripts": {
     "test": "node --test test/index.mjs"

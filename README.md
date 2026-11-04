@@ -50,7 +50,7 @@ and Python support returns in a later release. Windows and macOS builds are not 
       `[0-9]*` or `v[0-9]*`. A build of a tag reports that tag; other builds report the nearest one reachable (now
       `2.0.0-fork`). A checkout without tags (a shallow CI clone) reports `1.0.0`.
 * __JDK 21__ and __Maven__, to build the Java indexer (`java_indexer/`) and to run the Java tests.
-* __Node.js 22.5 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`). The build stages it with its
+* __Node.js 22.13 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`). The build stages it with its
   dependencies (`npm ci --omit=dev`) into `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged,
   TypeScript source groups cannot index and their tests are skipped. The indexer's own tests:
   `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`.
@@ -120,11 +120,13 @@ classes, interfaces, functions, methods and fields, with their calls, usages, ty
 imports and decorators. In an Angular + Spring app in one folder, each frontend HTTP call is then linked to its Spring
 handler, so a call chain runs from an Angular component through the HTTP request into the backend and back.
 
-**Prerequisites.** Node.js 22.5 or newer on `PATH`, and the project's own `node_modules`: run `npm install` in the
+**Prerequisites.** Node.js 22.13 or newer on `PATH`, and the project's own `node_modules`: run `npm install` in the
 project first (the indexer resolves types through them). Without either, the Java still indexes and the TypeScript step
-reports one line instead, `TypeScript skipped: cannot run "node": ...` or `TypeScript skipped: ... node_modules missing
-...; run npm install`; nothing of the TypeScript is half-written. A TypeScript run that fails for another reason reports
-`TypeScript failed (exit code N): ...` and the rest of the refresh still completes.
+reports one line instead, `TypeScript skipped: cannot run "node": ...`, `TypeScript skipped: ... Node.js 22.13 or newer
+is required (found v...)` or `TypeScript skipped: ... node_modules missing ...; run npm install`; nothing of the
+TypeScript is half-written, and a skipped group is tried again on the next refresh. A TypeScript run that fails for
+another reason reports `TypeScript failed (exit code N): ...` and the rest of the refresh still completes; a refresh
+retries it once its inputs change, and `st index --full` (or a full refresh in the GUI) retries it right away.
 
 **Projects.** New Project on a folder with a `tsconfig.json` and a Gradle or Maven build creates both source groups in
 one project; with a `tsconfig.json` and no Java build it creates a TypeScript-only project (no HTTP link: there is no

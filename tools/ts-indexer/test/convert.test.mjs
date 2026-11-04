@@ -179,6 +179,34 @@ describe('the command line', () => {
     }
   });
 
+  test('nodeWithoutSqliteExits3', () => {
+    // Node before 22.13 has node:sqlite only behind a flag: a missing prerequisite, like node_modules
+    const dir = scratchDir('nosqlite');
+    try {
+      const r = runIndexer(['--project', fixtureDir, '--tsconfig', path.join(fixtureDir, 'tsconfig.json'),
+        '--out', path.join(dir, 'ts.srctrldb')], ['--no-experimental-sqlite']);
+      assert.equal(r.code, 3);
+      assert.equal(r.stderr, `ts-indexer: Node.js 22.13 or newer is required (found ${process.version})\n`);
+      assert.equal(fs.existsSync(path.join(dir, 'ts.srctrldb')), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('anEarlierSidecarIsRemovedWhenARunFails', () => {
+    const dir = scratchDir('sidecar');
+    try {
+      const sidecar = path.join(dir, 'ts-http-calls.json');
+      fs.writeFileSync(sidecar, '[]\n');
+      const r = runIndexer(['--project', dir, '--tsconfig', path.join(dir, 'tsconfig.json'),
+        '--out', path.join(dir, 'ts.srctrldb'), '--http-out', sidecar]);
+      assert.equal(r.code, 2);
+      assert.equal(fs.existsSync(sidecar), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('appendKeepsExistingRows', () => {
     const dir = scratchDir('append');
     try {

@@ -41,7 +41,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # The TypeScript indexer runs on Node (22.5 or newer); CMake stages it with npm, and its tests run on node.
+      # The TypeScript indexer runs on Node (22.13 or newer: node:sqlite without a flag); CMake stages it with npm, and its tests run on node.
       - name: Configure Node
         uses: actions/setup-node@v4
         with:

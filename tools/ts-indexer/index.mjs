@@ -2,8 +2,8 @@
 // Indexes a TypeScript project into a Sourcetrail database: runs scip-typescript on the project's tsconfig, converts
 // its SCIP index into Sourcetrail rows and writes the project's HttpClient calls to a JSON sidecar.
 //
-// Exit codes: 0 indexed; 1 failed; 2 bad usage or tool not installed; 3 the project's node_modules are missing;
-// 4 several TypeScript apps in one folder.
+// Exit codes: 0 indexed; 1 failed; 2 bad usage or tool not installed; 3 the project's node_modules are missing, or
+// Node is too old for node:sqlite; 4 several TypeScript apps in one folder.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -46,6 +46,15 @@ function parseArguments(argv) {
   if (!options.project || !options.tsconfig || !options.out) throw new Failure(2, USAGE);
   options.httpOut ??= path.join(path.dirname(options.out), 'ts-http-calls.json');
   return options;
+}
+
+// node:sqlite is there without a flag from Node 22.13 on.
+async function checkNodeVersion() {
+  try {
+    await import('node:sqlite');
+  } catch {
+    throw new Failure(3, `ts-indexer: Node.js 22.13 or newer is required (found ${process.version})`);
+  }
 }
 
 function loadTools() {
@@ -184,6 +193,9 @@ function runScipTypescript(scipMain, project, tsconfig, output) {
 
 async function main(argv) {
   const options = parseArguments(argv);
+  // Written again only once this run has indexed: a failed run must not leave an earlier run's calls behind.
+  fs.rmSync(options.httpOut, { force: true });
+  await checkNodeVersion();
   const { ts, scip, scipMain } = loadTools();
   if (!fs.existsSync(options.tsconfig)) throw new Failure(2, `ts-indexer: ${options.tsconfig} not found`);
 

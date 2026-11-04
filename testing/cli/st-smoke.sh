@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Requires a JDK 21 JAVA_HOME, and Node.js 22.5+ on PATH for the TypeScript section (skipped without node).
+# Requires a JDK 21 JAVA_HOME, and Node.js 22.13+ on PATH for the TypeScript section (skipped without node).
 # Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
 die() { echo "st-smoke.sh: $*" >&2; exit 2; }
 [ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"

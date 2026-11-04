@@ -34,7 +34,7 @@ Sourcetrail includes support for Java 12 and lower which is powered by [Eclipse 
 
 ### TypeScript
 
-Sourcetrail indexes TypeScript projects that have a `tsconfig.json`, powered by [scip-typescript](https://github.com/sourcegraph/scip-typescript). Indexing needs Node.js 22.5 or newer and the project's `node_modules` (run `npm install` first). In an Angular + Spring application kept in one folder, each frontend HTTP call is linked to the Spring handler it reaches, so call graphs run from the frontend into the backend and back. Angular HTML templates, JavaScript-only projects and frontends in a different folder than their backend are not covered. See "TypeScript and the frontend–backend link" in the project README for details.
+Sourcetrail indexes TypeScript projects that have a `tsconfig.json`, powered by [scip-typescript](https://github.com/sourcegraph/scip-typescript). Indexing needs Node.js 22.13 or newer and the project's `node_modules` (run `npm install` first). In an Angular + Spring application kept in one folder, each frontend HTTP call is linked to the Spring handler it reaches, so call graphs run from the frontend into the backend and back. Angular HTML templates, JavaScript-only projects and frontends in a different folder than their backend are not covered. See "TypeScript and the frontend–backend link" in the project README for details.
 
 ### Python
 

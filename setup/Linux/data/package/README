@@ -11,7 +11,7 @@ Command line: bin/st indexes a project (st index [--full]) and answers code navi
 (callers, implementations, paths, impact; see "st: code navigation for agents" in the project README). It starts
 bin/sourcetrail to index, so keep them in the same directory.
 
-TypeScript (an Angular + Spring app in one folder, or a TypeScript-only project) needs Node.js 22.5 or newer on PATH
+TypeScript (an Angular + Spring app in one folder, or a TypeScript-only project) needs Node.js 22.13 or newer on PATH
 and the project's node_modules (run npm install in the project first). Without them the Java still indexes and the
 TypeScript step reports why it was skipped.
 

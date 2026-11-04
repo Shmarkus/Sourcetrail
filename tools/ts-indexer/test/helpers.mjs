@@ -19,8 +19,8 @@ export function scratchDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `ts-indexer-${prefix}-`));
 }
 
-export function runIndexer(args) {
-  const r = spawnSync(process.execPath, [indexerCli, ...args], { encoding: 'utf8' });
+export function runIndexer(args, nodeOptions = []) {
+  const r = spawnSync(process.execPath, [...nodeOptions, indexerCli, ...args], { encoding: 'utf8' });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 

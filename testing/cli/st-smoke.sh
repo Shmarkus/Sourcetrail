@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Requires a JDK 21 JAVA_HOME, and Node.js 22.13+ on PATH for the TypeScript section (skipped without node).
+# Requires a JDK 21 JAVA_HOME, and Node.js 22.13+ on PATH for the TypeScript and Python sections (skipped without node).
 # Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
 die() { echo "st-smoke.sh: $*" >&2; exit 2; }
 [ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"
@@ -554,6 +554,27 @@ if command -v node > /dev/null; then
     cd "$work/project"
 else
     echo "st-smoke.sh: node not found, TypeScript section skipped" >&2
+fi
+
+# Python: the shop fixture through the packaged scip-python; a caller in another module and the status row.
+if command -v node > /dev/null; then
+    cp -R "$root/testing/cli/python" "$work/py"
+    find "$work/py" -exec touch -d '1 minute ago' {} +
+    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<config><source_groups>' \
+        '<source_group_py><name>Python</name><type>Python Source Group</type><status>enabled</status></source_group_py>' \
+        '</source_groups><version>8</version></config>' > "$work/py/shop.srctrlprj"
+    cd "$work/py"
+    run 0 index --full
+    # One source file: the group's root folder, as for TypeScript's tsconfig.json.
+    [ "$(cat "$work/out")" = "indexed 1 files, 0 errors" ] || assert "Python fixture: st index --full printed: $(cat "$work/out")"
+    run 0 status
+    contains $'python\tindexed' out
+    run 0 callers shop.models.User.greet --no-source
+    contains 'callers: 1 (project shop)' err
+    contains $'shop.services.OrderService.place(str, str, str)\tmethod\tshop/services.py:22' out
+    cd "$work/project"
+else
+    echo "st-smoke.sh: node not found, Python section skipped" >&2
 fi
 
 echo "st smoke passed"

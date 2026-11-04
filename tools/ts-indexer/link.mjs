@@ -83,8 +83,8 @@ function removeEndpointLayer(db) {
   }
 }
 
-// Every handler in the index's Java files: {verb, path, fileId, start, end, nodeId, name}; nodeId is the first method
-// declared after the annotation (null if there is none), name its display name. Also the mappings that could not be
+// Every handler in the index's Java files: {verb, path, fileId, start, end, nodeId, name}; nodeId is the method declared
+// by the annotated declaration (null if the index has none there: never the next method), name its display name. Also the mappings that could not be
 // read, as {where, message}. The database may lack its indexes while Sourcetrail builds it: one query per table.
 function collectHandlers(db) {
   const handlers = [], problems = [];
@@ -115,7 +115,8 @@ function collectHandlers(db) {
   for (const [fileId, { path: filePath, handlers: fileHandlers }] of found) {
     for (const h of fileHandlers) {
       const after = m => m.line > h.end.line || (m.line === h.end.line && m.column > h.end.column);
-      const method = (methods.get(fileId) ?? []).find(after);
+      const before = m => m.line < h.nameBefore.line || (m.line === h.nameBefore.line && m.column < h.nameBefore.column);
+      const method = (methods.get(fileId) ?? []).find(m => after(m) && before(m));
       handlers.push({ ...h, fileId, nodeId: method?.id ?? null,
         name: method ? displayName(method.serialized_name) : `${filePath}:${h.start.line}` });
     }

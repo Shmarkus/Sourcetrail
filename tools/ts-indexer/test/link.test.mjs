@@ -200,6 +200,22 @@ describe('endpoint linking', () => {
     assert.match(log, /^ambiguous\tGET\t\/api\/orders\tsrc\/main\/webapp\/app\/orders\/order\.service\.ts:17\t2 handlers: com\.acme\.shop\.LegacyOrderResource\.orders, com\.acme\.shop\.OrderResource\.list$/m);
   });
 
+  test('aMappingWhoseMethodIsMissingLinksNothing', () => {
+    // list is not in the index (the Java indexer dropped it): its mapping must not take create, the next method
+    const dropped = mixedIndex('dropped', () => {},
+      { ...JAVA_METHODS, [`${SHOP}/OrderResource.java`]: [RESOURCE, ['create', 'get']] });
+    assert.equal(link(dropped), 'link: 2 linked, 0 ambiguous, 2 unresolved\n');
+    const index = openIndex(dropped.db);
+    try {
+      assert.deepEqual(links(index), FIXTURE_LINKS.filter(([, endpoint]) => endpoint !== 'HTTP.GET /api/orders'));
+      assert.deepEqual(index.named('HTTP.GET /api/orders'), []);
+    } finally {
+      index.close();
+    }
+    assert.match(fs.readFileSync(dropped.log, 'utf8'),
+      /^unresolved\tGET\t\/api\/orders\t.*\tno method after the mapping at .*OrderResource\.java:20$/m);
+  });
+
   test('feignClientIsNoHandler', () => {
     // a frontend call to the path the Feign client posts to
     const feign = mixedIndex('feign', root => {

@@ -175,8 +175,9 @@ const lineColumn = (text, index) => {
   return { line, column: index - before.lastIndexOf('\n') };
 };
 
-// Whether the declaration after `index` (past further annotations) is a type's.
-function declaresType(structure, index) {
+// The declaration after `index`, past further annotations: [its start, the end of its head (where its parameter
+// list, body, initialiser or `;` begins)], or null if an annotation is not closed.
+function declarationHead(structure, index) {
   let i = index;
   for (;;) {
     while (/\s/.test(structure[i] ?? '')) i++;
@@ -185,12 +186,18 @@ function declaresType(structure, index) {
     i += annotation[0].length;
     if (structure[i] === '(') {
       const close = closingParen(structure, i);
-      if (close < 0) return false;
+      if (close < 0) return null;
       i = close + 1;
     }
   }
   const end = structure.slice(i).search(/[({;=]/);
-  return /\b(class|interface|enum|record)\s+\w+/.test(structure.slice(i, end < 0 ? undefined : i + end));
+  return [i, end < 0 ? structure.length : i + end];
+}
+
+// Whether the declaration after `index` (past further annotations) is a type's.
+function declaresType(structure, index) {
+  const head = declarationHead(structure, index);
+  return head !== null && /\b(class|interface|enum|record)\s+\w+/.test(structure.slice(...head));
 }
 
 // The brace depth at each index, counting braces outside parentheses only (annotation arguments hold array braces).
@@ -217,9 +224,10 @@ function combineVerbs(classVerbs, methodVerbs) {
   return both.length > 0 ? both : null;
 }
 
-// The mappings a Java file declares: {handlers: [{verb, path, start, end}], problems: [{line, message}]}. Paths are
-// string literals, or the file's own string constants (see stringConstants). `start` and `end` are the annotation's
-// 1-based line and column (end inclusive); the handler method is the first one declared after `end`. Only the methods
+// The mappings a Java file declares: {handlers: [{verb, path, start, end, nameBefore}], problems: [{line, message}]}.
+// Paths are string literals, or the file's own string constants (see stringConstants). `start` and `end` are the
+// annotation's 1-based line and column (end inclusive); the handler method is the one whose name lies after `end` and
+// before `nameBefore`, the end of the annotated declaration's head (its parameter list). Only the methods
 // of the file's first type are handlers; mappings elsewhere (nested types, other types of the file) are reported.
 export function springHandlers(source) {
   const text = blankComments(source);
@@ -280,6 +288,8 @@ export function springHandlers(source) {
       problem(parsed.error);
       continue;
     }
+    const head = declarationHead(structure, a.last + 1);
+    const nameBefore = lineColumn(text, head ? head[1] : a.last + 1);
     const methodVerbs = a.kind === 'Request' ? parsed.verbs : [a.kind.toUpperCase()];
     const verbs = combineVerbs(classVerbs, methodVerbs);
     if (!verbs) {
@@ -288,7 +298,7 @@ export function springHandlers(source) {
     }
     for (const prefix of prefixes) {
       for (const path of parsed.paths) {
-        for (const verb of verbs) handlers.push({ verb, path: normalizePath(`${prefix}/${path}`), start, end });
+        for (const verb of verbs) handlers.push({ verb, path: normalizePath(`${prefix}/${path}`), start, end, nameBefore });
       }
     }
   }

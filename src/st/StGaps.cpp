@@ -141,7 +141,10 @@ public:
     if(isUnsolvedSymbol(name)) {
       return true;
     }
-    if(name.size() < 2 || !project().owns(name)) {
+    // Clang resolves every name it indexes (one it cannot is an index error), so a C/C++ symbol without a definition
+    // is declared in a header that is not indexed: a library's, even in a namespace the project also declares in
+    // (a std::hash specialization makes std one).
+    if(name.size() < 2 || name.getDelimiter() == L"::" || !project().owns(name)) {
       return false;
     }
     // A member of a defined type without a definition is implicit: a default constructor, an enum's valueOf.

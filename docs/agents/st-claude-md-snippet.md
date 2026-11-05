@@ -35,7 +35,8 @@ Use `st` (Sourcetrail CLI) for Java, Python, C and C++ structure, and for TypeSc
   prints `Python skipped: ...`. A module that does not resolve counts as one error in `st status`; calls into it have
   no links, and no `st: incomplete:` line warns about them.
 - **C and C++ names** use `::`: `'ns::Cls::method'`, `'ns::f(double, int)'`, `'ns::Box<T>::get'`, `'ns::operator=='`.
-  Standard library and other library symbols are left out of `callees` and `supers` (`refs` has them). After a change
+  Standard library and other library symbols are left out of `callees` and `supers` without a warning (`refs` has
+  them). After a change
   to compiler flags (`compile_commands.json`), run `st index --full`: a refresh does not re-index for it.
 - **No index, or one from an older version** (exit 4): run `st index --full` once in the project folder. Later
   queries refresh changed files on their own; `st index` does the same on demand.

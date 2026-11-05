@@ -2872,6 +2872,19 @@ FixtureCopy* StCxx::sFixture = nullptr;
 StRun StCxx::sIndexed;
 }    // namespace
 
+// The fixture specializes std::hash, so the project declares something in namespace std. The standard library's
+// symbols are still the library's: no unresolved symbols, and no gap on an answer that reaches them.
+TEST_F(StCxx, aStandardLibrarySpecializationLeavesTheLibraryResolved) {
+  const StRun status = st({"status"});
+  EXPECT_NE(std::string::npos, status.out.find("\nunresolved_symbols\t0\n")) << status.out;
+  // Book::describe() calls std::operator+ on strings
+  for(const char* key : {"shop::Book::describe()", "std::hash<shop::Item>::operator()"}) {
+    const StRun callees = st({"callees", key});
+    EXPECT_EQ(0, callees.exitCode) << key << callees.err;
+    EXPECT_EQ(std::string::npos, callees.err.find("st: incomplete:")) << key << callees.err;
+  }
+}
+
 TEST_F(StCxx, indexesAndReportsTheFixture) {
   EXPECT_EQ("indexed 5 files, 0 errors\n", sIndexed.out) << sIndexed.err;
   const StRun status = st({"status"});

@@ -1718,10 +1718,9 @@ What is not covered:
 - Functions of the same name in different programs, such as the `main()` of an app and of its tests, have the same
   key, and `st` cannot tell them apart (exit 2 lists both as `main()`).
 - Symbols from headers outside the project (the standard library, installed libraries) are parsed but not indexed:
-  `find`, `callees` and `supers` leave them out, `refs` answers for them (`st refs std::runtime_error`). A project that
-  declares something in namespace `std` itself (a `std::hash` or `std::formatter` specialization, as `fmt`'s tests do)
-  makes them count as unresolved: `st status` then reports thousands of `unresolved_symbols` (7,283 for `fmt`) and
-  answers that reach them end with an `st: incomplete:` line.
+  `find`, `callees` and `supers` leave them out without a warning (`supers` of a class deriving from
+  `std::runtime_error` is empty), while `refs` answers for them (`st refs std::runtime_error`). They never count as
+  unresolved, also in a project that declares something in namespace `std` (a `std::hash` specialization).
 - The indexed headers are the whole project folder, so vendored libraries and generated headers in it are indexed too,
   which costs time on a large project; narrow the "Header Files & Directories to Index" or add an exclude in Edit
   Project.
@@ -2002,7 +2001,9 @@ Windows and macOS builds are not maintained here.
   The `fork_release_cxx` preset finds Clang through `Clang_DIR=/usr/lib/llvm-19/lib/cmake/clang`, where these packages
   put it. For an LLVM 19 elsewhere (another distribution, your own build), override it:
   `cmake --preset fork_release_cxx -DClang_DIR=/path/to/llvm-19/lib/cmake/clang`. Other LLVM versions are rejected at
-  configure time, because `bin/app/data/cxx/include` holds Clang 19's builtin headers, which must match the parser.
+  configure time, because `bin/app/data/cxx/include` holds Clang 19's builtin headers, which must match the parser. To
+  build against another version (say LLVM 18 for local development), copy its `lib/clang/18/include` over those
+  headers and add `-DSOURCETRAIL_CXX_LLVM_MAJOR=18` next to its `Clang_DIR`.
   Without LLVM 19, the `fork_release` preset builds everything except C/C++.
 
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by

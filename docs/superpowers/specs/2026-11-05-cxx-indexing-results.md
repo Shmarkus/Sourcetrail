@@ -14,6 +14,10 @@ The project file was written as New Project writes it: `.sourcetrail/<name>.srct
 Database" group with `../build/compile_commands.json`, indexed header path `..` and the exclude `../build/_deps/**`.
 Spec: `2026-11-05-cxx-indexing-design.md`.
 
+To reproduce the environment: `st-ci-2204-cxx` is `ubuntu:22.04` with the "Install build tools" and "Install LLVM 19"
+steps of `.github/workflows/build.yml` run in it (as root, without `sudo`), plus JDK 21, Node.js 22.13 or newer and
+`scripts/fork/bootstrap.sh`; run it with `--init --shm-size=4g`.
+
 ## Projects
 
 | | Fixture | fmt |
@@ -23,7 +27,7 @@ Spec: `2026-11-05-cxx-indexing-design.md`.
 | `st index --full` wall time | 2.1 s | 10.1 s |
 | Indexed files (`st status` `files`), all files seen | 8, 227 | 51, 490 |
 | Nodes, edges | 343, 842 | 71,345, 316,381 |
-| `unresolved_symbols` | 0 | 7,283 (see below) |
+| `unresolved_symbols` | 0 | 0 (7,283 before the fix below) |
 | Header edit, then a query | `box.hpp`: `refreshed 1 files in 2.0s` | `include/fmt/os.h`: 31 of 49 sources re-indexed, `refreshed 1 files in 10.1s` (indexer 6.6 s) |
 | Source edit, then a query | | `src/os.cc`: `refreshed 1 files in 6.1s` |
 | `st status` | 0.03 s | 0.33 s |
@@ -53,7 +57,7 @@ loading the index.
 | fmt | `outline fmt::v11::basic_memory_buffer` | 15 members with access and line ranges |
 | fmt | `impact fmt::v11::report_system_error` | 11 symbols in 5 files: the destructors of `buffered_file` and `file`, then the test that calls it up to gtest's runner |
 | fmt | `callers 'fmt::v11::vformat(string_view, format_args)'` | 294, nearly all instantiations of `fmt::v11::format<...>` at one line, `include/fmt/format.h:4365` |
-| fmt | `supers fmt::v11::format_error` | 0, and `st: incomplete: 1 links to unresolved symbols` |
+| fmt | `supers fmt::v11::format_error` | 0: its base `std::runtime_error` is a library symbol (before the fix also `st: incomplete: 1 links to unresolved symbols`) |
 
 Every answer took 0.2 to 0.4 s on fmt and about 0.03 s on the fixture, with no `st serve`. Parameter types match
 without their namespace (`string_view` for `fmt::v11::string_view`). A function declared in a header and defined in
@@ -61,12 +65,13 @@ without their namespace (`string_view` for `fmt::v11::string_view`). A function 
 
 Two things to know from fmt:
 - **Library symbols.** Symbols from headers outside the project, such as `std::runtime_error`, are parsed but not
-  indexed, so `find`, `callees` and `supers` leave them out; `refs std::runtime_error` answers. In a project that
-  declares nothing in namespace `std` this is silent (a one-file check: `supers` of a class deriving from
-  `std::runtime_error` is 0 with no warning, `unresolved_symbols 0`). fmt's tests specialize templates in `std`, so
-  `st` counts `std` as one of the project's namespaces and its undefined symbols as unresolved: `unresolved_symbols
-  7283`, and answers that reach them end with `st: incomplete:`. Documented as a limit; a follow-up could leave out
-  symbols that only non-indexed files declare.
+  indexed, so `find`, `callees` and `supers` leave them out without a warning; `refs std::runtime_error` answers (78
+  references in fmt). fmt's tests specialize templates in `std`, and in the first measurement `st` therefore counted
+  `std` as one of the project's namespaces and its undefined symbols as unresolved: `unresolved_symbols 7283`, and
+  answers that reached them ended with `st: incomplete:`. Fixed (review fix round): an undefined C/C++ symbol is never
+  unresolved, because Clang resolves every name it indexes and one it cannot is an index error, so such a symbol is
+  declared in a non-indexed header. After the fix fmt shows `unresolved_symbols 0` and no `st: incomplete:` line; the
+  fixture now specializes `std::hash<shop::Item>`, and `StCxx` checks the same.
 - **Template instantiations** are callers of their own: 294 callers of `vformat` are mostly `format<...>` for each
   argument type the tests use, all at the same line.
 

@@ -43,3 +43,13 @@ private:
 bool operator==(const Item& left, const Item& right);
 
 }    // namespace shop
+
+// A standard library specialization, as real code has: std stays the library's namespace, not the project's.
+namespace std {
+template <>
+struct hash<shop::Item> {
+  size_t operator()(const shop::Item& item) const noexcept {
+    return hash<string>()(item.name());
+  }
+};
+}    // namespace std

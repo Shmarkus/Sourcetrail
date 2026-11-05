@@ -1,5 +1,5 @@
 # ${CMAKE_SOURCE_DIR}/src/lib_cxx/CMakeLists.txt
-find_package(Clang REQUIRED)
+find_package(Clang REQUIRED CONFIG)
 
 add_library(Sourcetrail_lib_cxx)
 add_library(Sourcetrail::lib_cxx ALIAS Sourcetrail_lib_cxx)

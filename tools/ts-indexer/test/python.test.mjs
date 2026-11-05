@@ -462,6 +462,66 @@ describe('Python projects', () => {
     }
   });
 
+  test('aClassDecoratedWithANonGenericRegistryKeepsItsBase', () => {
+    // scip-python lists the decorated type's bases (Type[User] -> object) instead of the class's own
+    const { dir, run, index } = indexCopy('pydecorated', {
+      'shop/registry.py': 'from typing import Dict, Type\nfrom shop.models import User\n\n\n'
+        + 'class Registry:\n    kinds: Dict[str, Type[User]] = {}\n\n    @classmethod\n'
+        + '    def register(cls, kind: Type[User]) -> Type[User]:\n        cls.kinds[kind.__name__] = kind\n'
+        + '        return kind\n',
+      'shop/staff.py': 'from shop.models import User\nfrom shop.registry import Registry\n\n\n'
+        + '@Registry.register\nclass Clerk(User):\n    def can_refund(self) -> bool:\n        return True\n' });
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.deepEqual(index.edgesBetween('shop.staff.Clerk', `${MODELS}.User`).map(e => e.type), [EDGE.INHERITANCE]);
+      assert.deepEqual(index.edgesBetween('shop.staff.Clerk.can_refund', `${MODELS}.User.can_refund`).map(e => e.type),
+        [EDGE.OVERRIDE]);
+      assert.deepEqual(index.edgesBetween('shop.staff.Clerk', 'builtins.object').map(e => e.type), []);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aSubscriptedBaseIsInherited', () => {
+    const { dir, run, index } = indexCopy('pygeneric', { 'shop/boxes.py': 'from typing import Generic, TypeVar\n\n'
+      + 'T = TypeVar("T")\n\n\nclass Box(Generic[T]):\n    pass\n\n\nclass IntBox(Box[int]):\n    pass\n' });
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.deepEqual(index.edgesBetween('shop.boxes.IntBox', 'shop.boxes.Box').map(e => e.type), [EDGE.INHERITANCE]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aStandardLibrarySubmoduleImportIsNoError', () => {
+    const { dir, run, index } = indexCopy('pystdlibsub', { 'shop/logs.py':
+      'from logging.handlers import RotatingFileHandler\nfrom unittest.mock import MagicMock\nimport os.path\n' },
+    ['--python', '/nonexistent/python3']);
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.deepEqual(errorsOf(index), []);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('aDebianPackagingStageIsNotIndexed', () => {
+    // dh_install copies the sources to debian/<package>/: a second copy of every module
+    const { dir, run, index } = indexCopy('pydebian', { 'debian/control': 'Source: shop\n',
+      'debian/shop-app/opt/shop/shop/models.py': 'class User:\n    pass\n', 'debian/tmp/shop/x.py': 'y = 1\n' });
+    try {
+      assert.equal(run.code, 0, run.stderr);
+      assert.equal(index.db.prepare("SELECT count(*) AS n FROM file WHERE path LIKE '%/debian/%'").get().n, 0);
+      assert.deepEqual(index.named(`${MODELS}.User`).map(n => n.type), [NODE.CLASS]);
+    } finally {
+      index?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('appendKeepsExistingRows', () => {
     const dir = scratchDir('pyappend');
     try {

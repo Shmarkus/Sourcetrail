@@ -5,7 +5,6 @@ build-*
 .vs/*
 out/*
 
-/bin/app/data/cxx
 /bin/app/data/java/lib/
 /bin/app/data/ts-indexer/
 /bin/app/data/projects/ignored/

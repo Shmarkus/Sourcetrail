@@ -93,6 +93,8 @@ jobs:
         run: |
           eval "$(scripts/fork/bootstrap.sh --env)"
           cmake --build --preset fork_release_cxx -j "$(nproc)"
+          # LLVM 19 and the C/C++ build take about 3 GB more than before; this shows how close the runner gets.
+          df -h /
 
       - name: Test
         run: |
@@ -112,9 +114,9 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/package"
           tar -xzf Sourcetrail_Linux_64bit.tar.gz -C "$RUNNER_TEMP/package"
-          # The smoke test skips C/C++ for an st built without it; the release package has it.
+          # The release package has C/C++: the libraries are in it, and ST_SMOKE_REQUIRE_CXX fails a skipped C/C++ section.
           ls "$RUNNER_TEMP/package/Sourcetrail/lib/"libclang-cpp.so.19* "$RUNNER_TEMP/package/Sourcetrail/lib/"libLLVM.so.19*
-          testing/cli/st-smoke.sh "$RUNNER_TEMP/package/Sourcetrail/bin/st"
+          ST_SMOKE_REQUIRE_CXX=1 testing/cli/st-smoke.sh "$RUNNER_TEMP/package/Sourcetrail/bin/st"
 
       - name: Archive artifacts
         uses: actions/upload-artifact@v4

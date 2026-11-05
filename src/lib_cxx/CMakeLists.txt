@@ -1,10 +1,14 @@
 # ${CMAKE_SOURCE_DIR}/src/lib_cxx/CMakeLists.txt
 find_package(Clang REQUIRED CONFIG)
-# bin/app/data/cxx/include holds Clang 19's builtin headers (stddef.h, intrinsics), which the parser passes as -isystem;
-# they must come from the same Clang as the parser. Another LLVM needs its lib/clang/<major>/include copied there.
-if(NOT LLVM_VERSION_MAJOR EQUAL 19)
-  message(FATAL_ERROR "LLVM ${LLVM_VERSION} found, but bin/app/data/cxx/include holds Clang 19's builtin headers. "
-                      "Point Clang_DIR at LLVM 19 (e.g. /usr/lib/llvm-19/lib/cmake/clang), or replace those headers.")
+# bin/app/data/cxx/include holds Clang's builtin headers (stddef.h, intrinsics), which the parser passes as -isystem;
+# they must come from the same Clang major version as the parser. The committed ones are Clang 19's.
+set(SOURCETRAIL_CXX_LLVM_MAJOR 19 CACHE STRING "LLVM major version of the Clang builtin headers in bin/app/data/cxx/include")
+if(NOT LLVM_VERSION_MAJOR EQUAL SOURCETRAIL_CXX_LLVM_MAJOR)
+  message(FATAL_ERROR "LLVM ${LLVM_VERSION} found, but bin/app/data/cxx/include holds Clang ${SOURCETRAIL_CXX_LLVM_MAJOR}'s "
+                      "builtin headers. Point Clang_DIR at LLVM ${SOURCETRAIL_CXX_LLVM_MAJOR} (e.g. "
+                      "/usr/lib/llvm-${SOURCETRAIL_CXX_LLVM_MAJOR}/lib/cmake/clang), or copy LLVM ${LLVM_VERSION_MAJOR}'s "
+                      "lib/clang/${LLVM_VERSION_MAJOR}/include over those headers and set "
+                      "SOURCETRAIL_CXX_LLVM_MAJOR=${LLVM_VERSION_MAJOR}.")
 endif()
 
 add_library(Sourcetrail_lib_cxx)

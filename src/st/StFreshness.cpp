@@ -271,28 +271,30 @@ std::vector<std::string> mavenStatusRows(const ProjectSettings& settings) {
 
 #if BUILD_CXX_LANGUAGE_PACKAGE
 namespace {
-// The source files a compilation database names; a relative path counts from its entry's directory, a relative
-// directory from the database's folder, as the indexer has them.
-std::vector<FilePath> databaseSourceFiles(const FilePath& database) {
+// Whether a source file the compilation database names satisfies `test`, stopping at the first that does. A relative
+// path counts from its entry's directory, a relative directory from the database's folder, as the indexer has them.
+// Each entry costs a canonicalisation, so a large database is not walked further than needed.
+bool anyDatabaseSourceFile(const FilePath& database, const std::function<bool(const FilePath&)>& test) {
   QFile file(QString::fromStdWString(database.wstr()));
   if(!file.open(QIODevice::ReadOnly)) {
-    return {};
+    return false;
   }
   const QDir folder(QString::fromStdWString(database.getParentDirectory().wstr()));
-  std::vector<FilePath> files;
   for(const QJsonValue& entry : QJsonDocument::fromJson(file.readAll()).array()) {
     const QDir directory(folder.absoluteFilePath(entry.toObject().value("directory").toString()));
     const QString path = QDir::cleanPath(directory.absoluteFilePath(entry.toObject().value("file").toString()));
-    files.push_back(FilePath(path.toStdWString()).makeCanonical());
+    if(test(FilePath(path.toStdWString()).makeCanonical())) {
+      return true;
+    }
   }
-  return files;
+  return false;
 }
 
 // Whether the index holds an indexed file of the group: a source file of its database, or one below its source paths.
 bool hasIndexedFile(const SourceGroupSettings& group, const PersistentStorage& storage) {
   if(const auto* cdb = dynamic_cast<const SourceGroupSettingsCxxCdb*>(&group)) {
-    return std::ranges::any_of(databaseSourceFiles(cdb->getCompilationDatabasePathExpandedAndAbsolute()),
-                               [&storage](const FilePath& file) { return storage.getFilePathIndexed(file); });
+    return anyDatabaseSourceFile(cdb->getCompilationDatabasePathExpandedAndAbsolute(),
+                                 [&storage](const FilePath& file) { return storage.getFilePathIndexed(file); });
   }
   const auto* sources = dynamic_cast<const SourceGroupSettingsWithSourcePaths*>(&group);
   if(!sources) {

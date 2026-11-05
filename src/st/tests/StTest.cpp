@@ -3030,15 +3030,22 @@ TEST_F(StCxx, serverRefreshesADatabaseEditOnce) {
   // past the server's first look, which finds the index fresh
   QThread::sleep(2);
   const int before = logged("st: refreshing ");
+  const int finishedBefore = logged(" finished in ");
 
   QFile database(sFixture->root() + "/build/compile_commands.json");
   ASSERT_TRUE(database.open(QIODevice::ReadWrite));
   const QByteArray text = database.readAll();
+  const QByteArray edited = QByteArray(text).replace("-std=gnu++17", "-std=gnu++17 -DSHOP_FLAG=1");
+  if(edited == text) {
+    stop();
+    FAIL() << "the database has no -std=gnu++17 to change: " << text.toStdString();
+  }
   database.resize(0);
-  database.write(QByteArray(text).replace("-std=gnu++17", "-std=gnu++17 -DSHOP_FLAG=1"));
+  database.write(edited);
   database.close();
 
-  const bool refreshed = await("st: refreshing ", before + 1) && await("st: background refresh ", before + 1);
+  // "finished in", not the prefix: "st: background refresh failed" shares it
+  const bool refreshed = await("st: refreshing ", before + 1) && await(" finished in ", finishedBefore + 1);
   // a loop would start another refresh within the quiet period and the retry delay
   QThread::sleep(5);
   const int after = logged("st: refreshing ");

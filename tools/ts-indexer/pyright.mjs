@@ -67,7 +67,8 @@ export function loadPythonParser(dist) {
     }
     T[name] = n;
   }
-  for (const name of ['Call', 'Class', 'Decorator', 'Function', 'Import', 'ImportFrom', 'MemberAccess', 'Name']) {
+  for (const name of ['Call', 'Class', 'Decorator', 'Function', 'Import', 'ImportFrom', 'Index', 'MemberAccess',
+    'Name']) {
     if (T[name] === undefined) throw new Error(`scip-python bundle: parse node type ${name} unknown`);
   }
   return { parse: text => parse(Parser, ParseOptions, T, text) };
@@ -102,7 +103,7 @@ function parse(Parser, ParseOptions, T, text) {
     // per `import` module and per `from ... import` statement: {span, module, names}; module and each imported name
     // {key, position, name}, the module's name with its leading dots
     imports: [],
-    heritage: new Set(), // positions of the names in a class's base list
+    heritage: new Map(), // position of a name in a class's base list -> name position of the class
     diagnostics: errors.map(e => ({ line: e.range.start.line, column: e.range.start.character, message: e.message })),
   };
   // `..pkg.mod` -> {key, position, name: '..pkg.mod'}
@@ -130,8 +131,9 @@ function parse(Parser, ParseOptions, T, text) {
       case T.Class:
         for (const argument of node.arguments ?? []) {
           if (argument.name) continue; // metaclass=..., keywords
-          const name = calleeName(argument.valueExpression);
-          if (name) facts.heritage.add(key(name));
+          const e = argument.valueExpression;
+          const name = calleeName(e?.nodeType === T.Index ? e.baseExpression : e); // Base, mod.Base, Base[int]
+          if (name && node.name) facts.heritage.set(key(name), key(node.name));
         }
         break;
       case T.Import:

@@ -97,13 +97,37 @@ export function isSrcLayout(projectRoot) {
     && fs.readdirSync(path.join(src, entry.name), { withFileTypes: true }).some(isPython)));
 }
 
+// Debian packaging copies the sources to debian/<package>/ (and debian/tmp/): a file below a folder of a `debian`
+// folder that holds a `control` file is a copy, not the project's.
+function inPackagingStage(projectRoot, relativePath) {
+  const dirs = relativePath.split('/').slice(0, -1);
+  return dirs.some((dir, i) => dir === 'debian' && i + 1 < dirs.length
+    && fs.existsSync(path.join(projectRoot, ...dirs.slice(0, i + 1), 'control')));
+}
+
+// The package of a project file's module symbol: `scip-python python <package> <version> \`mod\`/__init__:`.
+function projectPackageOf(documents) {
+  for (const doc of documents) {
+    for (const o of doc.occurrences) {
+      if ((o.symbol_roles & DEFINITION_ROLE) && o.symbol.endsWith('/__init__:') && !o.symbol.startsWith('local ')) {
+        return parseSymbol(o.symbol).pkg;
+      }
+    }
+  }
+  return null;
+}
+
 // Converts `index` (a scip.Index from scip-python) into `writer` (an IndexWriter).
 //   projectRoot: absolute folder the SCIP paths are relative to
 //   parser: loadPythonParser()'s result
 // Returns {files, errors, unresolvedModules}: the top-level modules imports could not resolve, in order of first use.
 export function convertPython({ index, projectRoot, writer, parser }) {
   const projectDocuments = index.documents.filter(doc =>
-    !doc.relative_path.split('/').slice(0, -1).some(dir => SKIPPED_DIRECTORIES.has(dir)));
+    !doc.relative_path.split('/').slice(0, -1).some(dir => SKIPPED_DIRECTORIES.has(dir))
+    && !inPackagingStage(projectRoot, doc.relative_path));
+
+  // the package scip-python names the project's own symbols with (--project-name)
+  const projectPackage = projectPackageOf(projectDocuments);
 
   const info = new Map();
   for (const doc of index.documents) for (const si of doc.symbols) info.set(si.symbol, si);
@@ -184,7 +208,33 @@ export function convertPython({ index, projectRoot, writer, parser }) {
   // ---- modules and classes of the project ----
   const projectModules = new Set(); // the project's modules and the packages around them
   const unresolvedModules = new Set(); // top-level modules an import could not resolve, reported once
+  // Each file's text and syntax facts, parsed once.
+  const sources = new Map(projectDocuments.map(doc => {
+    const abs = path.join(projectRoot, doc.relative_path);
+    const exists = fs.existsSync(abs);
+    const text = exists ? fs.readFileSync(abs, 'utf8') : '';
+    return [doc, { abs, exists, text, facts: parser.parse(text) }];
+  }));
+  const occurrencesAt = doc => {
+    const map = new Map(); // position -> occurrence
+    for (const o of doc.occurrences) map.set(at(o.range[0], o.range[1]), o);
+    return map;
+  };
+  // A class's bases are the names in its base list. scip-python's relationships list the bases of the class's
+  // type, which a decorator returning another type (`Type[Base]`) replaces; they serve classes whose base list
+  // holds no plain name.
   const bases = new Map(); // class symbol -> base class symbols
+  for (const doc of projectDocuments) {
+    const occurrenceAt = occurrencesAt(doc);
+    for (const [baseKey, classKey] of sources.get(doc).facts.heritage) {
+      const cls = occurrenceAt.get(classKey)?.symbol;
+      const base = occurrenceAt.get(baseKey)?.symbol;
+      if (!cls || isLocalish(cls) || !base || isLocalish(base)) continue;
+      if (!bases.has(cls)) bases.set(cls, []);
+      bases.get(cls).push(base);
+    }
+  }
+  const fromBaseList = new Set(bases.keys());
   for (const doc of projectDocuments) {
     for (const si of doc.symbols) {
       const r = elementsFor(si.symbol);
@@ -192,7 +242,7 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         const segments = r.module.split('.');
         for (let i = 1; i <= segments.length; i++) projectModules.add(segments.slice(0, i).join('.'));
       }
-      if (r?.kind === NODE.CLASS) {
+      if (r?.kind === NODE.CLASS && !fromBaseList.has(si.symbol)) {
         bases.set(si.symbol, si.relationships.filter(rel => rel.is_implementation && rel.symbol.endsWith('#'))
           .map(rel => rel.symbol));
       }
@@ -213,16 +263,12 @@ export function convertPython({ index, projectRoot, writer, parser }) {
 
   // ---- one file at a time ----
   for (const doc of projectDocuments) {
-    const abs = path.join(projectRoot, doc.relative_path);
-    const exists = fs.existsSync(abs);
-    const text = exists ? fs.readFileSync(abs, 'utf8') : '';
-    const facts = parser.parse(text);
+    const { abs, exists, text, facts } = sources.get(doc);
     const fileId = writer.file(abs, text, exists ? fs.statSync(abs).mtime : new Date());
     if (!exists) writer.error(fileId, abs, 0, 0, 'file not found');
     for (const d of facts.diagnostics) writer.error(fileId, abs, d.line, d.column, d.message);
 
-    const occurrenceAt = new Map(); // position -> occurrence
-    for (const o of doc.occurrences) occurrenceAt.set(at(o.range[0], o.range[1]), o);
+    const occurrenceAt = occurrencesAt(doc);
 
     // definitions: {symbol, ids, kind, pos, key, scope}
     const defs = [];
@@ -252,8 +298,14 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         const symbol = occurrenceAt.get(key)?.symbol;
         return symbol !== undefined && isLocalish(symbol);
       };
-      // `from .. import x` gets a local for `..` even when x resolves: the names decide
-      const moduleFound = imp.names.length ? !imp.names.every(n => local(n.key)) : !local(imp.module.key);
+      // A module scip-python found in a library or the standard library is found, even when it left an imported name
+      // out (`from logging.handlers import RotatingFileHandler`). A dotted module it cannot find gets the project's
+      // package, and `from .. import x` gets a local for `..` even when x resolves: there the names decide.
+      const moduleSymbol = occurrenceAt.get(imp.module.key)?.symbol;
+      const moduleResolved = moduleSymbol !== undefined && !isLocalish(moduleSymbol)
+        && parseSymbol(moduleSymbol).pkg !== projectPackage;
+      const moduleFound = moduleResolved
+        || (imp.names.length ? !imp.names.every(n => local(n.key)) : !local(imp.module.key));
       let module = imp.module.name;
       if (module.startsWith('.') && currentModule) {
         module = absoluteModule(module, currentModule, path.basename(doc.relative_path) === '__init__.py');
@@ -261,7 +313,7 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         if (rest) aliases.set(rest, module);
         else for (const n of imp.names) aliases.set(n.name, `${module}.${n.name}`);
       }
-      const unresolved = !moduleFound || imp.names.some(n => local(n.key));
+      const unresolved = !moduleFound || (!moduleResolved && imp.names.some(n => local(n.key)));
       // one error per missing top-level module and run, at its first import; the project's own never count
       const top = module.split('.')[0];
       if (unresolved && !projectModules.has(top) && !unresolvedModules.has(top)) {
@@ -336,7 +388,14 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         source = container(pos);
         if (CALLABLE.has(target.kind)) type = facts.callees.has(key) ? EDGE.CALL : EDGE.USAGE;
         else if (TYPES.has(target.kind)) {
-          if (facts.heritage.has(key)) continue; // a base class: an inheritance edge, from the relationships
+          if (facts.heritage.has(key)) { // a base class: the class inherits it
+            const cls = defs.find(d => d.key === facts.heritage.get(key));
+            if (cls && fromBaseList.has(cls.symbol)) {
+              writer.location(fileId, o.range, LOCATION.TOKEN,
+                writer.edge(EDGE.INHERITANCE, cls.ids[0], targetId));
+            }
+            continue;
+          }
           type = EDGE.TYPE_USAGE;
         } else type = EDGE.USAGE;
       }
@@ -361,6 +420,7 @@ export function convertPython({ index, projectRoot, writer, parser }) {
         const to = elementsFor(rel.symbol);
         if (!to) continue;
         const type = TYPES.has(from.kind) ? EDGE.INHERITANCE : EDGE.OVERRIDE;
+        if (type === EDGE.INHERITANCE && fromBaseList.has(si.symbol)) continue; // from its base list, above
         const edgeId = writer.edge(type, nodeFor(from.els), nodeFor(to.els));
         if (type !== EDGE.INHERITANCE || !def) continue;
         for (const o of doc.occurrences) {

@@ -1638,7 +1638,8 @@ and nothing is invented for them. Some imports of modules that do exist get the 
 `uv.lock` or `Pipfile.lock` re-indexes the Python group as a whole (about 7 s for the 71 files of `click`), never the
 Java or TypeScript; a Java or TypeScript edit never runs the Python step. `node_modules`, `.sourcetrail`, `build`,
 `dist`, `target`, `out`, `.git`, `.gradle`, `.idea`, `.venv`, `venv`, `__pycache__`, `.tox` and `.mypy_cache` are
-skipped. Installing packages into the environment is no edit: run `st index --full` (or a full refresh) afterwards.
+skipped, and so are Debian packaging copies (the folders inside a `debian` folder that holds a `control` file, such as
+`debian/<package>/`). Installing packages into the environment is no edit: run `st index --full` (or a full refresh) afterwards.
 Measurements: `docs/superpowers/specs/2026-11-04-python-indexing-results.md`.
 
 What is not covered:

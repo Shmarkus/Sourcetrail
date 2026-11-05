@@ -2,21 +2,22 @@
 
 # Creates Sourcetrail_Linux_64bit.tar.gz in the main directory from a finished build.
 #
-# Usage: setup/Linux/createPackages.sh [build dir]   (default build/fork-release; run from the main directory)
+# Usage: setup/Linux/createPackages.sh [build dir]   (default build/fork-release-cxx; run from the main directory)
 # Needs convert (ImageMagick), plus what bundleLibraries.sh needs.
 #
-# The sample projects are not shipped: they are C++ projects and the C++ indexer is not built.
+# The release package is built with C/C++ (preset fork_release_cxx). A build without it (build/fork-release) packages
+# too, without C/C++. The sample projects (bin/app/user/projects) are not shipped.
 
 set -e
 
-BUILD_DIR=${1:-build/fork-release}
+BUILD_DIR=${1:-build/fork-release-cxx}
 APP_DIR=$BUILD_DIR/app
 DATA_DIR=bin/app/data
 
 for BINARY in Sourcetrail sourcetrail_indexer st
 do
 	if [ ! -x "$APP_DIR/$BINARY" ]; then
-		echo "createPackages.sh: $APP_DIR/$BINARY is missing; build first" >&2
+		echo "createPackages.sh: $APP_DIR/$BINARY is missing; build first (or name the build dir, e.g. build/fork-release)" >&2
 		exit 1
 	fi
 done
@@ -29,6 +30,19 @@ fi
 if [ ! -f "$DATA_DIR/ts-indexer/index.mjs" ] || [ ! -d "$DATA_DIR/ts-indexer/node_modules" ]; then
 	echo "createPackages.sh: $DATA_DIR/ts-indexer is missing or has no node_modules; configure and build with npm on PATH" >&2
 	exit 1
+fi
+
+# With C/C++, the binaries link libclang-cpp and libLLVM (bundled below) and the parser needs Clang's builtin headers.
+DATA_DIRS="color_schemes syntax_highlighting_rules fonts gui java ts-indexer fallback license"
+if grep -q '^BUILD_CXX_LANGUAGE_PACKAGE:BOOL=ON$' "$BUILD_DIR/CMakeCache.txt"; then
+	if [ ! -f "$DATA_DIR/cxx/include/stddef.h" ]; then
+		echo "createPackages.sh: $DATA_DIR/cxx/include (Clang's builtin headers) is missing" >&2
+		exit 1
+	fi
+	DATA_DIRS="$DATA_DIRS cxx"
+	echo "createPackages.sh: packaging with C/C++"
+else
+	echo "createPackages.sh: packaging without C/C++ ($BUILD_DIR is built without BUILD_CXX_LANGUAGE_PACKAGE)"
 fi
 
 
@@ -48,7 +62,7 @@ cp setup/Linux/data/sourcetrail.desktop AppDir/usr/share/applications/
 cp setup/Linux/data/sourcetrail-mime.xml AppDir/usr/share/mime/packages/
 
 mkdir AppDir/usr/share/data
-for DIR in color_schemes syntax_highlighting_rules fonts gui java ts-indexer fallback license
+for DIR in $DATA_DIRS
 do
 	cp -R "$DATA_DIR/$DIR" AppDir/usr/share/data/
 done

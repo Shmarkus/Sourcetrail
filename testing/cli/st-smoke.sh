@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Requires a JDK 21 JAVA_HOME, and Node.js 22.13+ on PATH for the TypeScript and Python sections (skipped without node).
+# The C/C++ section needs cmake and a C++ compiler, and an st built with C/C++ (skipped otherwise).
 # Usage: st-smoke.sh path/to/st (the Sourcetrail it indexes with must sit next to it).
 die() { echo "st-smoke.sh: $*" >&2; exit 2; }
 [ $# -ge 1 ] || die "usage: st-smoke.sh path/to/st"
@@ -575,6 +576,34 @@ if command -v node > /dev/null; then
     cd "$work/project"
 else
     echo "st-smoke.sh: node not found, Python section skipped" >&2
+fi
+
+# C/C++: the shop fixture through its CMake compilation database; a template's callers, an override, the status row.
+# Needs cmake and a C++ compiler (the standard library headers), and an st built with C/C++ (it links libclang-cpp).
+if ! ldd "$st" | grep -qF libclang-cpp; then
+    echo "st-smoke.sh: st is built without C/C++, C/C++ section skipped" >&2
+elif ! command -v cmake > /dev/null || ! command -v c++ g++ clang++ > /dev/null; then
+    echo "st-smoke.sh: cmake or a C++ compiler not found, C/C++ section skipped" >&2
+else
+    cp -R "$root/testing/cli/cpp" "$work/cpp"
+    cmake -S "$work/cpp" -B "$work/cpp/build" > /dev/null || assert "cmake failed on the C/C++ fixture"
+    find "$work/cpp" -exec touch -d '1 minute ago' {} +
+    # What New Project writes for a folder with build/compile_commands.json.
+    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<config><source_groups>' \
+        '<source_group_cxx><name>C/C++</name><type>C/C++ from Compilation Database</type><status>enabled</status><build_file_path><compilation_db_path>build/compile_commands.json</compilation_db_path></build_file_path><indexed_header_paths><indexed_header_path>.</indexed_header_path></indexed_header_paths></source_group_cxx>' \
+        '</source_groups><version>8</version></config>' > "$work/cpp/shop.srctrlprj"
+    cd "$work/cpp"
+    run 0 index --full
+    [ "$(cat "$work/out")" = "indexed 5 files, 0 errors" ] || assert "C/C++ fixture: st index --full printed: $(cat "$work/out")"
+    run 0 status
+    contains $'cxx\tindexed' out
+    contains $'stale_files\t0' out
+    run 0 callers 'shop::Box<T>::get' --no-source
+    contains 'callers: 2 (project shop)' err
+    contains $'main()\tfunction via shop::Box<double>::get()\tapp/main.cpp:10' out
+    run 0 supers shop::Book::price --no-source
+    contains $'shop::Item::price()\tmethod\tinclude/shop/item.hpp:13' out
+    cd "$work/project"
 fi
 
 echo "st smoke passed"

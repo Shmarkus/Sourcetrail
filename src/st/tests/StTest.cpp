@@ -2769,16 +2769,25 @@ TEST(St, freshnessOfACxxGroupFollowsItsFilesAndItsDatabase) {
   EXPECT_EQ("", st::checkFreshness(settings, indexedAt, indexed, {}).reason);
 }
 
+// Indexed when a source file of its compilation database is in the index; not before its first indexing.
 TEST(St, statusShowsEachCxxGroup) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   const QString base = QDir(dir.path()).canonicalPath();
   ProjectSettings settings;
   cxxFixture(base, &settings);
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  // the Java group's file says nothing about the C/C++ group
+  addFile(storage, (base + "/java/A.java").toStdWString());
+  storage.buildCaches();
 
-  EXPECT_TRUE(st::cxxStatusRows(settings) == std::vector<std::string>{"cxx\tindexed"});
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) == std::vector<std::string>{"cxx\tnot indexed; st index shows why"});
+  addFile(storage, (base + "/repo/src/a.cpp").toStdWString());
+  storage.buildCaches();
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) == std::vector<std::string>{"cxx\tindexed"});
   ASSERT_TRUE(QFile::remove(base + "/repo/build/compile_commands.json"));
-  EXPECT_TRUE(st::cxxStatusRows(settings) ==
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) ==
               std::vector<std::string>{"cxx\tbroken: compilation database not found: " + base.toStdString() +
                                        "/repo/build/compile_commands.json"});
 }

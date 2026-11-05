@@ -215,6 +215,7 @@ namespace {
 class CxxNextToPython : public CxxSourceGroup {
 protected:
   void SetUp() override {
+    // Python runs the same staged script as TypeScript, with --language python and scip-python from its node_modules.
     if(!QFile::exists(QFileInfo(QStringLiteral(SOURCETRAIL_APP_PATH)).absolutePath() + "/data/ts-indexer/index.mjs")) {
       GTEST_SKIP() << "the SCIP indexer is not staged (no npm at configure time)";
     }

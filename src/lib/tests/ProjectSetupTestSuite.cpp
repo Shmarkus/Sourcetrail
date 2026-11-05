@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include "FilePathFilter.h"
 #include "language_packages.h"
 #include "ProjectSettings.h"
 #include "ProjectSetup.h"
@@ -751,6 +752,36 @@ TEST_F(ProjectSetupTest, createWritesACompilationDatabaseGroupWithRelativePaths)
   ASSERT_EQ(1U, cdb->getIndexedHeaderPaths().size());
   EXPECT_FALSE(cdb->getIndexedHeaderPaths().front().isAbsolute());
   EXPECT_EQ(folder(), cdb->getIndexedHeaderPathsExpandedAndAbsolute().front());
+}
+
+// The dependencies CMake's FetchContent puts in <build folder>/_deps are no project code.
+TEST_F(ProjectSetupTest, createLeavesOutTheDependenciesInTheBuildFolder) {
+  touch("build/compile_commands.json");
+
+  const auto cdb = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(
+      onlySourceGroup(createProject(folder(), detectBuild(folder()))));
+
+  ASSERT_TRUE(cdb);
+  const std::vector<FilePathFilter> excluded = cdb->getExcludeFiltersExpandedAndAbsolute();
+  const auto isExcluded = [this, &excluded](const fs::path& relative) {
+    return FilePathFilter::areMatching(excluded, FilePath{(mRoot / relative).wstring()});
+  };
+  EXPECT_TRUE(isExcluded("build/_deps/fmt-src/include/fmt/core.h"));
+  EXPECT_TRUE(isExcluded("build/_deps/googletest-src/googletest/src/gtest.cc"));
+  EXPECT_FALSE(isExcluded("include/shop/item.hpp"));
+  EXPECT_FALSE(isExcluded("build/generated/version.hpp"));
+  // relative, so the checkout can move
+  for(const std::wstring& filter : cdb->getExcludeFilterStrings()) {
+    EXPECT_FALSE(FilePath{filter}.isAbsolute());
+  }
+
+  // a database at the top level has no build folder to leave out
+  fs::remove_all(mRoot);
+  touch("compile_commands.json");
+  const auto top = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(
+      onlySourceGroup(createProject(folder(), detectBuild(folder()))));
+  ASSERT_TRUE(top);
+  EXPECT_TRUE(top->getExcludeFilterStrings().empty());
 }
 
 TEST_F(ProjectSetupTest, createWritesCxxNextToTheOtherGroups) {

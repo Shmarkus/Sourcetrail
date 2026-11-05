@@ -13,8 +13,12 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSaveFile>
 
+#include "FileInfo.h"
 #include "language_packages.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
@@ -29,6 +33,7 @@
 #include "utilityString.h"
 #if BUILD_CXX_LANGUAGE_PACKAGE
 #  include "SourceGroupSettingsCxxCdb.h"
+#  include "SourceGroupSettingsWithSourcePaths.h"
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 namespace st {
@@ -264,7 +269,46 @@ std::vector<std::string> mavenStatusRows(const ProjectSettings& settings) {
   return rows;
 }
 
-std::vector<std::string> cxxStatusRows([[maybe_unused]] const ProjectSettings& settings) {
+#if BUILD_CXX_LANGUAGE_PACKAGE
+namespace {
+// The source files a compilation database names; a relative path counts from its entry's directory, a relative
+// directory from the database's folder, as the indexer has them.
+std::vector<FilePath> databaseSourceFiles(const FilePath& database) {
+  QFile file(QString::fromStdWString(database.wstr()));
+  if(!file.open(QIODevice::ReadOnly)) {
+    return {};
+  }
+  const QDir folder(QString::fromStdWString(database.getParentDirectory().wstr()));
+  std::vector<FilePath> files;
+  for(const QJsonValue& entry : QJsonDocument::fromJson(file.readAll()).array()) {
+    const QDir directory(folder.absoluteFilePath(entry.toObject().value("directory").toString()));
+    const QString path = QDir::cleanPath(directory.absoluteFilePath(entry.toObject().value("file").toString()));
+    files.push_back(FilePath(path.toStdWString()).makeCanonical());
+  }
+  return files;
+}
+
+// Whether the index holds an indexed file of the group: a source file of its database, or one below its source paths.
+bool hasIndexedFile(const SourceGroupSettings& group, const PersistentStorage& storage) {
+  if(const auto* cdb = dynamic_cast<const SourceGroupSettingsCxxCdb*>(&group)) {
+    return std::ranges::any_of(databaseSourceFiles(cdb->getCompilationDatabasePathExpandedAndAbsolute()),
+                               [&storage](const FilePath& file) { return storage.getFilePathIndexed(file); });
+  }
+  const auto* sources = dynamic_cast<const SourceGroupSettingsWithSourcePaths*>(&group);
+  if(!sources) {
+    return false;
+  }
+  const std::vector<FilePath> roots = sources->getSourcePathsExpandedAndAbsolute();
+  return std::ranges::any_of(storage.getFileInfoForAllFiles(), [&](const FileInfo& file) {
+    return std::ranges::any_of(roots, [&file](const FilePath& root) { return root == file.path || root.contains(file.path); }) &&
+        storage.getFilePathIndexed(file.path);
+  });
+}
+}    // namespace
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+
+std::vector<std::string> cxxStatusRows([[maybe_unused]] const ProjectSettings& settings,
+                                       [[maybe_unused]] const PersistentStorage& storage) {
   std::vector<std::string> rows;
 #if BUILD_CXX_LANGUAGE_PACKAGE
   for(const auto& group : settings.getAllSourceGroupSettings()) {
@@ -278,7 +322,7 @@ std::vector<std::string> cxxStatusRows([[maybe_unused]] const ProjectSettings& s
        cdb && !database.exists()) {
       rows.push_back("cxx\tbroken: compilation database not found: " + database.str());
     } else {
-      rows.push_back("cxx\tindexed");
+      rows.push_back(hasIndexedFile(*group, storage) ? "cxx\tindexed" : "cxx\tnot indexed; st index shows why");
     }
   }
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE

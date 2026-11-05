@@ -162,11 +162,19 @@ bool parametersMatch(const std::vector<std::wstring>& wanted, const std::vector<
   return true;
 }
 
-// The wanted parameter types match the candidate's, for a C++ candidate also with the scopes left out on both sides.
-bool parametersMatch(const std::wstring& text, const Candidate& candidate) {
-  return parametersMatch(parameterTypes(text), candidate.parameters) ||
-      (candidate.delimiter == L"::" && parameterTypes(text, true) == candidate.unscopedParameters);
-}
+// The parameter types a query asks for, as written and without C++ scopes.
+struct WantedParameters {
+  explicit WantedParameters(const std::wstring& text) : types(parameterTypes(text)), unscoped(parameterTypes(text, true)) {}
+
+  // They match the candidate's, for a C++ candidate also with the scopes left out on both sides.
+  bool match(const Candidate& candidate) const {
+    return parametersMatch(types, candidate.parameters) ||
+        (candidate.delimiter == L"::" && unscoped == candidate.unscopedParameters);
+  }
+
+  std::vector<std::wstring> types;
+  std::vector<std::wstring> unscoped;
+};
 
 // The last name element of a query, which every symbol that can resolve from it contains.
 std::wstring lastElement(const std::wstring& query) {
@@ -252,6 +260,7 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
   const bool hasParameters = parameters != std::wstring::npos;
   const std::wstring bare = withoutTypeParameters(text);
   const std::wstring bareName = hasParameters ? withoutTypeParameters(text.substr(0, parameters)) : bare;
+  const WantedParameters wanted(text);
   std::vector<Id> ids;
   auto gather = [&](auto matches) {
     for(const auto& candidate : candidates) {
@@ -261,9 +270,9 @@ Resolved pick(const std::vector<Candidate>& candidates, const std::wstring& text
     return !ids.empty();
   };
   if(gather([&](const Candidate& c) { return c.key == text; }) || gather([&](const Candidate& c) { return c.qualified == text; }) ||
-     gather([&](const Candidate& c) { return c.bareQualified == bareName && (!hasParameters || parametersMatch(text, c)); }) ||
+     gather([&](const Candidate& c) { return c.bareQualified == bareName && (!hasParameters || wanted.match(c)); }) ||
      gather([&](const Candidate& c) {
-       return endsWithName(c.bareQualified, bareName, c.delimiter) && (!hasParameters || parametersMatch(text, c));
+       return endsWithName(c.bareQualified, bareName, c.delimiter) && (!hasParameters || wanted.match(c));
      })) {
     if(ids.size() > 1) {
       if(const std::optional<Id> type = typeWithConstructors(candidates, ids)) {
@@ -333,11 +342,12 @@ std::vector<RankedSymbol> rankSymbols(PersistentStorage& storage, const std::wst
   // A parameter list narrows the name's matches to the overloads it fits, as name resolution does.
   const std::wstring name = searchText(text);
   const bool hasParameters = name != text;
+  const WantedParameters wanted(text);
   const std::wstring bare = withoutTypeParameters(name);
   const std::wstring needle = lower(bare);
   std::vector<std::pair<int, Id>> ranked;
   for(const Candidate& candidate : collect(storage, name, search(storage, name), kinds)) {
-    if(lower(candidate.bareQualified).find(needle) == std::wstring::npos || (hasParameters && !parametersMatch(text, candidate))) {
+    if(lower(candidate.bareQualified).find(needle) == std::wstring::npos || (hasParameters && !wanted.match(candidate))) {
       continue;
     }
     int tier = 2;

@@ -255,6 +255,10 @@ std::shared_ptr<SourceGroupSettings> createCxxSourceGroup(const fs::path& folder
   settings->setCompilationDatabasePath(relativeToProject(toPath(compilationDatabase), projectDirectory));
   // Only the headers below an indexed header path are indexed; the folder's own are part of the project.
   settings->setIndexedHeaderPaths({relativeToProject(folder, projectDirectory)});
+  // but not the dependencies CMake's FetchContent puts into the build folder the database sits in
+  if(const fs::path buildFolder = toPath(compilationDatabase).parent_path(); buildFolder != folder) {
+    settings->setExcludeFilterStrings({relativeToProject(buildFolder / "_deps", projectDirectory).wstr() + L"/**"});
+  }
   return settings;
 }
 

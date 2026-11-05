@@ -39,9 +39,10 @@ Freshness checkFreshness(const ProjectSettings& settings,
 // (re-shown by every refresh that reuses it) or "not prepared; st index runs Maven".
 std::vector<std::string> mavenStatusRows(const ProjectSettings& settings);
 
-// One "cxx\t..." row per enabled C/C++ source group for `st status`: "indexed", or "broken: compilation database not
-// found: <path>". None without C/C++ support.
-std::vector<std::string> cxxStatusRows(const ProjectSettings& settings);
+// One "cxx\t..." row per enabled C/C++ source group for `st status`: "indexed" when the index holds one of its source
+// files, "broken: compilation database not found: <path>", or "not indexed; st index shows why". None without C/C++
+// support.
+std::vector<std::string> cxxStatusRows(const ProjectSettings& settings, const PersistentStorage& storage);
 
 // st's last successful refresh: when it started and the index time it left behind.
 struct RefreshRecord {

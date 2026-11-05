@@ -1565,6 +1565,11 @@ TypeScript is half-written, and a skipped group is tried again on the next refre
 another reason reports `TypeScript failed (exit code N): ...` and the rest of the refresh still completes; a refresh
 retries it once its inputs change, and `st index --full` (or a full refresh in the GUI) retries it right away.
 
+Sourcetrail started from the desktop menu sees the `PATH` of your login session, not of your shell: a Node.js that
+nvm, fnm or a `PATH` line in `~/.bashrc`/`~/.zshrc` provides (for example under `/opt`) is not found there and indexing
+reports `cannot run "node"`. Link it into a folder the session has on `PATH`, usually `~/.local/bin`
+(`ln -s "$(command -v node)" ~/.local/bin/node`), or start Sourcetrail from a terminal. `st` run from a shell finds it.
+
 **Projects.** New Project on a folder with a `tsconfig.json` and a Gradle or Maven build creates both source groups in
 one project; with a `tsconfig.json` and no Java build it creates a TypeScript-only project (no HTTP link: there is no
 backend in the index). On a folder whose existing project has no TypeScript yet, New Project offers to add it. New
@@ -1623,16 +1628,22 @@ own code and the standard library still resolve. Without Node the rest of the pr
 Python step reports one line instead, `Python skipped: cannot run "node": ...` or `Python skipped: ... Node.js 22.13 or
 newer is required (found v...)`, and is tried again on the next refresh. A run that fails for another reason reports
 `Python failed (exit code N): ...`; a refresh retries it once its inputs change, `st index --full` right away.
+Started from the desktop menu, Sourcetrail may not find a Node.js your shell finds: see the note under
+[TypeScript prerequisites](#typescript-and-the-frontendbackend-link).
 
 **Names** follow the import path: `shop.models.User.greet`, with packages as packages, a file as its module and code at
 a module's top level as `<module>.toplevel()`. A name re-exported by a package's `__init__.py`
 (`from .models import User`) is the class it names, `shop.models.User`. In a `src/` layout without
-`src/__init__.py` the `src.` prefix is dropped and the tests outside `src/` link to it. Test files (`test_*.py`,
+`src/__init__.py` the `src.` prefix is dropped and the tests outside `src/` link to it. A class inherits the
+classes named in its base list (`class Admin(User)`, `Box[int]`), also when a decorator registers it
+(`@Registry.register`). Test files (`test_*.py`,
 `tests/`) are indexed like any other code, so `st callers` includes them.
 
 **Errors.** A file with a syntax error gets an error row, and the other files index as usual. An imported module the
 environment does not have gets one error, `unresolved import: <module>`, at its first import; its uses are not linked,
-and nothing is invented for them. Some imports of modules that do exist get the same error (see below).
+and nothing is invented for them. A module that exists but lacks an imported name
+(`from logging import no_such_name`) is no error; the name is not linked. Some imports of modules that do exist
+are still reported (see below).
 
 **Refresh.** A change to a `.py` file, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt`, `poetry.lock`,
 `uv.lock` or `Pipfile.lock` re-indexes the Python group as a whole (about 7 s for the 71 files of `click`), never the
@@ -1651,9 +1662,8 @@ What is not covered:
 - A `src/` package that typeshed has stubs for (`requests`) is read from the stubs where the tests import it. The tests
   still link to `src/`, but a name the stub declares where the code only imports it gets a node of its own
   (`requests.utils.to_native_string()` next to `requests._internal_utils.to_native_string`).
-- Some imports of modules that do exist are reported unresolved too: `from <package> import <submodule>`
-  (`from http import cookiejar`), a name imported twice (`import simplejson as json` then `import json`), a name the
-  installed version lacks (reported under its module), and imports in Windows-only code.
+- Some imports of modules that do exist can be reported unresolved too: a name imported twice
+  (`import simplejson as json` then `import json`) and imports in Windows-only code.
 - `os.path` shows as `ntpath`. References to builtins and the standard library (`builtins.str`, `list.append`) are kept,
   so `st callees` lists them.
 - After a syntax error, Pyright's recovery can take the rest of that file into the broken definition.

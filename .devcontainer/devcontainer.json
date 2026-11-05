@@ -5,6 +5,8 @@
 	"build": {
 		"dockerfile": "Dockerfile"
 	},
+	// C/C++ indexing passes its results through /dev/shm; Docker's default 64 MB stalls it on a mid-size project.
+	"runArgs": ["--shm-size=1g"],
 	"mounts": [
 		"source=${localWorkspaceFolder},target=/home/sourcetrail/workspace,type=bind",
 		"source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,readonly"

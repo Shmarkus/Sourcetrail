@@ -24,7 +24,7 @@
 
 // Indexes copies of the Angular + Spring fixture with the built Sourcetrail, headless: a project of its Gradle half and
 // a TypeScript source group for its Angular half, and a Python source group for the folder. Shared by the TypeScript and
-// Python test suites.
+// Python test suites; the C++ suite keeps the helpers and sets up its own fixture.
 inline const QString kJavaGroup = QStringLiteral(
     "<source_group_java><name>Java</name><type>Java Source Group from Gradle</type><status>enabled</status>"
     "<java_standard>21</java_standard><source_extensions><source_extension>.java</source_extension></source_extensions>"

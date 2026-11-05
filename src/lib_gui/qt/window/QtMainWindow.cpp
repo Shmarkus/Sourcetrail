@@ -505,7 +505,7 @@ void QtMainWindow::hideStartScreen() {
 }
 
 // With Java: pick a folder; it opens the project in its .sourcetrail/ or creates one for its Gradle or Maven build, its
-// TypeScript project and its Python project.
+// TypeScript project, its Python project and its C/C++ compilation database.
 void QtMainWindow::newProject() {
 #if BUILD_JAVA_LANGUAGE_PACKAGE
   const QString folder = QtFileDialog::getExistingDirectory(this, tr("Select the Project Folder"), FilePath());
@@ -517,11 +517,19 @@ void QtMainWindow::newProject() {
   const ProjectChoice choice = openOrCreateProject(FilePath(folder.toStdWString()), [this, &folder, &declined]() {
     QMessageBox msgBox(this);
     msgBox.setText(tr("No Gradle or Maven build found"));
+#  if BUILD_CXX_LANGUAGE_PACKAGE
+    msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle, pom.xml, tsconfig.json, Python project "
+                                 "(pyproject.toml, setup.py, setup.cfg, requirements.txt, or only Python sources) or "
+                                 "compile_commands.json at its top level or in a build folder.</p>"
+                                 "<p>You can create a plain Java project and fill in its class path, or cancel.</p>")
+                                  .arg(folder.toHtmlEscaped()));
+#  else
     msgBox.setInformativeText(tr("<p>%1 has no settings.gradle, build.gradle, pom.xml, tsconfig.json or Python project "
                                  "(pyproject.toml, setup.py, setup.cfg, requirements.txt, or only Python sources) at "
                                  "its top level.</p>"
                                  "<p>You can create a plain Java project and fill in its class path, or cancel.</p>")
                                   .arg(folder.toHtmlEscaped()));
+#  endif    // BUILD_CXX_LANGUAGE_PACKAGE
     QAbstractButton* plainJava = msgBox.addButton(tr("Plain Java Project"), QMessageBox::AcceptRole);
     msgBox.addButton(QMessageBox::Cancel);
     msgBox.exec();
@@ -529,8 +537,20 @@ void QtMainWindow::newProject() {
     return !declined;
   });
 
+  // only when the folder got nothing: a project made or opened for another build (pybind11, JNI) is not held up
+  if(choice.compilationDatabaseMissing) {
+    QMessageBox msgBox(this);
+    msgBox.setText(tr("No compile_commands.json found"));
+    msgBox.setInformativeText(
+        tr("<p>%1 has a CMakeLists.txt but no compilation database, which Sourcetrail needs to index C and C++.</p>"
+           "<p>CMake writes one when you run this in the folder:</p><pre>%2</pre>"
+           "<p>Then pick the folder again.</p>")
+            .arg(folder.toHtmlEscaped(), QString::fromStdWString(compilationDatabaseCommand()).toHtmlEscaped()));
+    msgBox.exec();
+  }
+
   if(choice.projectFile.empty()) {
-    if(!declined) {
+    if(!declined && !choice.compilationDatabaseMissing) {
       QMessageBox::warning(this,
                            tr("Could not create Project"),
                            tr("Sourcetrail was unable to write the project into %1/.sourcetrail.").arg(folder.toHtmlEscaped()));
@@ -539,7 +559,11 @@ void QtMainWindow::newProject() {
   }
 
   if(choice.created) {
-    MessageStatus(L"Created project: " + choice.projectFile.wstr()).dispatch();
+    std::wstring status = L"Created project: " + choice.projectFile.wstr();
+    if(choice.build.cmakeWithoutDatabase) {
+      status += L". C/C++ not added: no compile_commands.json (" + compilationDatabaseCommand() + L" writes one)";
+    }
+    MessageStatus(status).dispatch();
   }
 
   if(choice.needsSetup) {
@@ -588,6 +612,13 @@ void QtMainWindow::newProject() {
                   tr("<p>%1 has a Python project, which its project does not index yet.</p>"
                      "<p>Adding it indexes the Python too. You can remove it again in the project settings.</p>"),
                   &addPythonGroup) ||
+        added;
+  }
+  if(choice.canAddCxx) {
+    added = offer(tr("C/C++"),
+                  tr("<p>%1 has a compile_commands.json, which its project does not index yet.</p>"
+                     "<p>Adding it indexes the C and C++ too. You can remove it again in the project settings.</p>"),
+                  &addCxxGroup) ||
         added;
   }
 

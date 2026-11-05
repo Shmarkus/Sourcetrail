@@ -13,8 +13,13 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSaveFile>
 
+#include "FileInfo.h"
+#include "language_packages.h"
 #include "PersistentStorage.h"
 #include "ProjectSettings.h"
 #include "SourceGroupPython.h"
@@ -26,6 +31,10 @@
 #include "utilityGradleCache.h"
 #include "utilityMavenCache.h"
 #include "utilityString.h"
+#if BUILD_CXX_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsCxxCdb.h"
+#  include "SourceGroupSettingsWithSourcePaths.h"
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 namespace st {
 namespace {
@@ -135,6 +144,8 @@ Freshness checkFreshness(const ProjectSettings& settings,
                          const GroupInputs& inputs) {
   Freshness freshness;
   bool fallback = false;
+  // C/C++ groups are refreshed per file, headers included: the indexed files are what they are checked by.
+  bool cxx = false;
   std::vector<FilePath> typeScriptRoots;
   std::vector<FilePath> pythonRoots;
   const auto groups = settings.getAllSourceGroupSettings();
@@ -159,6 +170,21 @@ Freshness checkFreshness(const ProjectSettings& settings,
       pythonRoots.push_back(root);
       continue;
     }
+#if BUILD_CXX_LANGUAGE_PACKAGE
+    if(group->getType() == SOURCE_GROUP_C_EMPTY || group->getType() == SOURCE_GROUP_CPP_EMPTY) {
+      cxx = true;
+      continue;
+    }
+    if(const auto cdb = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(group)) {
+      // a refresh reads it again and indexes the source files it adds; a missing one is no change a refresh can index
+      const FilePath database = cdb->getCompilationDatabasePathExpandedAndAbsolute();
+      if(database.exists() && changedSince(database, indexedAt)) {
+        freshness.changedFiles++;
+      }
+      cxx = true;
+      continue;
+    }
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
     if(const auto maven = std::dynamic_pointer_cast<SourceGroupSettingsJavaMaven>(group)) {
       // the files the Maven cache is keyed on; a refresh runs Maven again when one changed
       const FilePath projectDirectory = maven->getMavenProjectFilePathExpandedAndAbsolute().getParentDirectory();
@@ -204,8 +230,8 @@ Freshness checkFreshness(const ProjectSettings& settings,
       }
     }
   }
-  if(fallback) {
-    if(freshness.reason.empty()) {
+  if(fallback || cxx) {
+    if(fallback && freshness.reason.empty()) {
       freshness.reason = "no Gradle source roots cached; checked indexed files only";
     }
     for(const FilePath& file : indexedFiles) {
@@ -240,6 +266,68 @@ std::vector<std::string> mavenStatusRows(const ProjectSettings& settings) {
       rows.push_back("maven\t" + utility::encodeToUtf8(warning));
     }
   }
+  return rows;
+}
+
+#if BUILD_CXX_LANGUAGE_PACKAGE
+namespace {
+// Whether a source file the compilation database names satisfies `test`, stopping at the first that does. A relative
+// path counts from its entry's directory, a relative directory from the database's folder, as the indexer has them.
+// Each entry costs a canonicalisation, so a large database is not walked further than needed.
+bool anyDatabaseSourceFile(const FilePath& database, const std::function<bool(const FilePath&)>& test) {
+  QFile file(QString::fromStdWString(database.wstr()));
+  if(!file.open(QIODevice::ReadOnly)) {
+    return false;
+  }
+  const QDir folder(QString::fromStdWString(database.getParentDirectory().wstr()));
+  for(const QJsonValue& entry : QJsonDocument::fromJson(file.readAll()).array()) {
+    const QDir directory(folder.absoluteFilePath(entry.toObject().value("directory").toString()));
+    const QString path = QDir::cleanPath(directory.absoluteFilePath(entry.toObject().value("file").toString()));
+    if(test(FilePath(path.toStdWString()).makeCanonical())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Whether the index holds an indexed file of the group: a source file of its database, or one below its source paths.
+bool hasIndexedFile(const SourceGroupSettings& group, const PersistentStorage& storage) {
+  if(const auto* cdb = dynamic_cast<const SourceGroupSettingsCxxCdb*>(&group)) {
+    return anyDatabaseSourceFile(cdb->getCompilationDatabasePathExpandedAndAbsolute(),
+                                 [&storage](const FilePath& file) { return storage.getFilePathIndexed(file); });
+  }
+  const auto* sources = dynamic_cast<const SourceGroupSettingsWithSourcePaths*>(&group);
+  if(!sources) {
+    return false;
+  }
+  const std::vector<FilePath> roots = sources->getSourcePathsExpandedAndAbsolute();
+  return std::ranges::any_of(storage.getFileInfoForAllFiles(), [&](const FileInfo& file) {
+    return std::ranges::any_of(roots, [&file](const FilePath& root) { return root == file.path || root.contains(file.path); }) &&
+        storage.getFilePathIndexed(file.path);
+  });
+}
+}    // namespace
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+
+std::vector<std::string> cxxStatusRows([[maybe_unused]] const ProjectSettings& settings,
+                                       [[maybe_unused]] const PersistentStorage& storage) {
+  std::vector<std::string> rows;
+#if BUILD_CXX_LANGUAGE_PACKAGE
+  for(const auto& group : settings.getAllSourceGroupSettings()) {
+    const SourceGroupType type = group->getType();
+    if(group->getStatus() != SOURCE_GROUP_STATUS_ENABLED ||
+       (type != SOURCE_GROUP_CXX_CDB && type != SOURCE_GROUP_C_EMPTY && type != SOURCE_GROUP_CPP_EMPTY)) {
+      continue;
+    }
+    const auto cdb = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(group);
+    if(const FilePath database = cdb ? cdb->getCompilationDatabasePathExpandedAndAbsolute() : FilePath();
+       cdb && !database.exists()) {
+      rows.push_back("cxx\tbroken: compilation database not found: " + database.str());
+    } else {
+      rows.push_back(hasIndexedFile(*group, storage) ? "cxx\tindexed" : "cxx\tnot indexed; st index shows why");
+    }
+  }
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
   return rows;
 }
 

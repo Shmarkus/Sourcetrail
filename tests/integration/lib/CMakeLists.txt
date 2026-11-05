@@ -62,3 +62,32 @@ if(BUILD_JAVA_LANGUAGE_PACKAGE)
     add_dependencies(${suite} Sourcetrail)
   endforeach()
 endif()
+
+if(BUILD_CXX_LANGUAGE_PACKAGE)
+  # Run the built Sourcetrail on a copy of the C++ fixture, with the compilation database CMake writes for it.
+  add_sourcetrail_test(
+    NAME
+    CxxSourceGroupTestSuite
+    SOURCES
+    CxxSourceGroupTestSuite.cpp
+    DEPS
+    GTest::gtest
+    Qt6::Core
+    Qt6::Sql
+    Sourcetrail::gtest_main
+    TEST_PREFIX
+    "integration.lib."
+    WORKING_DIRECTORY
+    "${CMAKE_BINARY_DIR}/test/")
+  target_compile_definitions(
+    CxxSourceGroupTestSuite
+    PRIVATE SOURCETRAIL_APP_PATH="$<TARGET_FILE:Sourcetrail>"
+            # MixedProjectTest's own SetUp, which this suite replaces, names the Angular + Spring fixture.
+            TS_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring"
+            CPP_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/cpp"
+            PY_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/python"
+            CMAKE_COMMAND_PATH="${CMAKE_COMMAND}"
+            CMAKE_GENERATOR_NAME="${CMAKE_GENERATOR}"
+            CMAKE_MAKE_PROGRAM_PATH="${CMAKE_MAKE_PROGRAM}")
+  add_dependencies(CxxSourceGroupTestSuite Sourcetrail)
+endif()

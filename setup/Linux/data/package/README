@@ -20,6 +20,10 @@ also needs Node.js 22.13 or newer on PATH. A python3, ideally the project's .ven
 installed, lets library calls resolve; without one the project's own code still indexes and unresolved imports are
 reported once per module.
 
+C and C++ need a compile_commands.json in the project folder or its build/ folder (CMake writes one with
+cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON) and the project's compiler with its standard library headers. The
+Clang 19 libraries the indexer uses are in lib/. After changing compiler flags, run st index --full.
+
 
 Install
 -------

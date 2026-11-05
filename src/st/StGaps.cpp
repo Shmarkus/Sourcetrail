@@ -141,7 +141,10 @@ public:
     if(isUnsolvedSymbol(name)) {
       return true;
     }
-    if(name.size() < 2 || !project().owns(name)) {
+    // A name Clang cannot resolve is an index error, so a C/C++ symbol without a definition is declared but defined
+    // outside the indexed files: mostly a library's, even in a namespace the project also declares in (a std::hash
+    // specialization makes std one), else a project function defined outside the compilation database.
+    if(name.size() < 2 || name.getDelimiter() == L"::" || !project().owns(name)) {
       return false;
     }
     // A member of a defined type without a definition is implicit: a default constructor, an enum's valueOf.
@@ -397,10 +400,12 @@ size_t multiDeclared(PersistentStorage& storage, GapInputs::Data& inputs, const 
     }
     level = owners;
   }
-  // every file of a package declares it
+  // Every file of a package declares it; a C++ symbol declared in a header and defined in a source file is no second
+  // copy.
   std::vector<Id> candidates;
   for(const StorageNode& node : storage.getStorageNodesForIds(std::vector<Id>(symbols.begin(), symbols.end()))) {
-    if(!(intToNodeKind(node.type) & (NODE_PACKAGE | NODE_MODULE | NODE_NAMESPACE | NODE_FILE))) {
+    if(!(intToNodeKind(node.type) & (NODE_PACKAGE | NODE_MODULE | NODE_NAMESPACE | NODE_FILE)) &&
+       NameHierarchy::deserialize(node.serializedName).getDelimiter() != L"::") {
       candidates.push_back(node.id);
     }
   }

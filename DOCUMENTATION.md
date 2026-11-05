@@ -16,7 +16,7 @@ Sourcetrail is an interactive source explorer that simplifies navigation in exis
 * **Graph:** The graph displays the structure of your source code. It focuses on the currently selected symbol and directly shows all incoming and outgoing dependencies to other symbols.
 * **Code:** The Code view displays all source locations of the currently selected symbol in a list of code snippets. Clicking on a different source location allows you to change the selection and dig deeper.
 
-Note: this fork supports Java, TypeScript and Python. C/C++ is work in progress. For more information have a look at [supported languages](#supported-languages).
+Note: this fork supports Java, TypeScript, Python, C and C++. For more information have a look at [supported languages](#supported-languages).
 
 ## Supported Languages
 
@@ -30,7 +30,11 @@ Sourcetrail indexes TypeScript projects that have a `tsconfig.json`, powered by 
 
 ### C and C++
 
-Work in progress: C and C++ indexing is not in this fork's current builds.
+Sourcetrail indexes C and C++ through a compilation database (`compile_commands.json`), powered by Clang 19
+([LLVM](https://llvm.org/)), whose libraries ship in the package. CMake writes the database with
+`cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`; other builds can use [Bear](https://github.com/rizsotto/Bear). The
+project's compiler must be installed, for its standard library headers. See [C and C++ projects](#c-and-c-projects) for
+details.
 
 ### Python
 
@@ -64,6 +68,7 @@ After launching Sourcetrail you will see the [Start Window](#start-window). From
 * A Gradle or Maven build creates a Java project with tests included. See [New Java projects](#new-java-projects).
 * A `tsconfig.json` adds TypeScript, or creates a TypeScript-only project if there is no Java build. See [TypeScript and the frontend–backend link](#typescript-and-the-frontendbackend-link).
 * A `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt` adds Python, as do `.py` files in a folder with no other build. See [Python projects](#python-projects).
+* A `compile_commands.json` at the top level or in a build folder (`build/`, `cmake-build-*/`, `out/build/*/`) adds C/C++. A folder with only a `CMakeLists.txt` and no database gets a message with the `cmake` command that writes it; next to another build, the project is created and the status bar names that command. See [C and C++ projects](#c-and-c-projects).
 * With none of these, Sourcetrail offers a plain Java project and opens the project settings so that you can fill in the class path.
 
 For Custom Command source groups, manual Java source groups or several groups in one project, use **Project > New Custom Project...**, which opens the [Project Setup Wizard](#project-setup).
@@ -192,8 +197,6 @@ To uninstall Sourcetrail run the `/opt/sourcetrail/uninstall.sh` script with `su
 The data folder holds certain files that are used by Sourcetrail to run the program. It is located at `~/.config/sourcetrail`.
 
 ## Finding System Header Locations
-
-> **Work in progress:** C/C++ indexing is not in this fork's current builds.
 
 Run either of these commands:
 `gcc -x c++ -v -E /dev/null`
@@ -351,7 +354,7 @@ The Preferences window lets you define settings for all projects. You can open t
 | Sourcetrail Port | Port number that Sourcetrail uses to listen for incoming messages from plugins.
 | Plugin Port | Port number that Sourcetrail sends outgoing messages to.
 | Indexer threads | Define how many parallel threads are used during indexing. Setting this value to `default` will cause Sourcetrail to detect the ideal number of threads based on the CPU and use as many threads for indexing.
-| Multi Process C/C++ Indexing | Work in progress, with C/C++ indexing. Enable C/C++ indexer threads to run in a different process. This prevents the application from crashing due to unforeseen exceptions while indexing.
+| Multi Process C/C++ Indexing | Enable C/C++ indexer threads to run in a different process. This prevents the application from crashing due to unforeseen exceptions while indexing.
 | Java Path | If you want to use Sourcetrail on Java source code, please specify the path to the `libjvm.so` of a JDK 21 or newer. You can either use the button below for automatic detection or add the path manually. For instructions on how to find it see [Finding Java Runtime Library Location](#finding-java-runtime-library-location).
 | JRE System Library | Add the jar files of your JRE System Library. These jars can be found inside your JRE install directory. You can either use the button below for automatic detection or add the paths manually.
 | Maven Path | Only required for indexing projects using Maven. Provide the location of your installed Maven executable. You can also use the auto detection.
@@ -1099,7 +1102,7 @@ This window is also used when editing the project. You can select a Source Group
 
 ## Choose a Source Group Type
 
-When creating a new Source Group you can choose between different methods of setup depending on your project language. This fork offers Java (from Maven, from Gradle or empty), TypeScript, Python and Custom Command Source Groups.
+When creating a new Source Group you can choose between different methods of setup depending on your project language. This fork offers Java (from Maven, from Gradle or empty), TypeScript, Python, C/C++ (from Compilation Database or empty) and Custom Command Source Groups.
 
 **Interactions:**
 
@@ -1109,8 +1112,6 @@ When creating a new Source Group you can choose between different methods of set
 * Clicking `Next` will take you to the next step of the setup process.
 
 ## Empty C/C++ Source Group
-
-> **Work in progress:** C/C++ indexing is not in this fork's current builds.
 
 Empty C/C++ Source Groups have the following configuration options:
 
@@ -1129,7 +1130,7 @@ Empty C/C++ Source Groups have the following configuration options:
 
 ## C/C++ Source Group from Compilation Database
 
-> **Work in progress:** C/C++ indexing is not in this fork's current builds.
+New Project creates this group by itself for a folder with a `compile_commands.json`; see [C and C++ projects](#c-and-c-projects).
 
 If you are using [CMake](https://cmake.org/) you can export compile commands by defining the `CMAKE_EXPORT_COMPILE_COMMANDS` flag and then use the exported `.json` file for Sourcetrail project setup.
 For non-CMake projects you can use [Bear](https://github.com/rizsotto/Bear). Bear generates a `.json` file during the simulated build process. Bear has been tested on FreeBSD, GNU/Linux and OS X.
@@ -1137,7 +1138,7 @@ C/C++ Source Groups from Compilation Database offer the following configuration 
 
 | Setting                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Compilation Database                       | Select the compilation database file for the project. Sourcetrail will index your project based on the compile commands this file contains using all include paths and compiler flags of these compile commands. The project will stay up to date with changes in the compilation database on every refresh. You can make use of environment variables with ${ENV_VAR}.                                                                                                                                                                                                                                                                                                                                                                                      |
+| Compilation Database                       | Select the compilation database file for the project. Sourcetrail will index your project based on the compile commands this file contains using all include paths and compiler flags of these compile commands. A refresh indexes the source files the compilation database adds; after changing compiler flags (defines, include paths, the language standard) run `st index --full` or a full refresh. You can make use of environment variables with ${ENV_VAR}.                                                                                                                                                                                                                                                                                                                                                                                      |
 | Header Files & Directories to Index        | Your Compilation Database already specifies which source files are part of your project. But Sourcetrail still needs to know which header files to index as part of your project and which to skip. Choosing to skip indexing your system headers or external frameworks will significantly improve the overall indexing performance. Use this list to define which header files should be indexed by Sourcetrail. Provide a directory to recursively add all contained files. You can make use of environment variables with ${ENV_VAR}.<br />**Hint**: Just enter the root path of your project if you want Sourcetrail to index all contained headers it encounters.<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box). |
 | Excluded Files & Directories               | These paths define the files and directories that will be left out from indexing.<br />Hints:<br /><ul><li>You can use the wildcard `*` which represents characters except `\` or `/` (e.g. `src/*/test.h` matches `src/app/test.h` but does not match `src/app/widget/test.h` or `src/test.h`)</li><li>You can use the wildcard `**` which represents arbitrary characters (e.g. `src**test.h` matches `src/app/test.h` as well as `src/app/widget/test.h` or `src/test.h`)</li><li>You can make use of environment variables with `${ENV_VAR}`<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box).</li></ul>                                                                                                              |
 | Additional Include Paths                   | Include Paths are used for resolving #include directives in the indexed source and header files. These paths are usually passed to the compiler with the '-I' or '-iquote' flags. Add all paths #include directives throughout your project are relative to. If all #include directives are specified relative to the project's root directory, please add that root directory here. If your project also includes files from external libraries (e.g. boost), please add these directories as well (e.g. add 'path/to/boost_home/include'). You can make use of environment variables with ${ENV_VAR}.<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box).                                                                 |
@@ -1613,7 +1614,8 @@ A folder with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt`
 indexed into the same index as its Java and TypeScript: packages, modules, classes, functions, methods, fields (class
 attributes and dataclass fields) and module variables, with their calls, usages, type uses, inheritance, overrides,
 imports and decorators. Loose `.py` files without such a file count only in a folder with no Gradle or Maven build, no
-`tsconfig.json` and no `.java` file, so the scripts of a Java or TypeScript project do not make it a Python project. On
+`tsconfig.json`, no `.java` file and no compilation database (nor C/C++ files next to a `CMakeLists.txt`), so the
+scripts of a Java, TypeScript or C/C++ project do not make it a Python project. On
 a folder whose existing project has no Python yet, New Project offers to add it; New Custom Project and Edit Project
 have a "Python" source group type.
 
@@ -1670,14 +1672,75 @@ What is not covered:
 - With no Python at all, or with a `:` in the project path, the tests of a `src/` layout are not linked to `src/`
   (no error is reported; `st index --verbose` says why for the `:`).
 
+## C and C++ projects
+
+A folder with a `compile_commands.json` gets its C and C++ indexed into the same index as its Java, TypeScript and
+Python: namespaces, classes, structs, enums, functions, methods, fields, variables, templates and their
+specializations, macros and typedefs, with their calls, usages, type uses, inheritance, overrides and includes. New
+Project looks for the database at the folder's top level, then in `build/`, then in the first `cmake-build-*/` and the
+first `out/build/*/` by name; one in a deeper or differently named folder is not found (use New Custom Project, or move
+it). It creates a "C/C++" group of the type "C/C++ from Compilation Database" whose indexed headers are the whole
+folder, except for `_deps/` (CMake's FetchContent downloads) in the database's build folder. Headers outside the folder
+(the standard library, installed libraries) are parsed but not indexed. On a folder whose existing project has no
+C/C++ yet, New Project offers to add it; New Custom Project and Edit Project have the "C/C++ from Compilation
+Database" and "Empty C/C++" types.
+
+A folder with a `CMakeLists.txt`, no database and no other build gets a message with the command that writes one,
+`cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (or `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)` in the
+`CMakeLists.txt`), and no project; run it and pick the folder again. Next to a Java, TypeScript or Python build (a
+pybind11 or JNI layout) the project is created for that build without the C/C++ part, and the status bar names the
+command; once the database exists, New Project on the folder offers to add C/C++. Other builds can produce the database with
+[Bear](https://github.com/rizsotto/Bear) (`bear -- make`); Meson writes one into its build folder, and Ninja prints one
+with `ninja -t compdb`.
+
+**Prerequisites.** The compiler the database names, installed with its standard library headers (`g++` or `clang`):
+the indexer runs Clang 19 with each file's own flags and finds the standard library the way that compiler does. Clang's
+builtin headers (`stddef.h`, the intrinsics) ship in `share/data/cxx/include`. A header Clang cannot find is reported
+as an error of the file that includes it; `st status` counts the errors. C/C++ indexing passes its results through
+shared memory (`/dev/shm`): in a Docker container, whose default is 64 MB, give it more (`docker run --shm-size=1g`),
+or indexing a project the size of `fmt` stalls (multi-process indexing, the default) or aborts.
+
+**Names** use `::`: `shop::Order::total`, `shop::Book::price`. Overloads take their parameter types, with or without
+the namespace and with or without spaces: `'shop::discount(double, double)'` or `'shop::discount(double,double)'`.
+Templates take their parameter names: `shop::Box<T>::get` (Sourcetrail shows `Box<typename T>`), and `st callers` of a
+template includes the callers of its specializations (`main() via shop::Box<double>::get()`). Operators keep their
+symbol: `'shop::operator=='`, `'shop::operator<'`. Quote names with `<`, `(` or spaces for the shell.
+
+**Refresh.** A change to a source file re-indexes it; a change to a header re-indexes the source files that include
+it, and `st` sees the header as stale before that. Changing `compile_commands.json` marks the index stale once; a
+refresh indexes only the source files it adds, not the files whose compiler flags changed. After changing defines,
+include paths or the language standard, run `st index --full`. A C/C++ edit re-indexes no Java, TypeScript or Python
+file, and their edits re-index no C/C++ file.
+
+On `fmt` 11.0.2 (49 compile commands) a full index takes about 10 s; after an edit to `include/fmt/os.h` a query
+refreshed the 31 source files including it in 10 s, after an edit to `src/os.cc` in 6 s. Measurements:
+`docs/superpowers/specs/2026-11-05-cxx-indexing-results.md`.
+
+What is not covered:
+- Linux only (the package is Linux); no Visual Studio solution import; no link between C/C++ and the other languages.
+- Clang's builtin headers ship without compiler-rt's `sanitizer/` and `fuzzer/` headers: an
+  `#include <sanitizer/asan_interface.h>` or `<fuzzer/FuzzedDataProvider.h>` is a missing-header error of that file.
+- Functions of the same name in different programs, such as the `main()` of an app and of its tests, have the same
+  key, and `st` cannot tell them apart (exit 2 lists both as `main()`).
+- Symbols from headers outside the project (the standard library, installed libraries) are parsed but not indexed:
+  `find`, `callees` and `supers` leave them out without a warning (`supers` of a class deriving from
+  `std::runtime_error` is empty), while `refs` answers for them (`st refs std::runtime_error`). They never count as
+  unresolved, also in a project that declares something in namespace `std` (a `std::hash` specialization).
+  The same holds for a project function declared in an indexed header but defined in a file outside the compilation
+  database: `callees` of it is empty, with no warning.
+- The indexed headers are the whole project folder, so vendored libraries and generated headers in it are indexed too,
+  which costs time on a large project; narrow the "Header Files & Directories to Index" or add an exclude in Edit
+  Project.
+
 ## `st` reference
 
 ### Installing from a build
 
-The `fork_release` build (see [How to Build](#how-to-build)) puts `st` next to the other binaries. Put it on your `PATH`:
+The `fork_release_cxx` build (see [How to Build](#how-to-build)) puts `st` next to the other binaries. Put it on your
+`PATH`:
 
 ```bash
-ln -s "$PWD/build/fork-release/app/st" ~/.local/bin/st
+ln -s "$PWD/build/fork-release-cxx/app/st" ~/.local/bin/st
 ```
 
 It needs the adjacent `Sourcetrail`, `sourcetrail_indexer` and data payload, so link it rather than copying it alone.
@@ -1823,7 +1886,8 @@ one access level per member in `outline` (one copy's private field can show as p
 module resolves it to the first copy on the class path, so its calls to members only the other copy has are missing
 (`st` warns, see below; module-aware resolution is a tracked follow-up).
 Python's limits (libraries typed from typeshed stubs, imports reported unresolved) are listed under
-[Python projects](#python-projects).
+[Python projects](#python-projects), C and C++'s (compiler flag changes need `st index --full`, two `main()`s share a
+key) under [C and C++ projects](#c-and-c-projects).
 
 ### Incomplete answers
 
@@ -1839,8 +1903,8 @@ totals, `files_with_errors` and `unresolved_symbols`.
 A further part, `K symbols declared in several modules` (listed first; `st status` has no total for it, so the line drops
 the hint when it is the only part), counts the inputs and the symbols the walk went on from, or types enclosing one, that
 more than one file declares (a class two modules both have): their callers may be bound to the other copy or missing. A
-result row in such a class does not count. The check assumes Java: in C and C++ a declaration in a header and a
-definition in a source file count as several files, so `st` on C/C++ indexes is untested and may warn wrongly.
+result row in such a class does not count. In C and C++, a declaration in a header and its definition in a source file
+do not count as several files.
 The warning can stay silent where a gap is real: the Java indexer reports an unresolved type once, where it is declared (a
 field of a generated type), so calls through that field vanish without an error in the calling method; and `refs` of an
 entity field misses its JPA metamodel uses (`Order_.status`) without a warning. `refs` and `impact` of a field of a Lombok
@@ -1914,8 +1978,8 @@ calls. Details: `docs/superpowers/specs/2026-11-02-upgrade-port-results.md`.
 
 # How to Build
 
-This fork builds on Linux (x86-64) only, with Java, TypeScript and Python support and the `st` command-line tool.
-C/C++ indexing is work in progress and not in the current builds. Windows and macOS builds are not maintained here.
+This fork builds on Linux (x86-64) only, with Java, TypeScript, Python and C/C++ support and the `st` command-line tool.
+Windows and macOS builds are not maintained here.
 
 ## Required tools
 
@@ -1933,6 +1997,22 @@ C/C++ indexing is work in progress and not in the current builds. Windows and ma
   their tests are skipped. The indexer's own tests: `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`
   (the Python tests that need a virtualenv skip without `python3`).
 
+* __LLVM and Clang 19__ development packages from [apt.llvm.org](https://apt.llvm.org/), for the C/C++ indexer. On
+  Ubuntu 22.04:
+  ```bash
+  curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+  echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" |
+    sudo tee /etc/apt/sources.list.d/llvm-19.list
+  sudo apt update && sudo apt install clang-19 llvm-19-dev libclang-19-dev libclang-cpp19-dev
+  ```
+  The `fork_release_cxx` preset finds Clang through `Clang_DIR=/usr/lib/llvm-19/lib/cmake/clang`, where these packages
+  put it. For an LLVM 19 elsewhere (another distribution, your own build), override it:
+  `cmake --preset fork_release_cxx -DClang_DIR=/path/to/llvm-19/lib/cmake/clang`. Other LLVM versions are rejected at
+  configure time, because `bin/app/data/cxx/include` holds Clang 19's builtin headers, which must match the parser. To
+  build against another version (say LLVM 18 for local development), copy its `lib/clang/18/include` over those
+  headers and add `-DSOURCETRAIL_CXX_LLVM_MAJOR=18` next to its `Clang_DIR`.
+  Without LLVM 19, the `fork_release` preset builds everything except C/C++.
+
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by
 `scripts/fork/bootstrap.sh`.
 
@@ -1943,8 +2023,8 @@ git clone https://github.com/Shmarkus/Sourcetrail.git
 cd Sourcetrail
 scripts/fork/bootstrap.sh                      # once; idempotent
 eval "$(scripts/fork/bootstrap.sh --env)"      # in every new shell
-cmake --preset fork_release
-cmake --build --preset fork_release -j16
+cmake --preset fork_release_cxx
+cmake --build --preset fork_release_cxx -j16
 ```
 
 `bootstrap.sh` puts a Python venv with Conan and aqtinstall, Qt from aqt and its own `CONAN_HOME` into
@@ -1952,17 +2032,21 @@ cmake --build --preset fork_release -j16
 `.conan/gcc/` with the lock file. `--env` only prints the `export` lines for `CONAN_HOME`, `CMAKE_PREFIX_PATH` and
 `PATH`.
 
-The `fork_release` preset builds into `build/fork-release` with Java support and lld. The binaries are
-`build/fork-release/app/Sourcetrail` (the GUI, also `Sourcetrail index` headless), `sourcetrail_indexer` and `st`. They
-find their resources through the `data` and `user` symlinks CMake creates next to them.
+The `fork_release_cxx` preset builds into `build/fork-release-cxx` with Java and C/C++ support and lld; it is what CI
+builds, tests and packages. `fork_release` is the same without C/C++ (no LLVM needed), into `build/fork-release`. The
+binaries are `build/fork-release-cxx/app/Sourcetrail` (the GUI, also `Sourcetrail index` headless),
+`sourcetrail_indexer` and `st`. They find their resources through the `data` and `user` symlinks CMake creates next to
+them.
 
 > Gradle imports use the project's Gradle wrapper version by default. Set `GRADLE_VERSION` before launching Sourcetrail
 > only if you need to override that version.
 
 ## Creating the Linux package
 
-After building with the `fork_release` preset, run `./setup/Linux/createPackages.sh` from the main directory. It creates
-`Sourcetrail_Linux_64bit.tar.gz` there, with the Qt libraries and plugins of the Qt the build linked against bundled.
+After building with the `fork_release_cxx` preset, run `./setup/Linux/createPackages.sh` from the main directory (pass
+`build/fork-release` for a package without C/C++). It creates `Sourcetrail_Linux_64bit.tar.gz` there, with the Qt
+libraries and plugins of the Qt the build linked against bundled, and `libclang-cpp.so.19` and `libLLVM.so.19` with
+their dependencies and Clang's builtin headers (`share/data/cxx`): about 75 MB of the 157 MB package.
 Packaging needs `patchelf`, `file`, `objdump`, ImageMagick's `convert`, and `libxcb-cursor0` installed so that it can be
 bundled. Build and package on an Ubuntu 22.04 host (CI does the same): the script rejects binaries that need a glibc
 newer than 2.35.
@@ -1976,15 +2060,16 @@ is `python3` (optional) for Python's library types.
 
 ```bash
 eval "$(scripts/fork/bootstrap.sh --env)"
-HOME=/tmp/st-test-home QT_QPA_PLATFORM=offscreen ctest --preset fork_release
-JAVA_HOME=/path/to/jdk-21 bash testing/cli/st-smoke.sh build/fork-release/app/st
+HOME=/tmp/st-test-home QT_QPA_PLATFORM=offscreen ctest --preset fork_release_cxx
+JAVA_HOME=/path/to/jdk-21 bash testing/cli/st-smoke.sh build/fork-release-cxx/app/st
 ```
 
 The tests are GoogleTest suites run by `ctest`. The preset runs them one at a time, because the integration suites share
 temporary databases. Point `HOME` at a scratch directory so your own `~/.config/sourcetrail` is not written. The Java
 tests need a JVM: `$HOME/.config/sourcetrail/ApplicationSettings.xml` naming a `libjvm.so`, or `JAVA_HOME` pointing at a
 JDK 21. `st-smoke.sh` indexes a copied Lombok fixture with an isolated home and checks `st` end to end, including
-`st serve`; with Node.js on `PATH` it also indexes the TypeScript and Python fixtures.
+`st serve`; with Node.js on `PATH` it also indexes the TypeScript and Python fixtures, and with CMake and a C++
+compiler the C++ fixture (`testing/cli/cpp`).
 
 # Frequently Asked Questions
 

@@ -69,5 +69,11 @@ if(ENABLE_UNIT_TEST)
     st_test PRIVATE ST_APP_PATH="$<TARGET_FILE:st>" ST_LOMBOK_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/lombok"
                     ST_TS_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring"
                     ST_PY_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/python")
+  if(BUILD_CXX_LANGUAGE_PACKAGE)
+    # StCxx has CMake write the compilation database of a copy of the C++ fixture.
+    target_compile_definitions(
+      st_test PRIVATE ST_CPP_FIXTURE="${CMAKE_SOURCE_DIR}/testing/cli/cpp" CMAKE_COMMAND_PATH="${CMAKE_COMMAND}"
+                      CMAKE_GENERATOR_NAME="${CMAKE_GENERATOR}" CMAKE_MAKE_PROGRAM_PATH="${CMAKE_MAKE_PROGRAM}")
+  endif()
   add_dependencies(st_test st)
 endif()

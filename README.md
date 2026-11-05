@@ -6,8 +6,8 @@
 > [OpenSourceSourceTrail](https://github.com/OpenSourceSourceTrail/Sourcetrail) continuation of the project.
 
 > [!IMPORTANT]
-> The fork adds Java 25 support for Gradle and Maven projects, TypeScript and Python indexing, and `st`, a command-line
-> tool that gives agents fast, reliable lookups of classes and call chains.
+> The fork adds Java 25 support for Gradle and Maven projects, TypeScript and Python indexing, C/C++ indexing on
+> LLVM 19, and `st`, a command-line tool that gives agents fast, reliable lookups of classes and call chains.
 
 Sourcetrail is a free, offline source explorer that helps you get productive on unfamiliar code. It indexes a project
 and lets you browse its symbols and their relationships in a graph next to the code.
@@ -26,7 +26,8 @@ and lets you browse its symbols and their relationships in a graph next to the c
 - **Python:** projects with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt`, tests included.
   Library calls resolve through the project's virtualenv; see [Python projects](DOCUMENTATION.md#python-projects) for
   limits.
-- **Work in progress:** C/C++ indexing is not in the current builds.
+- **C and C++:** projects with a `compile_commands.json` (CMake: `cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`),
+  through the Clang-based indexer. See [C and C++ projects](DOCUMENTATION.md#c-and-c-projects) for limits.
 
 ## Getting started
 
@@ -35,11 +36,12 @@ and lets you browse its symbols and their relationships in a graph next to the c
 2. Run `sudo Sourcetrail/install.sh` to install to `/opt/sourcetrail` and add `sourcetrail` and `st` to your `PATH`. To
    try it without installing, run `Sourcetrail/Sourcetrail.sh`.
 3. In Sourcetrail, choose **New Project** and pick your project's source folder. There is no setup wizard: Sourcetrail
-   detects Gradle, Maven, TypeScript and Python from the folder. Start indexing, and `st` then works from anywhere in
-   that folder.
+   detects Gradle, Maven, TypeScript, Python and a C/C++ `compile_commands.json` from the folder. Start indexing, and
+   `st` then works from anywhere in that folder.
 
 Java indexing needs JDK 21 or newer, set in the preferences. TypeScript needs Node.js 22.13 or newer and the project's
 `node_modules`. Python needs Node.js 22.13 or newer, and for library calls a `.venv` with the project's dependencies.
+C/C++ needs the compilation database and the project's compiler installed (for its standard library headers).
 
 To give an agent `st`, add [this snippet](docs/agents/st-claude-md-snippet.md) to your project's `CLAUDE.md`.
 
@@ -67,6 +69,7 @@ existing Sourcetrail index, as plain text lines that pipe into each other.
 | Text, config, strings, log messages | grep, not `st`; quote globs for zsh: `grep -rn --include='*.java' 'text' .` |
 
 Names are a short name (`OrderService.place`) or a key; parameters take simple type names: `'OrderService.place(Order, int)'`.
+C++ names use `::`: `'shop::Order::total'`, `'shop::discount(double, double)'`, `'shop::Box<T>::get'`.
 - **Trust the answer.** No `st: incomplete:` line on stderr means the answer is complete as far as the index goes: don't
   re-read source to confirm it. Only the [blind spots](DOCUMENTATION.md#st-known-limits) need grep or reading: text, config, strings, Java records,
   Lombok `@Builder` setters of a field, JPA metamodel uses (`Order_.status`), calls through a field of an unresolved type.
@@ -89,6 +92,7 @@ For every command, option and known limit, see the [`st` reference](DOCUMENTATIO
 - [Java projects](DOCUMENTATION.md#new-java-projects)
 - [TypeScript and the frontend–backend link](DOCUMENTATION.md#typescript-and-the-frontendbackend-link)
 - [Python projects](DOCUMENTATION.md#python-projects)
+- [C and C++ projects](DOCUMENTATION.md#c-and-c-projects)
 - [`st` reference](DOCUMENTATION.md#st-reference)
 - [Building from source and running the tests](DOCUMENTATION.md#how-to-build)
 - [Changelog](CHANGELOG.md)

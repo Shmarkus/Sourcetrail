@@ -100,11 +100,17 @@ std::shared_ptr<IndexerCommandProvider> SourceGroupCxxCdb::getIndexerCommandProv
         utility::append(cdbFlags, includePchFlags);
       }
 
+      // a relative directory counts from the database's folder, like the relative source paths above
+      FilePath directory(utility::decodeFromUtf8(command.Directory));
+      if(!directory.isAbsolute()) {
+        directory = cdbPath.getParentDirectory().getConcatenated(directory).makeCanonical();
+      }
+
       provider->addCommand(std::make_shared<IndexerCommandCxx>(sourcePath,
                                                                utility::concat(indexedHeaderPaths, {sourcePath}),
                                                                excludeFilters,
                                                                std::set<FilePathFilter>(),
-                                                               FilePath(utility::decodeFromUtf8(command.Directory)),
+                                                               directory,
                                                                utility::concat(cdbFlags, compilerFlags)));
     }
   }

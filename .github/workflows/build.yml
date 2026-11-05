@@ -35,6 +35,17 @@ jobs:
           gcc --version
           mvn --version
 
+      # The C/C++ indexer builds against LLVM/Clang 19 from apt.llvm.org (bin/app/data/cxx/include holds Clang 19's
+      # builtin headers); the package bundles libclang-cpp.so.19 and libLLVM.so.19.
+      - name: Install LLVM 19
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" |
+            sudo tee /etc/apt/sources.list.d/llvm-19.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-19 llvm-19-dev libclang-19-dev libclang-cpp19-dev
+          /usr/lib/llvm-19/bin/llvm-config --version
+
       - name: Configure Java
         uses: actions/setup-java@v5
         with:
@@ -76,18 +87,20 @@ jobs:
       - name: Configure CMake
         run: |
           eval "$(scripts/fork/bootstrap.sh --env)"
-          cmake --preset fork_release
+          cmake --preset fork_release_cxx
 
       - name: Build
         run: |
           eval "$(scripts/fork/bootstrap.sh --env)"
-          cmake --build --preset fork_release -j "$(nproc)"
+          cmake --build --preset fork_release_cxx -j "$(nproc)"
+          # LLVM 19 and the C/C++ build take about 3 GB more than before; this shows how close the runner gets.
+          df -h /
 
       - name: Test
         run: |
           eval "$(scripts/fork/bootstrap.sh --env)"
           mkdir -p "$RUNNER_TEMP/home"
-          HOME="$RUNNER_TEMP/home" QT_QPA_PLATFORM=offscreen ctest --preset fork_release
+          HOME="$RUNNER_TEMP/home" QT_QPA_PLATFORM=offscreen ctest --preset fork_release_cxx
 
       - name: Test the TypeScript and Python indexer
         run: |
@@ -95,13 +108,15 @@ jobs:
           node --test tools/ts-indexer
 
       - name: Package
-        run: ./setup/Linux/createPackages.sh
+        run: ./setup/Linux/createPackages.sh build/fork-release-cxx
 
       - name: Smoke test the packaged st
         run: |
           mkdir -p "$RUNNER_TEMP/package"
           tar -xzf Sourcetrail_Linux_64bit.tar.gz -C "$RUNNER_TEMP/package"
-          testing/cli/st-smoke.sh "$RUNNER_TEMP/package/Sourcetrail/bin/st"
+          # The release package has C/C++: the libraries are in it, and ST_SMOKE_REQUIRE_CXX fails a skipped C/C++ section.
+          ls "$RUNNER_TEMP/package/Sourcetrail/lib/"libclang-cpp.so.19* "$RUNNER_TEMP/package/Sourcetrail/lib/"libLLVM.so.19*
+          ST_SMOKE_REQUIRE_CXX=1 testing/cli/st-smoke.sh "$RUNNER_TEMP/package/Sourcetrail/bin/st"
 
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
@@ -127,7 +142,7 @@ jobs:
       - name: Refresh the latest prerelease
         if: github.ref == 'refs/heads/master'
         run: |
-          NOTES="Built from master at $GITHUB_SHA. Includes the GUI and st, with Java, TypeScript and Python indexing."
+          NOTES="Built from master at $GITHUB_SHA. Includes the GUI and st, with Java, TypeScript, Python and C/C++ indexing."
           if gh release view latest > /dev/null 2>&1; then
             # Update in place: move the tag, replace the package, rewrite the notes.
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null

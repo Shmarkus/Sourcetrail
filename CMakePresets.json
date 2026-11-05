@@ -204,12 +204,29 @@
             "inherits": [
                 "ci_gnu_release"
             ]
+        },
+        {
+            "name": "fork_release_cxx",
+            "displayName": "Fork GNU Release with C/C++ (LLVM 19 from apt.llvm.org)",
+            "binaryDir": "${sourceDir}/build/fork-release-cxx",
+            "cacheVariables": {
+                "BUILD_CXX_LANGUAGE_PACKAGE": "ON",
+                "Clang_DIR": "/usr/lib/llvm-19/lib/cmake/clang",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/fork-release-cxx/install"
+            },
+            "inherits": [
+                "fork_release"
+            ]
         }
     ],
     "buildPresets": [
         {
             "name": "fork_release",
             "configurePreset": "fork_release"
+        },
+        {
+            "name": "fork_release_cxx",
+            "configurePreset": "fork_release_cxx"
         }
     ],
     "testPresets": [
@@ -222,6 +239,11 @@
             "execution": {
                 "jobs": 1
             }
+        },
+        {
+            "name": "fork_release_cxx",
+            "inherits": "fork_release",
+            "configurePreset": "fork_release_cxx"
         }
     ]
 }

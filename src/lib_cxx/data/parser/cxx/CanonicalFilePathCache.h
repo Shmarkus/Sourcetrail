@@ -14,7 +14,8 @@
 
 class CanonicalFilePathCache {
 public:
-  CanonicalFilePathCache(std::shared_ptr<FileRegister> fileRegister);
+  // Relative file names count from workingDirectory, the directory of the compile command, when it is given.
+  CanonicalFilePathCache(std::shared_ptr<FileRegister> fileRegister, FilePath workingDirectory = FilePath());
 
   std::shared_ptr<FileRegister> getFileRegister() const;
 
@@ -35,6 +36,7 @@ public:
 
 private:
   std::shared_ptr<FileRegister> m_fileRegister;
+  FilePath m_workingDirectory;
 
   std::map<clang::FileID, FilePath> m_fileIdMap;
   std::unordered_map<std::wstring, FilePath> m_fileStringMap;

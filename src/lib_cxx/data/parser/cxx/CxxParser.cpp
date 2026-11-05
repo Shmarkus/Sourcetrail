@@ -128,7 +128,7 @@ void CxxParser::buildIndex(const std::shared_ptr<IndexerCommandCxx>& indexerComm
   compileCommand.CommandLine = prependSyntaxOnlyToolArgs(compileCommand.CommandLine);
 
   CxxCompilationDatabaseSingle compilationDatabase(compileCommand);
-  runTool(&compilationDatabase, indexerCommand->getSourceFilePath());
+  runTool(&compilationDatabase, indexerCommand->getSourceFilePath(), indexerCommand->getWorkingDirectory());
 }
 
 void CxxParser::buildIndex(const std::wstring& fileName,
@@ -144,12 +144,19 @@ void CxxParser::buildIndex(const std::wstring& fileName,
   runToolOnCodeWithArgs(diagnostics.get(), std::move(action), fileContent->getText(), args, utility::encodeToUtf8(fileName));
 }
 
-void CxxParser::runTool(clang::tooling::CompilationDatabase* pCompilationDatabase, const FilePath& sourceFilePath) {
+void CxxParser::runTool(clang::tooling::CompilationDatabase* pCompilationDatabase,
+                        const FilePath& sourceFilePath,
+                        const FilePath& workingDirectory) {
   initializeLLVM();
 
-  clang::tooling::ClangTool tool(*pCompilationDatabase, std::vector<std::string>(1, utility::encodeToUtf8(sourceFilePath.wstr())));
+  // A file system of its own: the shared real one changes the process's working directory to the command's and back,
+  // which breaks the relative paths of the commands other indexer threads run meanwhile.
+  clang::tooling::ClangTool tool(*pCompilationDatabase,
+                                 std::vector<std::string>(1, utility::encodeToUtf8(sourceFilePath.wstr())),
+                                 std::make_shared<clang::PCHContainerOperations>(),
+                                 llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>(llvm::vfs::createPhysicalFileSystem().release()));
 
-  auto pCanonicalFilePathCache = std::make_shared<CanonicalFilePathCache>(m_fileRegister);
+  auto pCanonicalFilePathCache = std::make_shared<CanonicalFilePathCache>(m_fileRegister, workingDirectory);
   auto pDiagnostics = getDiagnostics(sourceFilePath, pCanonicalFilePathCache, true);
 
   tool.setDiagnosticConsumer(pDiagnostics.get());

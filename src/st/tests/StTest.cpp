@@ -33,6 +33,7 @@
 #include "DefinitionKind.h"
 #include "Edge.h"
 #include "FilePath.h"
+#include "language_packages.h"
 #include "LocationType.h"
 #include "NameHierarchy.h"
 #include "NodeKind.h"
@@ -256,6 +257,64 @@ TEST(St, findWithAParameterListKeepsTheMatchingOverloads) {
   ASSERT_TRUE(st::findSymbols(storage, L"Job.run(Order, int)", ALL_KINDS) == std::vector<Id>{runOrder});
   ASSERT_TRUE(st::findSymbols(storage, L"Job.run", ALL_KINDS).size() == 2);
   ASSERT_TRUE(st::findSymbols(storage, L"Job.run(long)", ALL_KINDS).empty());
+}
+
+namespace {
+// A C++ name: `::` between its elements, the last one with its return type and parameters if given.
+NameHierarchy cxxName(const std::vector<std::wstring>& path,
+                      const std::wstring& name,
+                      const std::wstring& returnType = L"",
+                      const std::wstring& parameters = L"") {
+  NameHierarchy hierarchy(L"::");
+  for(const auto& element : path) {
+    hierarchy.push(element);
+  }
+  hierarchy.push(NameElement(name, returnType, parameters));
+  return hierarchy;
+}
+}    // namespace
+
+// C++ keys: `::` between the elements, operators whose symbol holds `<` or `(`, a template's members under any name
+// for its parameters, overloads by their parameter types with or without namespaces.
+TEST(St, resolvesCxxOperatorsTemplatesAndOverloads) {
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  const Id less = add(
+      storage, cxxName({L"shop"}, L"operator<", L"bool", L"(const shop::Item &, const shop::Item &)"), NODE_FUNCTION);
+  const Id shift = add(
+      storage, cxxName({L"shop"}, L"operator<<", L"std::ostream &", L"(std::ostream &, const shop::Item &)"), NODE_FUNCTION);
+  const Id equal = add(
+      storage, cxxName({L"shop"}, L"operator==", L"bool", L"(const shop::Item &, const shop::Item &)"), NODE_FUNCTION);
+  const Id call = add(storage, cxxName({L"shop", L"Pricer"}, L"operator()", L"double", L"(const shop::Item &) const"));
+  const Id get = add(storage, cxxName({L"shop", L"Box<typename T>"}, L"get", L"T", L"() const"));
+  const Id byPercent = add(storage, cxxName({L"shop"}, L"discount", L"double", L"(double, int)"), NODE_FUNCTION);
+  const Id byRate = add(storage, cxxName({L"shop"}, L"discount", L"double", L"(double, double)"), NODE_FUNCTION);
+  const Id total = add(storage, cxxName({L"shop"}, L"totalWithTax", L"shop::Box<double>", L"(const shop::Order &)"), NODE_FUNCTION);
+  storage.buildCaches();
+
+  const auto found = [&](const std::wstring& text) {
+    const auto resolved = st::resolveSymbol(storage, text, ALL_KINDS);
+    return resolved.status == st::Resolution::Found && resolved.ids.size() == 1 ? resolved.ids.front() : Id(0);
+  };
+  EXPECT_EQ(less, found(L"shop::operator<"));
+  EXPECT_EQ(less, found(L"operator<"));
+  EXPECT_EQ(shift, found(L"shop::operator<<"));
+  EXPECT_EQ(shift, found(L"shop::operator<<(std::ostream &, const shop::Item &)"));
+  EXPECT_EQ(equal, found(L"shop::operator=="));
+  EXPECT_EQ(call, found(L"shop::Pricer::operator()"));
+  EXPECT_EQ(call, found(L"Pricer::operator()(const shop::Item &)"));
+  EXPECT_EQ(get, found(L"shop::Box<T>::get"));
+  EXPECT_EQ(get, found(L"shop::Box<typename T>::get()"));
+  EXPECT_EQ(get, found(L"Box::get"));
+  EXPECT_EQ(byPercent, found(L"shop::discount(double, int)"));
+  EXPECT_EQ(byPercent, found(L"discount(double,int)"));
+  EXPECT_EQ(byRate, found(L"shop::discount(double,double)"));
+  EXPECT_TRUE(st::resolveSymbol(storage, L"shop::discount", ALL_KINDS).status == st::Resolution::Ambiguous);
+  EXPECT_EQ(total, found(L"totalWithTax(const shop::Order &)"));
+  EXPECT_EQ(total, found(L"totalWithTax(const Order&)"));
+  EXPECT_EQ(0U, found(L"totalWithTax(Order)"));
+  EXPECT_TRUE(st::findSymbols(storage, L"operator<", ALL_KINDS) == (std::vector<Id>{less, shift}));
+  EXPECT_TRUE(st::findSymbols(storage, L"discount(double, int)", ALL_KINDS) == std::vector<Id>{byPercent});
 }
 
 TEST(St, outputKeepsBestrankedResultsUnderTheLimit) {
@@ -2096,7 +2155,8 @@ public:
               qgetenv("JAVA_HOME") + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
   }
 
-  StRun st(const QStringList& arguments) const {
+  // The environment st runs in, with the copy's own HOME.
+  QProcessEnvironment environment() const {
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     if(!environment.contains("GRADLE_USER_HOME")) {
       environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
@@ -2104,8 +2164,12 @@ public:
     environment.insert("HOME", mHome);
     environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
     environment.remove("DISPLAY");
+    return environment;
+  }
+
+  StRun st(const QStringList& arguments) const {
     QProcess process;
-    process.setProcessEnvironment(environment);
+    process.setProcessEnvironment(environment());
     process.setWorkingDirectory(mRoot);
     process.start(ST_APP_PATH, QStringList(arguments) << "--no-server");
     StRun run;
@@ -2420,6 +2484,7 @@ TEST(StIndex, javaOnlyOutputUnchanged) {
   const StRun status = fixture.st({"status"});
   EXPECT_EQ(std::string::npos, status.out.find("typescript")) << status.out;
   EXPECT_EQ(std::string::npos, status.out.find("python")) << status.out;
+  EXPECT_EQ(std::string::npos, status.out.find("cxx")) << status.out;
   for(const auto& [arguments, out] : golden) {
     const StRun run = fixture.st(arguments);
     EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
@@ -2629,3 +2694,377 @@ TEST(StIndex, missingPythonRootIsReportedOnceNotRefreshedAgain) {
   run = fixture.st({"find", "main"});
   EXPECT_EQ(std::string::npos, run.err.find("refreshed")) << run.err;
 }
+
+#if BUILD_CXX_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsCxxCdb.h"
+
+namespace {
+// A C++ project at <base>/repo, its compilation database in build/, in a source group next to a plain Java one over
+// <base>/java, with its project file at <base>/prj/x.srctrlprj.
+void cxxFixture(const QString& base, ProjectSettings* settings) {
+  const QString repo = base + "/repo";
+  write(repo + "/src/a.cpp", "#include \"a.hpp\"\nint a() { return 1; }\n");
+  write(repo + "/include/a.hpp", "int a();\n");
+  write(repo + "/build/compile_commands.json",
+        ("[{\"directory\": \"" + repo +
+         "/build\", \"command\": \"c++ -I../include -c ../src/a.cpp\", \"file\": "
+         "\"../src/a.cpp\"}]\n")
+            .toUtf8());
+  write(repo + "/build/CMakeFiles/gen.cpp", "");
+  write(base + "/java/A.java", "class A {}");
+  write(base + "/prj/x.srctrlprj",
+        QString("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<config><source_groups>"
+                "<source_group_cxx><name>C/C++</name><type>C/C++ from Compilation Database</type><status>enabled</status>"
+                "<build_file_path><compilation_db_path>" +
+                repo +
+                "/build/compile_commands.json</compilation_db_path></build_file_path>"
+                "<indexed_header_paths><indexed_header_path>" +
+                repo +
+                "</indexed_header_path></indexed_header_paths></source_group_cxx>"
+                "<source_group_j><name>Java</name><type>Java Source Group</type><status>enabled</status>"
+                "<source_paths><source_path>" +
+                base +
+                "/java</source_path></source_paths>"
+                "<source_extensions><source_extension>.java</source_extension></source_extensions></source_group_j>"
+                "</source_groups><version>8</version></config>\n")
+            .toUtf8());
+  ASSERT_TRUE(settings->load(FilePath((base + "/prj/x.srctrlprj").toStdWString()), true));
+}
+}    // namespace
+
+// A C/C++ group is stale when an indexed source file or header changed, or the compilation database did (it may name new
+// source files); a C/C++ project alone checks its indexed files without the Gradle note.
+TEST(St, freshnessOfACxxGroupFollowsItsFilesAndItsDatabase) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString repo = base + "/repo";
+  ProjectSettings settings;
+  cxxFixture(base, &settings);
+  const TimeStamp indexedAt(boost::posix_time::second_clock::local_time() - boost::posix_time::minutes(5));
+  const std::vector<FilePath> indexed = {
+      FilePath((repo + "/src/a.cpp").toStdWString()), FilePath((repo + "/include/a.hpp").toStdWString())};
+  const auto changes = [&]() { return st::checkFreshness(settings, indexedAt, indexed, {}).changedFiles; };
+
+  age(base);
+  ASSERT_EQ(0U, changes());
+  write(repo + "/build/CMakeFiles/gen.cpp", "changed");
+  write(repo + "/notes.txt", "changed");
+  EXPECT_EQ(0U, changes());
+
+  write(repo + "/include/a.hpp", "int a();\nint b();\n");
+  EXPECT_EQ(1U, changes());
+  age(base);
+  write(repo + "/src/a.cpp", "int a() { return 2; }\n");
+  EXPECT_EQ(1U, changes());
+  age(base);
+  write(repo + "/build/compile_commands.json", "[]\n");
+  EXPECT_EQ(1U, changes());
+  age(base);
+  // a missing database is no change a refresh could pick up; st status shows it
+  ASSERT_TRUE(QFile::remove(repo + "/build/compile_commands.json"));
+  EXPECT_EQ(0U, changes());
+
+  // the Java group's note only with the Java group
+  EXPECT_EQ(
+      "no Gradle source roots cached; checked indexed files only", st::checkFreshness(settings, indexedAt, indexed, {}).reason);
+  auto groups = settings.getAllSourceGroupSettings();
+  std::erase_if(groups, [](const auto& group) { return group->getType() != SOURCE_GROUP_CXX_CDB; });
+  settings.setAllSourceGroupSettings(groups);
+  EXPECT_EQ("", st::checkFreshness(settings, indexedAt, indexed, {}).reason);
+}
+
+// Indexed when a source file of its compilation database is in the index; not before its first indexing.
+TEST(St, statusShowsEachCxxGroup) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  ProjectSettings settings;
+  cxxFixture(base, &settings);
+  PersistentStorage storage(FilePath(L":memory:"), FilePath(L":memory:"));
+  storage.setup();
+  // the Java group's file says nothing about the C/C++ group
+  addFile(storage, (base + "/java/A.java").toStdWString());
+  storage.buildCaches();
+
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) == std::vector<std::string>{"cxx\tnot indexed; st index shows why"});
+  addFile(storage, (base + "/repo/src/a.cpp").toStdWString());
+  storage.buildCaches();
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) == std::vector<std::string>{"cxx\tindexed"});
+  ASSERT_TRUE(QFile::remove(base + "/repo/build/compile_commands.json"));
+  EXPECT_TRUE(st::cxxStatusRows(settings, storage) ==
+              std::vector<std::string>{"cxx\tbroken: compilation database not found: " + base.toStdString() +
+                                       "/repo/build/compile_commands.json"});
+}
+
+// The compilation database is watched where it is, in build/ too; the indexed files as for any group.
+TEST(St, watchPathsCoverTheCompilationDatabase) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  const QString base = QDir(dir.path()).canonicalPath();
+  const QString repo = base + "/repo";
+  ProjectSettings settings;
+  cxxFixture(base, &settings);
+
+  const std::vector<QString> paths = st::watchPaths(
+      settings, {FilePath((repo + "/src/a.cpp").toStdWString()), FilePath((repo + "/include/a.hpp").toStdWString())});
+  const std::set<QString> watched(paths.begin(), paths.end());
+  for(const QString& expected : {repo + "/build/compile_commands.json", repo + "/src/a.cpp", repo + "/include/a.hpp"}) {
+    EXPECT_TRUE(watched.count(expected)) << expected.toStdString();
+  }
+  EXPECT_FALSE(watched.count(repo + "/build/CMakeFiles/gen.cpp"));
+  EXPECT_FALSE(watched.count(repo + "/build/CMakeFiles"));
+}
+
+namespace {
+const QString kCxxGroup = QStringLiteral(
+    "<source_group_cxx><name>C/C++</name><type>C/C++ from Compilation Database</type><status>enabled</status>"
+    "<build_file_path><compilation_db_path>build/compile_commands.json</compilation_db_path></build_file_path>"
+    "<indexed_header_paths><indexed_header_path>.</indexed_header_path></indexed_header_paths></source_group_cxx>");
+
+// The C++ fixture with the compilation database CMake writes for it, indexed by st.
+class StCxx : public testing::Test {
+protected:
+  static void SetUpTestSuite() {
+    sFixture = new FixtureCopy(ST_CPP_FIXTURE, "shop.srctrlprj", kCxxGroup);
+    QProcess cmake;
+    cmake.setProcessChannelMode(QProcess::MergedChannels);
+    cmake.start(QStringLiteral(CMAKE_COMMAND_PATH),
+                {QStringLiteral("-S"),
+                 sFixture->root(),
+                 QStringLiteral("-B"),
+                 sFixture->root() + "/build",
+                 QStringLiteral("-G"),
+                 QStringLiteral(CMAKE_GENERATOR_NAME),
+                 QStringLiteral("-DCMAKE_MAKE_PROGRAM=" CMAKE_MAKE_PROGRAM_PATH)});
+    if(cmake.waitForFinished(120000) && cmake.exitCode() == 0) {
+      // the database older than the start of the indexing, give or take the clock's coarseness
+      QThread::msleep(100);
+      sIndexed = sFixture->st({"index", "--full"});
+    } else {
+      sIndexed.err = cmake.readAll().toStdString();
+    }
+  }
+
+  static void TearDownTestSuite() {
+    delete sFixture;
+    sFixture = nullptr;
+  }
+
+  void SetUp() override {
+    ASSERT_EQ(0, sIndexed.exitCode) << sIndexed.err;
+  }
+
+  static StRun st(const QStringList& arguments) {
+    StRun run = sFixture->st(arguments);
+    // a C/C++ project checks its indexed files, which is no gap to report
+    EXPECT_EQ(std::string::npos, run.err.find("checked indexed files only")) << run.err;
+    // a declaration in a header and a definition in a source file are one symbol
+    EXPECT_EQ(std::string::npos, run.err.find("declared in several modules")) << run.err;
+    return run;
+  }
+
+  static FixtureCopy* sFixture;
+  static StRun sIndexed;
+};
+
+FixtureCopy* StCxx::sFixture = nullptr;
+StRun StCxx::sIndexed;
+}    // namespace
+
+// The fixture specializes std::hash, so the project declares something in namespace std. The standard library's
+// symbols are still the library's: no unresolved symbols, and no gap on an answer that reaches them.
+TEST_F(StCxx, aStandardLibrarySpecializationLeavesTheLibraryResolved) {
+  const StRun status = st({"status"});
+  EXPECT_NE(std::string::npos, status.out.find("\nunresolved_symbols\t0\n")) << status.out;
+  // Book::describe() calls std::operator+ on strings
+  for(const char* key : {"shop::Book::describe()", "std::hash<shop::Item>::operator()"}) {
+    const StRun callees = st({"callees", key});
+    EXPECT_EQ(0, callees.exitCode) << key << callees.err;
+    EXPECT_EQ(std::string::npos, callees.err.find("st: incomplete:")) << key << callees.err;
+  }
+}
+
+TEST_F(StCxx, indexesAndReportsTheFixture) {
+  EXPECT_EQ("indexed 5 files, 0 errors\n", sIndexed.out) << sIndexed.err;
+  const StRun status = st({"status"});
+  EXPECT_NE(std::string::npos, status.out.find("\nerrors\t0\nfiles_with_errors\t0\n")) << status.out;
+  EXPECT_NE(std::string::npos, status.out.find("\nstale_files\t0\n")) << status.out;
+  EXPECT_NE(std::string::npos, status.out.find("\ncxx\tindexed\n")) << status.out;
+  EXPECT_EQ(std::string::npos, status.out.find("python")) << status.out;
+}
+
+// Keys with `::`, an operator, a template named by its parameter, overloads by parameter list.
+TEST_F(StCxx, answersWithCxxKeys) {
+  const std::vector<std::pair<QStringList, std::string>> answers = {
+      {{"callers", "shop::Order::total"},
+       "shop::totalWithTax(const shop::Order &)\tfunction\tsrc/pricing.cpp:18\n"
+       "main()\tfunction\ttests/shop_tests.cpp:21\n"},
+      {{"callers", "shop::operator=="}, "main()\tfunction\ttests/shop_tests.cpp:27\n"},
+      {{"callers", "shop::discount(double, int)"},
+       "main()\tfunction\tapp/main.cpp:10\n"
+       "main()\tfunction\ttests/shop_tests.cpp:22\n"},
+      {{"callers", "discount(double,double)"},
+       "shop::discount(double, int)\tfunction\tsrc/pricing.cpp:10\n"
+       "main()\tfunction\ttests/shop_tests.cpp:23\n"},
+      {{"callers", "shop::Box<T>::get"},
+       "main()\tfunction via shop::Box<double>::get()\tapp/main.cpp:10\n"
+       "main()\tfunction via shop::Box<int>::get()\ttests/shop_tests.cpp:26\n"},
+      {{"callees", "shop::totalWithTax(const Order&)"},
+       "shop::Order::total()\tmethod\tsrc/pricing.cpp:18\n"
+       "shop::boxed<double>(double)\tfunction\tsrc/pricing.cpp:18\n"},
+      {{"supers", "shop::Book"}, "shop::Item\tclass\tinclude/shop/item.hpp:7\n"},
+      {{"impls", "shop::Item"},
+       "shop::Book\tclass\tinclude/shop/item.hpp:20\n"
+       "shop::Food\tclass\tinclude/shop/item.hpp:32\n"},
+      {{"supers", "shop::Book::price"}, "shop::Item::price()\tmethod\tinclude/shop/item.hpp:13\n"},
+  };
+  for(const auto& [arguments, out] : answers) {
+    const StRun run = st(QStringList(arguments) << "--no-source");
+    EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
+    EXPECT_EQ(out, run.out) << arguments.join(' ').toStdString() << '\n' << run.err;
+  }
+  const StRun overloads = st({"callers", "shop::discount", "--no-source"});
+  EXPECT_EQ(2, overloads.exitCode) << overloads.out << overloads.err;
+}
+
+// impls/supers follow C++ inheritance and overrides; refs, outline and impact answer on C++ symbols.
+TEST_F(StCxx, answersHierarchyRefsOutlineAndImpact) {
+  const std::vector<std::pair<QStringList, std::string>> answers = {
+      {{"impls", "shop::Item"},
+       "shop::Book\tclass\tinclude/shop/item.hpp:20\n"
+       "shop::Food\tclass\tinclude/shop/item.hpp:32\n"},
+      {{"impls", "shop::Item::price"},
+       "shop::Book::price()\tmethod\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\tmethod\tinclude/shop/item.hpp:36\n"
+       "shop::Book::price()\tmethod\tsrc/item.cpp:20\n"
+       "shop::Food::price()\tmethod\tsrc/item.cpp:30\n"},
+      {{"supers", "shop::Food"}, "shop::Item\tclass\tinclude/shop/item.hpp:7\n"},
+      {{"supers", "shop::Food::price()"}, "shop::Item::price()\tmethod\tinclude/shop/item.hpp:13\n"},
+      {{"refs", "shop::Item::price"},
+       "shop::Book::price()\toverride\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\toverride\tinclude/shop/item.hpp:36\n"
+       "shop::Book::price()\toverride\tsrc/item.cpp:20\n"
+       "shop::Food::price()\toverride\tsrc/item.cpp:30\n"
+       "shop::operator==(const shop::Item &, const shop::Item &)\tcall\tsrc/item.cpp:35\n"
+       "shop::Order::total()\tcall\tsrc/order.cpp:14\n"},
+      {{"outline", "shop::Book"},
+       "shop::Book::Book(std::string, double, std::string)\tpublic method\tinclude/shop/item.hpp:22\n"
+       "shop::Book::price()\tpublic method\tinclude/shop/item.hpp:24\n"
+       "shop::Book::describe()\tpublic method\tinclude/shop/item.hpp:25\n"
+       "shop::Book::m_price\tprivate field\tinclude/shop/item.hpp:28\n"
+       "shop::Book::m_author\tprivate field\tinclude/shop/item.hpp:29\n"
+       "shop::Book::Book(std::string, double, std::string)\tpublic method\tsrc/item.cpp:17-18\n"
+       "shop::Book::price()\tpublic method\tsrc/item.cpp:20-22\n"
+       "shop::Book::describe()\tpublic method\tsrc/item.cpp:24-26\n"},
+      {{"impact", "shop::Item::price"},
+       "main()\tfunction, depth 3\tapp/main.cpp:10\n"
+       "shop::Book::price()\tmethod, depth 0\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\tmethod, depth 0\tinclude/shop/item.hpp:36\n"
+       "shop::operator==(const shop::Item &, const shop::Item &)\tfunction, depth 1\tsrc/item.cpp:35\n"
+       "shop::Order::total()\tmethod, depth 1\tsrc/order.cpp:14\n"
+       "shop::totalWithTax(const shop::Order &)\tfunction, depth 2\tsrc/pricing.cpp:18\n"
+       "main()\tfunction, depth 2\ttests/shop_tests.cpp:21\n"},
+  };
+  for(const auto& [arguments, out] : answers) {
+    const StRun run = st(QStringList(arguments) << "--no-source");
+    EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
+    EXPECT_EQ(out, run.out) << arguments.join(' ').toStdString() << '\n' << run.err;
+  }
+  const StRun file = st({"outline", "include/shop/item.hpp", "--no-source"});
+  EXPECT_EQ(0, file.exitCode) << file.err;
+  for(const char* line : {"shop::Item\tclass\tinclude/shop/item.hpp:7-18\n",
+                          "shop::Item::price()\tpublic method\tinclude/shop/item.hpp:13\n",
+                          "shop::Food\tclass\tinclude/shop/item.hpp:32-41\n",
+                          "shop::operator==(const shop::Item &, const shop::Item &)\tfunction\tinclude/shop/item.hpp:43\n"}) {
+    EXPECT_NE(std::string::npos, file.out.find(line)) << line << file.out;
+  }
+}
+
+// A header edit and a new compilation database make the index stale; the next query refreshes it.
+TEST_F(StCxx, headerAndDatabaseEditsAreStale) {
+  QThread::sleep(2);
+  QFile box(sFixture->root() + "/include/shop/box.hpp");
+  ASSERT_TRUE(box.open(QIODevice::Append));
+  box.write("\nnamespace shop {\ninline int boxCount() {\n  return 0;\n}\n}    // namespace shop\n");
+  box.close();
+  StRun run = st({"status"});
+  EXPECT_NE(std::string::npos, run.out.find("stale_files\t1\n")) << run.out;
+  run = st({"find", "boxCount"});
+  EXPECT_EQ(0, run.exitCode) << run.err;
+  EXPECT_NE(std::string::npos, run.err.find("refreshed 1 files")) << run.err;
+  EXPECT_NE(std::string::npos, run.out.find("shop::boxCount()")) << run.out;
+  EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t0\n"));
+
+  QThread::sleep(2);
+  QFile database(sFixture->root() + "/build/compile_commands.json");
+  ASSERT_TRUE(database.open(QIODevice::Append));
+  database.write("\n");
+  database.close();
+  EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t1\n"));
+  EXPECT_EQ(0, st({"find", "boxCount"}).exitCode);
+  EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t0\n"));
+}
+
+// Under st serve, a compilation database edit that adds no source file (new flags) is refreshed once in the background
+// and leaves the index fresh: no refresh loop.
+TEST_F(StCxx, serverRefreshesADatabaseEditOnce) {
+  const QString log = sFixture->root() + "/../serve.err";
+  QProcess server;
+  server.setProcessEnvironment(sFixture->environment());
+  server.setWorkingDirectory(sFixture->root());
+  server.setStandardOutputFile(QProcess::nullDevice());
+  server.setStandardErrorFile(log);
+  server.start(ST_APP_PATH, {"serve"});
+  ASSERT_TRUE(server.waitForStarted());
+  const auto contents = [&log]() {
+    QFile file(log);
+    return file.open(QIODevice::ReadOnly) ? file.readAll().toStdString() : std::string();
+  };
+  const auto logged = [&contents](const char* text) { return static_cast<int>(QByteArray::fromStdString(contents()).count(text)); };
+  // waits up to 60 s for `count` lines holding `text`
+  const auto await = [&](const char* text, int count) {
+    for(int i = 0; i < 600 && logged(text) < count; i++) {
+      QThread::msleep(100);
+    }
+    return logged(text) >= count;
+  };
+  const auto stop = [&]() {
+    server.terminate();
+    if(!server.waitForFinished(10000)) {
+      server.kill();
+      server.waitForFinished();
+    }
+  };
+  if(!await("st: watching ", 1)) {
+    stop();
+    FAIL() << "the server does not watch";
+  }
+  // past the server's first look, which finds the index fresh
+  QThread::sleep(2);
+  const int before = logged("st: refreshing ");
+  const int finishedBefore = logged(" finished in ");
+
+  QFile database(sFixture->root() + "/build/compile_commands.json");
+  ASSERT_TRUE(database.open(QIODevice::ReadWrite));
+  const QByteArray text = database.readAll();
+  const QByteArray edited = QByteArray(text).replace("-std=gnu++17", "-std=gnu++17 -DSHOP_FLAG=1");
+  if(edited == text) {
+    stop();
+    FAIL() << "the database has no -std=gnu++17 to change: " << text.toStdString();
+  }
+  database.resize(0);
+  database.write(edited);
+  database.close();
+
+  // "finished in", not the prefix: "st: background refresh failed" shares it
+  const bool refreshed = await("st: refreshing ", before + 1) && await(" finished in ", finishedBefore + 1);
+  // a loop would start another refresh within the quiet period and the retry delay
+  QThread::sleep(5);
+  const int after = logged("st: refreshing ");
+  stop();
+  ASSERT_TRUE(refreshed) << contents();
+  EXPECT_EQ(before + 1, after) << contents();
+  EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t0\n"));
+}
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE

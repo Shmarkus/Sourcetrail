@@ -1,5 +1,11 @@
 # ${CMAKE_SOURCE_DIR}/src/lib_cxx/CMakeLists.txt
 find_package(Clang REQUIRED CONFIG)
+# bin/app/data/cxx/include holds Clang 19's builtin headers (stddef.h, intrinsics), which the parser passes as -isystem;
+# they must come from the same Clang as the parser. Another LLVM needs its lib/clang/<major>/include copied there.
+if(NOT LLVM_VERSION_MAJOR EQUAL 19)
+  message(FATAL_ERROR "LLVM ${LLVM_VERSION} found, but bin/app/data/cxx/include holds Clang 19's builtin headers. "
+                      "Point Clang_DIR at LLVM 19 (e.g. /usr/lib/llvm-19/lib/cmake/clang), or replace those headers.")
+endif()
 
 add_library(Sourcetrail_lib_cxx)
 add_library(Sourcetrail::lib_cxx ALIAS Sourcetrail_lib_cxx)

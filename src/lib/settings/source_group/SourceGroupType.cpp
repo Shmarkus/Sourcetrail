@@ -22,6 +22,8 @@ std::string sourceGroupTypeToString(SourceGroupType v) {
 #endif
   case SOURCE_GROUP_TYPESCRIPT:
     return "TypeScript Source Group";
+  case SOURCE_GROUP_PYTHON:
+    return "Python Source Group";
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return "Custom Command Source Group";
   case SOURCE_GROUP_UNKNOWN:
@@ -52,6 +54,8 @@ std::string sourceGroupTypeToProjectSetupString(SourceGroupType v) {
 #endif
   case SOURCE_GROUP_TYPESCRIPT:
     return "TypeScript Source Group";
+  case SOURCE_GROUP_PYTHON:
+    return "Python Source Group";
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return "Custom Command Source Group";
   case SOURCE_GROUP_UNKNOWN:
@@ -82,6 +86,9 @@ SourceGroupType stringToSourceGroupType(const std::string& v) {
 #endif
   if(v == sourceGroupTypeToString(SOURCE_GROUP_TYPESCRIPT)) {
     return SOURCE_GROUP_TYPESCRIPT;
+  }
+  if(v == sourceGroupTypeToString(SOURCE_GROUP_PYTHON)) {
+    return SOURCE_GROUP_PYTHON;
   }
   if(v == sourceGroupTypeToString(SOURCE_GROUP_CUSTOM_COMMAND)) {
     return SOURCE_GROUP_CUSTOM_COMMAND;

@@ -44,6 +44,7 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
   sourceGroupInfos[LANGUAGE_JAVA].emplace_back(SOURCE_GROUP_JAVA_EMPTY);
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   sourceGroupInfos[LANGUAGE_TYPESCRIPT].emplace_back(SOURCE_GROUP_TYPESCRIPT);
+  sourceGroupInfos[LANGUAGE_PYTHON].emplace_back(SOURCE_GROUP_PYTHON);
   sourceGroupInfos[LANGUAGE_CUSTOM].emplace_back(SOURCE_GROUP_CUSTOM_COMMAND);
 
   // define which icons should be used for which kind of source group
@@ -59,6 +60,7 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
   m_sourceGroupTypeIconName[SOURCE_GROUP_JAVA_GRADLE] = L"gradle_icon";
 #endif    // BUILD_JAVA_LANGUAGE_PACKAGE
   m_sourceGroupTypeIconName[SOURCE_GROUP_TYPESCRIPT] = L"empty_icon";
+  m_sourceGroupTypeIconName[SOURCE_GROUP_PYTHON] = L"empty_icon";
   m_sourceGroupTypeIconName[SOURCE_GROUP_CUSTOM_COMMAND] = L"empty_icon";
 
   // define descriptions for each kind of Source Group
@@ -90,6 +92,10 @@ void QtProjectWizardContentSelect::populate(QGridLayout* layout, int& /*row*/) {
       "Create a new Source Group from the root tsconfig.json of a TypeScript project. Its HTTP calls are linked to "
       "the Spring handlers of the project's Java source groups.<br /><br />Indexing needs Node.js and the project's "
       "node_modules (run npm install first).";
+  m_sourceGroupTypeDescriptions[SOURCE_GROUP_PYTHON] =
+      "Create a new Source Group from the folder of a Python project: the .py files below it are indexed, tests "
+      "included.<br /><br />Indexing needs Node.js. Library imports resolve against the project's virtualenv "
+      "(.venv or venv), or the interpreter you name, wherever it is installed.";
   m_sourceGroupTypeDescriptions[SOURCE_GROUP_CUSTOM_COMMAND] =
       "Create a new Source Group executing a custom command on each source file. "
       "This Source Group type can be used on <a "

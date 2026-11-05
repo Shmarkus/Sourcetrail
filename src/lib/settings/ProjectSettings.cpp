@@ -5,6 +5,7 @@
 #include "SettingsMigrationLambda.h"
 #include "SettingsMigrationMoveKey.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsUnloadable.h"
 #include "utilityFile.h"
@@ -172,6 +173,9 @@ std::vector<std::shared_ptr<SourceGroupSettings>> ProjectSettings::getAllSourceG
 #endif
     case SOURCE_GROUP_TYPESCRIPT:
       settings = std::make_shared<SourceGroupSettingsTypeScript>(id, this);
+      break;
+    case SOURCE_GROUP_PYTHON:
+      settings = std::make_shared<SourceGroupSettingsPython>(id, this);
       break;
     case SOURCE_GROUP_CUSTOM_COMMAND:
       settings = std::make_shared<SourceGroupSettingsCustomCommand>(id, this);

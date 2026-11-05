@@ -14,6 +14,7 @@
 #include "SourceGroupSettingsJavaEmpty.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsJavaMaven.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "utilityString.h"
 #include "utilityUuid.h"
@@ -231,6 +232,53 @@ std::shared_ptr<SourceGroupSettings> createTypeScriptSourceGroup(const fs::path&
   return settings;
 }
 
+std::shared_ptr<SourceGroupSettings> createPythonSourceGroup(const fs::path& folder, const ProjectSettings* projectSettings) {
+  auto settings = std::make_shared<SourceGroupSettingsPython>(utility::getUuidString(), projectSettings);
+  settings->setName("Python");
+  // the indexer finds the folder's environment itself
+  settings->setProjectRoot(relativeToProject(folder, folder / ProjectFolderName));
+  return settings;
+}
+
+// A pyproject.toml, setup.py, setup.cfg or requirements*.txt at the folder's top level.
+bool hasPythonProjectFile(const fs::path& folder) {
+  for(const auto* name : {L"pyproject.toml", L"setup.py", L"setup.cfg"}) {
+    if(isFile(folder / name)) {
+      return true;
+    }
+  }
+  std::error_code error;
+  for(const auto& entry : fs::directory_iterator{folder, error}) {
+    const std::wstring name = entry.path().filename().wstring();
+    if(name.starts_with(L"requirements") && name.ends_with(L".txt") && isFile(entry.path())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// .py files below the folder, outside the folders the Python indexer skips, and no .java file there: the sources of a
+// folder without a build are Python.
+bool hasOnlyPythonSources(const fs::path& folder) {
+  bool python = false;
+  std::error_code error;
+  for(auto it = fs::recursive_directory_iterator{folder, fs::directory_options::skip_permission_denied, error};
+      !error && it != fs::recursive_directory_iterator{};
+      it.increment(error)) {
+    const fs::path& path = it->path();
+    std::error_code typeError;
+    if(it->is_directory(typeError)) {
+      if(SourceGroupSettingsPython::isUnwalkedDirectory(path.filename().wstring())) {
+        it.disable_recursion_pending();
+      }
+    } else if(path.extension() == ".java") {
+      return false;
+    } else if(path.extension() == ".py") {
+      python = true;
+    }
+  }
+  return python;
+}
 }    // namespace
 
 JavaBuildKind detectJavaBuild(const FilePath& folder) {
@@ -245,7 +293,11 @@ JavaBuildKind detectJavaBuild(const FilePath& folder) {
 }
 
 DetectedBuild detectBuild(const FilePath& folder) {
-  return {.java = detectJavaBuild(folder), .typeScript = isFile(folderPath(folder) / TsconfigName)};
+  const fs::path path = folderPath(folder);
+  DetectedBuild build{.java = detectJavaBuild(folder), .typeScript = isFile(path / TsconfigName)};
+  build.python = hasPythonProjectFile(path) ||
+      (build.java == JavaBuildKind::None && !build.typeScript && hasOnlyPythonSources(path));
+  return build;
 }
 
 FilePath projectFileFor(const FilePath& folder) {
@@ -305,17 +357,22 @@ std::shared_ptr<ProjectSettings> projectSettingsFor(const FilePath& folder, cons
   settings->setVersion(ProjectSettings::VERSION);
 
   std::vector<std::shared_ptr<SourceGroupSettings>> groups;
-  if(build.java != JavaBuildKind::None || !build.typeScript) {
+  if(build.java != JavaBuildKind::None || (!build.typeScript && !build.python)) {
     groups.push_back(createJavaSourceGroup(path, build.java, settings.get()));
   }
   if(build.typeScript) {
     groups.push_back(createTypeScriptSourceGroup(path, settings.get()));
   }
+  if(build.python) {
+    groups.push_back(createPythonSourceGroup(path, settings.get()));
+  }
   settings->setAllSourceGroupSettings(groups);
   return settings;
 }
 
-bool addTypeScriptGroup(const FilePath& projectFile, const FilePath& folder) {
+namespace {
+bool addSourceGroup(const FilePath& projectFile,
+                    const std::function<std::shared_ptr<SourceGroupSettings>(const ProjectSettings*)>& createGroup) {
   ProjectSettings settings;
   if(!settings.load(projectFile)) {
     LOG_ERROR("Cannot read {}", projectFile.str());
@@ -323,13 +380,38 @@ bool addTypeScriptGroup(const FilePath& projectFile, const FilePath& folder) {
   }
 
   auto groups = settings.getAllSourceGroupSettings();
-  groups.push_back(createTypeScriptSourceGroup(folderPath(folder), &settings));
+  groups.push_back(createGroup(&settings));
   settings.setAllSourceGroupSettings(groups);
   if(!settings.save(projectFile)) {
     LOG_ERROR("Cannot write {}", projectFile.str());
     return false;
   }
   return true;
+}
+
+bool hasSourceGroup(const FilePath& projectFile, SourceGroupType type) {
+  ProjectSettings settings;
+  return settings.load(projectFile) &&
+      std::ranges::any_of(settings.getAllSourceGroupSettings(), [type](const auto& group) { return group->getType() == type; });
+}
+}    // namespace
+
+bool addTypeScriptGroup(const FilePath& projectFile, const FilePath& folder) {
+  return addSourceGroup(projectFile, [&folder](const ProjectSettings* settings) {
+    return createTypeScriptSourceGroup(folderPath(folder), settings);
+  });
+}
+
+bool addPythonGroup(const FilePath& projectFile, const FilePath& folder) {
+  return addSourceGroup(
+      projectFile, [&folder](const ProjectSettings* settings) { return createPythonSourceGroup(folderPath(folder), settings); });
+}
+
+FilePath pythonRootFor(const FilePath& projectDirectory) {
+  if(projectDirectory.empty() || folderPath(projectDirectory).filename() != ProjectFolderName) {
+    return {};
+  }
+  return FilePath{L".."};
 }
 
 bool prepareProjectFolder(const FilePath& folder) {
@@ -355,16 +437,12 @@ ProjectChoice openOrCreateProject(const FilePath& folder, const std::function<bo
   const DetectedBuild build = detectBuild(folder);
 
   if(FilePath existing = existingProjectFile(folder); !existing.empty()) {
-    bool hasTypeScript = false;
-    ProjectSettings settings;
-    if(settings.load(existing)) {
-      hasTypeScript = std::ranges::any_of(
-          settings.getAllSourceGroupSettings(), [](const auto& group) { return group->getType() == SOURCE_GROUP_TYPESCRIPT; });
-    }
-    return {.projectFile = existing, .canAddTypeScript = build.typeScript && !hasTypeScript, .build = build};
+    const bool canAddTypeScript = build.typeScript && !hasSourceGroup(existing, SOURCE_GROUP_TYPESCRIPT);
+    const bool canAddPython = build.python && !hasSourceGroup(existing, SOURCE_GROUP_PYTHON);
+    return {.projectFile = existing, .canAddTypeScript = canAddTypeScript, .canAddPython = canAddPython, .build = build};
   }
 
-  if(build.java == JavaBuildKind::None && !build.typeScript) {
+  if(build.java == JavaBuildKind::None && !build.typeScript && !build.python) {
     if(!acceptPlainJava()) {
       return {};
     }

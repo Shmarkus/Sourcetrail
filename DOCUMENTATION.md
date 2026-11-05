@@ -16,7 +16,7 @@ Sourcetrail is an interactive source explorer that simplifies navigation in exis
 * **Graph:** The graph displays the structure of your source code. It focuses on the currently selected symbol and directly shows all incoming and outgoing dependencies to other symbols.
 * **Code:** The Code view displays all source locations of the currently selected symbol in a list of code snippets. Clicking on a different source location allows you to change the selection and dig deeper.
 
-Note: this fork supports Java and TypeScript. C/C++ and Python are work in progress. For more information have a look at [supported languages](#supported-languages).
+Note: this fork supports Java, TypeScript and Python. C/C++ is work in progress. For more information have a look at [supported languages](#supported-languages).
 
 ## Supported Languages
 
@@ -34,7 +34,7 @@ Work in progress: C and C++ indexing is not in this fork's current builds.
 
 ### Python
 
-Work in progress: Python indexing is not in this fork's current builds.
+Sourcetrail indexes Python projects, powered by [scip-python](https://github.com/sourcegraph/scip-python). Indexing needs Node.js 22.13 or newer. Calls into libraries resolve when the project has a Python environment with its dependencies installed: a `.venv` or `venv` in the project folder, the active virtualenv, or any interpreter named in the project settings; without one the project's own code still indexes. Test files are indexed like any other code. See [Python projects](#python-projects) for details.
 
 
 # Getting Started
@@ -63,6 +63,7 @@ After launching Sourcetrail you will see the [Start Window](#start-window). From
 * A folder that already holds a project opens that project.
 * A Gradle or Maven build creates a Java project with tests included. See [New Java projects](#new-java-projects).
 * A `tsconfig.json` adds TypeScript, or creates a TypeScript-only project if there is no Java build. See [TypeScript and the frontend–backend link](#typescript-and-the-frontendbackend-link).
+* A `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt` adds Python, as do `.py` files in a folder with no other build. See [Python projects](#python-projects).
 * With none of these, Sourcetrail offers a plain Java project and opens the project settings so that you can fill in the class path.
 
 For Custom Command source groups, manual Java source groups or several groups in one project, use **Project > New Custom Project...**, which opens the [Project Setup Wizard](#project-setup).
@@ -375,10 +376,6 @@ This dialog displays the number of files for indexing and clearing before indexi
 * **Incomplete & updated files:** Reindexes all files that had errors during last indexing, all files depending on those and all updated files.
 * **All files:** Deletes the previous index and reindexes all files.
 
-
-**Shallow Python Indexing** (work in progress, with Python support)
-
-For Python projects a checkbox **Shallow Python Indexing** is additionally displayed. When checked, references within your code base (calls, usages, etc.) are resolved by name, which is imprecise but much faster than in-depth indexing. Use this option for a quick first indexing pass and start browsing the code base while running a second pass for in-depth indexing.
 
 <img src="docs/documentation/start_indexing_dialog.png" width="600" alt="Start Indexing Dialog">
 
@@ -1102,7 +1099,7 @@ This window is also used when editing the project. You can select a Source Group
 
 ## Choose a Source Group Type
 
-When creating a new Source Group you can choose between different methods of setup depending on your project language. This fork offers Java (from Maven, from Gradle or empty), TypeScript and Custom Command Source Groups.
+When creating a new Source Group you can choose between different methods of setup depending on your project language. This fork offers Java (from Maven, from Gradle or empty), TypeScript, Python and Custom Command Source Groups.
 
 **Interactions:**
 
@@ -1191,19 +1188,14 @@ Java Source Groups from Maven offer the following configuration options:
 | Excluded Files & Directories        | These paths define the files and directories that will be left out from indexing.<br />Hints:<br /><ul><li>You can use the wildcard `*` which represents characters except `\` or `/` (e.g. `src/*/test.h` matches `src/app/test.h` but does not match `src/app/widget/test.h` or `src/test.h`)</li><li>You can use the wildcard `**` which represents arbitrary characters (e.g. `src**test.h` matches `src/app/test.h` as well as `src/app/widget/test.h` or `src/test.h`)</li><li>You can make use of environment variables with `${ENV_VAR}`<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box).</li></ul> |
 | Source File Extensions              | Define the valid extensions for source files including the dot e.g. `.java`. Sourcetrail will only try to index files that match one of these extensions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
-## Empty Python Source Group
+## Python Source Group
 
-> **Work in progress:** Python indexing is not in this fork's current builds.
+Choose this option to index a Python project. A project has one Python Source Group. Indexing needs Node.js 22.13 or newer. See [Python projects](#python-projects).
 
-Choose this option if you want to index Python files using Sourcetrail.
-Empty Python Source Groups offer the following configuration options:
-
-| Setting                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Python Environment           | Here you can specify the path to the directory or to the executable of the (virtual) Python environment that should be used to resolve dependencies within the indexed source code.<br />If you would run:<br />`$ cd c:\dev\python\envs`<br />`$ virtualenv py37`<br />you would set it to `C:\dev\python\envs\py37` or `C:\dev\python\envs\py37\Scripts\python.exe`.<br />Leave blank to use the default Python environment. You can make use of environment variables with `${ENV_VAR}`.                                                                                                                                                     |
-| Files & Directories to Index | These paths define the files and directories that will be indexed by Sourcetrail. Provide a directory to recursively add all contained source and header files. If your project's source code resides in one location, but generated source files are kept at a different location, you will also need to add that directory. You can make use of environment variables with ${ENV_VAR}.<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box).                                                                                                                                                                   |
-| Excluded Files & Directories | These paths define the files and directories that will be left out from indexing.<br />Hints:<br /><ul><li>You can use the wildcard `*` which represents characters except `\` or `/` (e.g. `src/*/test.h` matches `src/app/test.h` but does not match `src/app/widget/test.h` or `src/test.h`)</li><li>You can use the wildcard `**` which represents arbitrary characters (e.g. `src**test.h` matches `src/app/test.h` as well as `src/app/widget/test.h` or `src/test.h`)</li><li>You can make use of environment variables with `${ENV_VAR}`<br /><br />For instructions on how to add paths see [Path List Box](#path-list-box).</li></ul> |
-| Source File Extensions       | Define the valid extensions for source files including the dot e.g. `.py`. Sourcetrail will only try to index files that match one of these extensions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Setting               | Description                                                                                                                                                                                                                          |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Python Project Folder | The folder whose `.py` files are indexed. Leave blank for the project folder.                                                                                                                                                        |
+| Python Interpreter    | The Python that resolves libraries: a path, or a name looked up on `PATH`. Leave blank to use the active virtualenv, else the folder's `.venv` or `venv`, else `python3` on `PATH`; the field shows the `.venv` or `venv` it finds. |
 
 ## TypeScript Source Group
 
@@ -1610,6 +1602,63 @@ Java. On a private Angular + Spring app of 327 TypeScript files the TypeScript s
 the whole refresh takes about 10 s, because Maven's preparation runs on every refresh. Measurements:
 `docs/superpowers/specs/2026-11-03-typescript-indexing-results.md`.
 
+## Python projects
+
+A folder with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt` at its top level gets its Python
+indexed into the same index as its Java and TypeScript: packages, modules, classes, functions, methods, fields (class
+attributes and dataclass fields) and module variables, with their calls, usages, type uses, inheritance, overrides,
+imports and decorators. Loose `.py` files without such a file count only in a folder with no Gradle or Maven build, no
+`tsconfig.json` and no `.java` file, so the scripts of a Java or TypeScript project do not make it a Python project. On
+a folder whose existing project has no Python yet, New Project offers to add it; New Custom Project and Edit Project
+have a "Python" source group type.
+
+**Prerequisites.** Node.js 22.13 or newer on `PATH` (it runs scip-python). For library calls, a Python environment with
+the project's dependencies installed: the group's interpreter setting, else the active virtualenv (`$VIRTUAL_ENV`), else
+`.venv` or `venv` in the Python project folder, else `python3` on `PATH`. The interpreter can live anywhere (a
+virtualenv outside the project, a pyenv, asdf or mise shim, the system `python3` with its distribution's packages).
+Create one with `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (or `pip install -e .`). Sourcetrail
+asks the interpreter for its installed distributions; if it cannot answer, `st index --verbose` shows
+`scip-indexer: library resolution off: <python> could not list its packages (...)`. Without any Python the project's
+own code and the standard library still resolve. Without Node the rest of the project still indexes and the
+Python step reports one line instead, `Python skipped: cannot run "node": ...` or `Python skipped: ... Node.js 22.13 or
+newer is required (found v...)`, and is tried again on the next refresh. A run that fails for another reason reports
+`Python failed (exit code N): ...`; a refresh retries it once its inputs change, `st index --full` right away.
+
+**Names** follow the import path: `shop.models.User.greet`, with packages as packages, a file as its module and code at
+a module's top level as `<module>.toplevel()`. A name re-exported by a package's `__init__.py`
+(`from .models import User`) is the class it names, `shop.models.User`. In a `src/` layout without
+`src/__init__.py` the `src.` prefix is dropped and the tests outside `src/` link to it. Test files (`test_*.py`,
+`tests/`) are indexed like any other code, so `st callers` includes them.
+
+**Errors.** A file with a syntax error gets an error row, and the other files index as usual. An imported module the
+environment does not have gets one error, `unresolved import: <module>`, at its first import; its uses are not linked,
+and nothing is invented for them. Some imports of modules that do exist get the same error (see below).
+
+**Refresh.** A change to a `.py` file, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt`, `poetry.lock`,
+`uv.lock` or `Pipfile.lock` re-indexes the Python group as a whole (about 7 s for the 71 files of `click`), never the
+Java or TypeScript; a Java or TypeScript edit never runs the Python step. `node_modules`, `.sourcetrail`, `build`,
+`dist`, `target`, `out`, `.git`, `.gradle`, `.idea`, `.venv`, `venv`, `__pycache__`, `.tox` and `.mypy_cache` are
+skipped. Installing packages into the environment is no edit: run `st index --full` (or a full refresh) afterwards.
+Measurements: `docs/superpowers/specs/2026-11-04-python-indexing-results.md`.
+
+What is not covered:
+- One Python part per project, Linux and macOS only (the package is Linux). A second enabled Python group is skipped
+  with `Python: only one Python source group per project is supported; skipping <name>`.
+- No link between web routes (Flask, Django, FastAPI) and a frontend.
+- A distribution installed without a list of its files (Debian's `python3-*` packages) is matched by its name only:
+  its modules resolve, but names a typeshed stub re-exports may not (`six.ensure_str`). A pip-installed one has the list.
+- A `src/` package that typeshed has stubs for (`requests`) is read from the stubs where the tests import it. The tests
+  still link to `src/`, but a name the stub declares where the code only imports it gets a node of its own
+  (`requests.utils.to_native_string()` next to `requests._internal_utils.to_native_string`).
+- Some imports of modules that do exist are reported unresolved too: `from <package> import <submodule>`
+  (`from http import cookiejar`), a name imported twice (`import simplejson as json` then `import json`), a name the
+  installed version lacks (reported under its module), and imports in Windows-only code.
+- `os.path` shows as `ntpath`. References to builtins and the standard library (`builtins.str`, `list.append`) are kept,
+  so `st callees` lists them.
+- After a syntax error, Pyright's recovery can take the rest of that file into the broken definition.
+- With no Python at all, or with a `:` in the project path, the tests of a `src/` layout are not linked to `src/`
+  (no error is reported; `st index --verbose` says why for the `:`).
+
 ## `st` reference
 
 ### Installing from a build
@@ -1762,6 +1811,8 @@ A class two modules both declare (same package and name, e.g. a test helper) is 
 one access level per member in `outline` (one copy's private field can show as public); a third
 module resolves it to the first copy on the class path, so its calls to members only the other copy has are missing
 (`st` warns, see below; module-aware resolution is a tracked follow-up).
+Python's limits (libraries typed from typeshed stubs, imports reported unresolved) are listed under
+[Python projects](#python-projects).
 
 ### Incomplete answers
 
@@ -1852,8 +1903,8 @@ calls. Details: `docs/superpowers/specs/2026-11-02-upgrade-port-results.md`.
 
 # How to Build
 
-This fork builds on Linux (x86-64) only, with Java and TypeScript support and the `st` command-line tool. C/C++ and
-Python indexing are work in progress and not in the current builds. Windows and macOS builds are not maintained here.
+This fork builds on Linux (x86-64) only, with Java, TypeScript and Python support and the `st` command-line tool.
+C/C++ indexing is work in progress and not in the current builds. Windows and macOS builds are not maintained here.
 
 ## Required tools
 
@@ -1865,10 +1916,11 @@ Python indexing are work in progress and not in the current builds. Windows and 
       `[0-9]*` or `v[0-9]*`. A build of a tag reports that tag; other builds report the nearest one reachable (now
       `2.0.0-fork`). A checkout without tags (a shallow CI clone) reports `1.0.0`.
 * __JDK 21__ and __Maven__, to build the Java indexer (`java_indexer/`) and to run the Java tests.
-* __Node.js 22.13 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`). The build stages it with its
-  dependencies (`npm ci --omit=dev`) into `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged,
-  TypeScript source groups cannot index and their tests are skipped. The indexer's own tests:
-  `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`.
+* __Node.js 22.13 or newer__ with __npm__, for the TypeScript indexer (`tools/ts-indexer/`), which also indexes Python
+  (`--language python`, with scip-python). The build stages it with its dependencies (`npm ci --omit=dev`) into
+  `bin/app/data/ts-indexer`. Without npm, CMake warns, nothing is staged, TypeScript source groups cannot index and
+  their tests are skipped. The indexer's own tests: `npm ci --prefix tools/ts-indexer && node --test tools/ts-indexer`
+  (the Python tests that need a virtualenv skip without `python3`).
 
 Everything else (Qt 6.8.2, and Boost, fmt, spdlog, SQLite and the other libraries pinned in `conan.lock`) is installed by
 `scripts/fork/bootstrap.sh`.
@@ -1904,9 +1956,10 @@ Packaging needs `patchelf`, `file`, `objdump`, ImageMagick's `convert`, and `lib
 bundled. Build and package on an Ubuntu 22.04 host (CI does the same): the script rejects binaries that need a glibc
 newer than 2.35.
 
-The package ships the TypeScript indexer with its production `node_modules` (`share/data/ts-indexer`), so the build must
-have staged it (npm on `PATH` at configure time); the script stops otherwise. Node.js itself is not shipped: it is a
-prerequisite on the machine that indexes TypeScript.
+The package ships the TypeScript and Python indexer with its production `node_modules` (`share/data/ts-indexer`,
+scip-typescript and scip-python), so the build must have staged it (npm on `PATH` at configure time); the script stops
+otherwise. Node.js itself is not shipped: it is a prerequisite on the machine that indexes TypeScript or Python, and so
+is `python3` (optional) for Python's library types.
 
 ## Tests
 
@@ -1920,7 +1973,7 @@ The tests are GoogleTest suites run by `ctest`. The preset runs them one at a ti
 temporary databases. Point `HOME` at a scratch directory so your own `~/.config/sourcetrail` is not written. The Java
 tests need a JVM: `$HOME/.config/sourcetrail/ApplicationSettings.xml` naming a `libjvm.so`, or `JAVA_HOME` pointing at a
 JDK 21. `st-smoke.sh` indexes a copied Lombok fixture with an isolated home and checks `st` end to end, including
-`st serve`.
+`st serve`; with Node.js on `PATH` it also indexes the TypeScript and Python fixtures.
 
 # Frequently Asked Questions
 

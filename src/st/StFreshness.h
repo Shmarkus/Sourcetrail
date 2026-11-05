@@ -20,14 +20,14 @@ struct Freshness {
   std::string reason;
 };
 
-// The inputs record of each TypeScript source group as the index keeps it, by group id: what the group was last
+// The inputs record of each TypeScript and Python source group as the index keeps it, by group id: what the group was last
 // indexed from; empty when its last run was skipped.
 using GroupInputs = std::map<std::string, std::string>;
 GroupInputs storedGroupInputs(const ProjectSettings& settings, const PersistentStorage& storage);
 
 // Stale when a source file, source directory or Gradle build file changed at or after `indexedAt`, or when a
-// TypeScript group's inputs (its trigger files) differ from the ones in `inputs`; a TypeScript group without a stored
-// record counts the trigger files changed at or after `indexedAt`. Other source groups without a Gradle preparation
+// TypeScript or Python group's inputs (its trigger files) differ from the ones in `inputs`; such a group without a
+// stored record counts the trigger files changed at or after `indexedAt`. Other source groups without a Gradle preparation
 // cache fall back to the indexed files.
 Freshness checkFreshness(const ProjectSettings& settings,
                          const TimeStamp& indexedAt,

@@ -18,7 +18,7 @@ const DEFINITION_ROLE = 1;
 
 // ---- SCIP symbols ----
 // "<scheme> <manager> <package> <version> <descriptors>"; descriptor names may be `backticked`.
-function parseSymbol(symbol) {
+export function parseSymbol(symbol) {
   if (symbol.startsWith('local ')) return null;
   let i = 0, spaces = 0;
   while (spaces < 4 && i < symbol.length) {
@@ -64,7 +64,7 @@ function parseSymbol(symbol) {
     p++;
     parts.push({ name, d, end: p });
   }
-  return { pkg, parts, prefix: k => head + s.slice(0, parts[k].end) };
+  return { pkg, head, parts, prefix: k => head + s.slice(0, parts[k].end) };
 }
 
 // "a: X, b: Y<Z, W>" -> ["X", "Y<Z, W>"]
@@ -112,14 +112,14 @@ function signatureFromHover(hover) {
     postfix: `(${parameterTypes(h.slice(open + 1, close)).join(', ')})` };
 }
 
-const serialize = elements =>
+export const serialize = elements =>
   DELIMITER + '\tm' + elements.map(e => `${e.name}\ts${e.prefix || ''}\tp${e.postfix || ''}`).join('\tn');
 
-const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
-const start = r => [r[0], r[1]];
+export const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
+export const start = r => [r[0], r[1]];
 const end = r => (r.length === 3 ? [r[0], r[2]] : [r[2], r[3]]);
-const within = (pos, r) => cmp(pos, start(r)) >= 0 && cmp(pos, end(r)) <= 0;
-const at = (line, column) => `${line}|${column}`;
+export const within = (pos, r) => cmp(pos, start(r)) >= 0 && cmp(pos, end(r)) <= 0;
+export const at = (line, column) => `${line}|${column}`;
 
 // ---- syntax-only facts about one file ----
 function parseFile(ts, relativePath, text) {

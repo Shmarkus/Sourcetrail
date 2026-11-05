@@ -321,7 +321,7 @@ private:
   qint64 m_retryAt = 0;
   qint64 m_attempted = 0;
   st::PendingRecord m_pending;
-  // The TypeScript groups' inputs records of the index last read.
+  // The TypeScript and Python groups' inputs records of the index last read.
   st::GroupInputs m_groupInputs;
 };
 

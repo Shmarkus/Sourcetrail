@@ -41,7 +41,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # The TypeScript indexer runs on Node (22.13 or newer: node:sqlite without a flag); CMake stages it with npm, and its tests run on node.
+      # The TypeScript and Python indexer runs on Node (22.13 or newer: node:sqlite without a flag); CMake stages it with npm
+      # (scip-python included), and its tests run on node. The Python tests use the runner's python3 for a virtualenv.
       - name: Configure Node
         uses: actions/setup-node@v4
         with:
@@ -88,7 +89,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/home"
           HOME="$RUNNER_TEMP/home" QT_QPA_PLATFORM=offscreen ctest --preset fork_release
 
-      - name: Test the TypeScript indexer
+      - name: Test the TypeScript and Python indexer
         run: |
           npm ci --prefix tools/ts-indexer --no-audit --no-fund
           node --test tools/ts-indexer
@@ -126,7 +127,7 @@ jobs:
       - name: Refresh the latest prerelease
         if: github.ref == 'refs/heads/master'
         run: |
-          NOTES="Built from master at $GITHUB_SHA. Includes the GUI and st. Python support returns in a later release."
+          NOTES="Built from master at $GITHUB_SHA. Includes the GUI and st, with Java, TypeScript and Python indexing."
           if gh release view latest > /dev/null 2>&1; then
             # Update in place: move the tag, replace the package, rewrite the notes.
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null

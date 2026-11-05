@@ -1,13 +1,16 @@
 #include "SourceGroupFactoryModuleCustom.h"
 
 #include "SourceGroupCustomCommand.h"
+#include "SourceGroupPython.h"
 #include "SourceGroupSettingsCustomCommand.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupTypeScript.h"
 
 bool SourceGroupFactoryModuleCustom::supports(SourceGroupType type) const {
   switch(type) {
   case SOURCE_GROUP_TYPESCRIPT:
+  case SOURCE_GROUP_PYTHON:
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return true;
   default:
@@ -24,6 +27,9 @@ std::shared_ptr<SourceGroup> SourceGroupFactoryModuleCustom::createSourceGroup(s
   } else if(std::shared_ptr<SourceGroupSettingsTypeScript> typeScriptSettings =
                 std::dynamic_pointer_cast<SourceGroupSettingsTypeScript>(settings)) {
     sourceGroup = std::make_shared<SourceGroupTypeScript>(typeScriptSettings);
+  } else if(std::shared_ptr<SourceGroupSettingsPython> pythonSettings =
+                std::dynamic_pointer_cast<SourceGroupSettingsPython>(settings)) {
+    sourceGroup = std::make_shared<SourceGroupPython>(pythonSettings);
   }
   return sourceGroup;
 }

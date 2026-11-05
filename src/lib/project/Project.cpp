@@ -27,6 +27,7 @@
 #include "RefreshInfoGenerator.h"
 #include "SourceGroup.h"
 #include "SourceGroupFactory.h"
+#include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupStatusType.h"
 #include "SourceGroupTypeScript.h"
@@ -93,11 +94,25 @@ bool changesEndpointLayer(const std::set<FilePath>& clearedFilePaths,
   });
 }
 
-// The project's source groups, but for the TypeScript groups after the first: one TypeScript group per project.
+// The TypeScript groups after the first and the Python groups after the first, each with its status line: one group of
+// each per project.
+std::vector<std::pair<std::shared_ptr<SourceGroupSettings>, std::wstring>> getUnsupportedGroups(
+    const std::vector<std::shared_ptr<SourceGroupSettings>>& groups) {
+  std::vector<std::pair<std::shared_ptr<SourceGroupSettings>, std::wstring>> unsupported;
+  for(const std::shared_ptr<SourceGroupSettings>& group : SourceGroupSettingsTypeScript::getUnsupportedGroups(groups)) {
+    unsupported.emplace_back(group, SourceGroupSettingsTypeScript::getUnsupportedGroupStatus(*group));
+  }
+  for(const std::shared_ptr<SourceGroupSettings>& group : SourceGroupSettingsPython::getUnsupportedGroups(groups)) {
+    unsupported.emplace_back(group, SourceGroupSettingsPython::getUnsupportedGroupStatus(*group));
+  }
+  return unsupported;
+}
+
+// The project's source groups, but for the unsupported ones.
 std::vector<std::shared_ptr<SourceGroup>> createSupportedSourceGroups(const ProjectSettings& settings) {
   std::vector<std::shared_ptr<SourceGroupSettings>> groups = settings.getAllSourceGroupSettings();
-  for(const std::shared_ptr<SourceGroupSettings>& unsupported : SourceGroupSettingsTypeScript::getUnsupportedGroups(groups)) {
-    std::erase(groups, unsupported);
+  for(const auto& unsupported : getUnsupportedGroups(groups)) {
+    std::erase(groups, unsupported.first);
   }
   return SourceGroupFactory::getInstance()->createSourceGroups(groups);
 }
@@ -370,9 +385,7 @@ void Project::refresh(std::shared_ptr<DialogView> dialogView, RefreshMode refres
   m_settings->reload();
 
   m_sourceGroups = createSupportedSourceGroups(*m_settings);
-  for(const std::shared_ptr<SourceGroupSettings>& unsupported :
-      SourceGroupSettingsTypeScript::getUnsupportedGroups(m_settings->getAllSourceGroupSettings())) {
-    const std::wstring status = SourceGroupSettingsTypeScript::getUnsupportedGroupStatus(*unsupported);
+  for(const auto& [unsupported, status] : getUnsupportedGroups(m_settings->getAllSourceGroupSettings())) {
     LOG_WARNING(status);
     MessageStatus(status).dispatch();
   }
@@ -726,7 +739,8 @@ std::pair<std::unique_ptr<CombinedIndexerCommandProvider>, std::unique_ptr<Combi
   auto customIndexerCommandProvider = std::make_unique<CombinedIndexerCommandProvider>();
   for(const std::shared_ptr<SourceGroup>& sourceGroup : m_sourceGroups) {
     if(SOURCE_GROUP_STATUS_ENABLED == sourceGroup->getStatus()) {
-      if(SOURCE_GROUP_CUSTOM_COMMAND == sourceGroup->getType() || SOURCE_GROUP_TYPESCRIPT == sourceGroup->getType()) {
+      if(SOURCE_GROUP_CUSTOM_COMMAND == sourceGroup->getType() || SOURCE_GROUP_TYPESCRIPT == sourceGroup->getType() ||
+         SOURCE_GROUP_PYTHON == sourceGroup->getType()) {
         customIndexerCommandProvider->addProvider(sourceGroup->getIndexerCommandProvider(info));
       } else {
         indexerCommandProvider->addProvider(sourceGroup->getIndexerCommandProvider(info));

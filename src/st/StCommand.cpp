@@ -583,12 +583,13 @@ int status(const st::Io& io,
   for(const std::string& row : st::mavenStatusRows(settings)) {
     io.out << row << '\n';
   }
-  // A TypeScript group's last run: indexed, broken with the status it left (a failure, a missing tsconfig), or none in
-  // the index (skipped, e.g. without node_modules; `st index` shows why).
+  // A TypeScript or Python group's last run: indexed, broken with the status it left (a failure, a missing tsconfig or
+  // root), or none in the index (skipped, e.g. without node_modules; `st index` shows why).
   for(const auto& group : settings.getAllSourceGroupSettings()) {
-    if(group->getStatus() == SOURCE_GROUP_STATUS_ENABLED && group->getType() == SOURCE_GROUP_TYPESCRIPT) {
+    const bool typeScript = group->getType() == SOURCE_GROUP_TYPESCRIPT;
+    if(group->getStatus() == SOURCE_GROUP_STATUS_ENABLED && (typeScript || group->getType() == SOURCE_GROUP_PYTHON)) {
       const std::string failure = storage.getSourceGroupFailure(group->getId());
-      io.out << "typescript\t"
+      io.out << (typeScript ? "typescript\t" : "python\t")
              << (!failure.empty() ? "broken: " + failure.substr(0, failure.find('\n')) :
                      storage.getSourceGroupInputs(group->getId()).empty() ? "not indexed; st index shows why" :
                                                                            "indexed")
@@ -652,11 +653,11 @@ int inspect(const st::Io& io,
   return st::EXIT_RESULTS;
 }
 
-// The indexer's TypeScript and endpoint linking status lines, which a refresh otherwise keeps to itself.
-void printTypeScriptStatus(const st::Io& io, const QByteArray& status) {
-  static const QRegularExpression lines(QStringLiteral(
-      "(TypeScript(?: skipped| failed|: only one)[^\\n]*|Endpoint linking (?:skipped|failed)[^\\n]*|"
-      "link: \\d+ linked, \\d+ ambiguous, \\d+ unresolved)"));
+// The indexer's TypeScript, Python and endpoint linking status lines, which a refresh otherwise keeps to itself.
+void printLanguageStatus(const st::Io& io, const QByteArray& status) {
+  static const QRegularExpression lines(
+      QStringLiteral("((?:TypeScript|Python)(?: skipped| failed|: only one)[^\\n]*|Endpoint linking (?:skipped|failed)[^\\n]*|"
+                     "link: \\d+ linked, \\d+ ambiguous, \\d+ unresolved)"));
   for(auto it = lines.globalMatch(QString::fromUtf8(status)); it.hasNext();) {
     io.err << it.next().captured(1).toStdString() << '\n';
   }
@@ -695,7 +696,7 @@ int refreshIfStale(const st::Io& io,
   }
   if(failure.empty()) {
     st::recordRefresh(settings, {started, *indexedAt}, io.err);
-    printTypeScriptStatus(io, status);
+    printLanguageStatus(io, status);
     io.err << "refreshed " << changedFiles << " files in " << std::fixed << std::setprecision(1) << timer.elapsed() / 1000.0
            << "s\n";
   } else if(freshness->stale) {

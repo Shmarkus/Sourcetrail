@@ -1,6 +1,6 @@
 ## Code navigation with `st`
 
-Use `st` (Sourcetrail CLI) for Java structure, and for TypeScript in an Angular + Spring project. Use grep for text, config, strings and log messages.
+Use `st` (Sourcetrail CLI) for Java and Python structure, and for TypeScript in an Angular + Spring project. Use grep for text, config, strings and log messages.
 
 | Question | Command |
 |---|---|
@@ -31,6 +31,9 @@ Use `st` (Sourcetrail CLI) for Java structure, and for TypeScript in an Angular 
 - **TypeScript needs Node.js and the project's `node_modules`.** Without them `st` prints `TypeScript skipped: ...` and
   answers for the Java only; run `npm install`, then `st index`. Frontend calls linked to the backend show as
   `HTTP.GET /api/orders` (kind `endpoint`); a call whose URL is not resolved has no link.
+- **Python needs Node.js**, and a `.venv` with the project's dependencies for calls into libraries. Without Node `st`
+  prints `Python skipped: ...`. A module that does not resolve counts as one error in `st status`; calls into it have
+  no links, and no `st: incomplete:` line warns about them.
 - **No index, or one from an older version** (exit 4): run `st index --full` once in the project folder. Later
   queries refresh changed files on their own; `st index` does the same on demand.
 - **Faster:** `st serve --detach` once per session keeps the index loaded (opt-in; `st status` shows `server running`).

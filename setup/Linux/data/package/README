@@ -15,6 +15,11 @@ TypeScript (an Angular + Spring app in one folder, or a TypeScript-only project)
 and the project's node_modules (run npm install in the project first). Without them the Java still indexes and the
 TypeScript step reports why it was skipped.
 
+Python (a folder with pyproject.toml, setup.py, setup.cfg or requirements*.txt, or loose .py files and no other build)
+also needs Node.js 22.13 or newer on PATH. A python3, ideally the project's .venv or venv with its dependencies
+installed, lets library calls resolve; without one the project's own code still indexes and unresolved imports are
+reported once per module.
+
 
 Install
 -------

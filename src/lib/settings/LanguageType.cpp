@@ -14,6 +14,8 @@ std::string languageTypeToString(LanguageType type) {
 #endif
   case LANGUAGE_TYPESCRIPT:
     return "TypeScript";
+  case LANGUAGE_PYTHON:
+    return "Python";
   case LANGUAGE_CUSTOM:
     return "Custom";
   case LANGUAGE_UNKNOWN:
@@ -38,6 +40,9 @@ LanguageType stringToLanguageType(const std::string& typeString) {
 #endif
   if(typeString == languageTypeToString(LANGUAGE_TYPESCRIPT)) {
     return LANGUAGE_TYPESCRIPT;
+  }
+  if(typeString == languageTypeToString(LANGUAGE_PYTHON)) {
+    return LANGUAGE_PYTHON;
   }
   if(typeString == languageTypeToString(LANGUAGE_CUSTOM)) {
     return LANGUAGE_CUSTOM;
@@ -65,6 +70,8 @@ LanguageType getLanguageTypeForSourceGroupType(SourceGroupType type) {
 #endif
   case SOURCE_GROUP_TYPESCRIPT:
     return LANGUAGE_TYPESCRIPT;
+  case SOURCE_GROUP_PYTHON:
+    return LANGUAGE_PYTHON;
   case SOURCE_GROUP_CUSTOM_COMMAND:
     return LANGUAGE_CUSTOM;
   default:

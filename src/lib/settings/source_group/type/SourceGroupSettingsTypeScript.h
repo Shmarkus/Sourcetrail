@@ -6,14 +6,14 @@
 #include <vector>
 
 #include "FilePath.h"
-#include "SourceGroupSettingsWithComponents.h"
+#include "SourceGroupSettingsScip.h"
 
 // A TypeScript project: its root tsconfig.json, relative to the project folder. The folder holding the tsconfig is the
 // TypeScript project the indexer reads; its node_modules are the user's own `npm install`.
-class SourceGroupSettingsTypeScript : public SourceGroupSettingsWithComponents<> {
+class SourceGroupSettingsTypeScript : public SourceGroupSettingsScip {
 public:
   SourceGroupSettingsTypeScript(const std::string& id, const ProjectSettings* projectSettings)
-      : SourceGroupSettingsWithComponents(SOURCE_GROUP_TYPESCRIPT, id, projectSettings) {}
+      : SourceGroupSettingsScip(SOURCE_GROUP_TYPESCRIPT, id, projectSettings) {}
 
   std::shared_ptr<SourceGroupSettings> createCopy() const override {
     return std::make_shared<SourceGroupSettingsTypeScript>(*this);

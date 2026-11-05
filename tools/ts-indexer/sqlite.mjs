@@ -44,9 +44,10 @@ export function timestamp(date) {
 }
 
 // One writer per run. Without `append` the database is created anew; with it, rows are added to an existing
-// database (for example one the Java indexer wrote), reusing nodes that already exist under the same name.
+// database (for example one the Java indexer wrote), reusing nodes that already exist under the same name. `language`
+// is what the file rows record.
 export class IndexWriter {
-  constructor(dbPath, { append = false } = {}) {
+  constructor(dbPath, { append = false, language = 'typescript' } = {}) {
     this.append = append && fs.existsSync(dbPath);
     if (!this.append) fs.rmSync(dbPath, { force: true });
     this.db = new DatabaseSync(dbPath);
@@ -71,7 +72,7 @@ export class IndexWriter {
       symbol: prepare('INSERT OR REPLACE INTO symbol(id, definition_kind) VALUES (?, ?)'),
       edge: prepare('INSERT INTO edge(id, type, source_node_id, target_node_id) VALUES (?, ?, ?, ?)'),
       file: prepare('INSERT OR REPLACE INTO file(id, path, language, modification_time, indexed, complete, line_count) '
-        + "VALUES (?, ?, 'typescript', ?, 1, 1, ?)"),
+        + 'VALUES (?, ?, ?, ?, 1, 1, ?)'),
       content: prepare('INSERT OR REPLACE INTO filecontent(id, content) VALUES (?, ?)'),
       local: prepare('INSERT INTO local_symbol(id, name) VALUES (?, ?)'),
       location: prepare('INSERT INTO source_location(id, file_node_id, start_line, start_column, end_line, end_column, '
@@ -93,6 +94,7 @@ export class IndexWriter {
       this.edges.set(`${r.type}|${r.source_node_id}|${r.target_node_id}`, r.id);
     }
     this.locations = new Map(); // "file|sl|sc|el|ec|type" -> id
+    this.language = language;
     this.fileCount = 0;
     this.errorCount = 0;
   }
@@ -138,7 +140,7 @@ export class IndexWriter {
 
   file(absolutePath, text, modified) {
     const id = this.node(`/\tm${absolutePath}\ts\tp`, NODE.FILE);
-    this.insert.file.run(id, absolutePath, timestamp(modified), text.split('\n').length);
+    this.insert.file.run(id, absolutePath, this.language, timestamp(modified), text.split('\n').length);
     this.insert.content.run(id, text);
     this.fileCount++;
     return id;

@@ -11,6 +11,7 @@
 #include "FileSystem.h"
 #include "ScopedTemporaryFile.hpp"
 #include "utility.h"
+#include "utilityFile.h"
 
 namespace fs = std::filesystem;
 
@@ -253,4 +254,16 @@ TEST(FileSystem, copyFile) {
 
   // Clean
   fs::remove(toPath.str());
+}
+
+// A whole-group source group is keyed on its root folder: a folder sorts like a missing file, it has no byte size.
+TEST(FileSystem, partitionFilePathsBySizeTakesFolders) {
+  const FilePath folder(fs::temp_directory_path().wstring());
+  const FilePath missing(fs::temp_directory_path() / "missing-partition-file.txt");
+
+  const std::vector<FilePath> sorted = utility::partitionFilePathsBySize({folder, missing}, 2);
+
+  ASSERT_EQ(2, sorted.size());
+  EXPECT_TRUE(std::ranges::find(sorted, folder) != sorted.end());
+  EXPECT_TRUE(std::ranges::find(sorted, missing) != sorted.end());
 }

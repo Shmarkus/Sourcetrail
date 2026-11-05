@@ -2,7 +2,7 @@
   "name": "sourcetrail-ts-indexer",
   "version": "0.1.0",
   "private": true,
-  "description": "Indexes a TypeScript project into a Sourcetrail database (scip-typescript + converter)",
+  "description": "Indexes a TypeScript or Python project into a Sourcetrail database (scip-typescript, scip-python + converter)",
   "type": "module",
   "main": "test/index.mjs",
   "bin": {
@@ -15,6 +15,7 @@
     "test": "node --test test/index.mjs"
   },
   "dependencies": {
+    "@sourcegraph/scip-python": "0.6.8",
     "@sourcegraph/scip-typescript": "0.6.1",
     "typescript": "6.0.3"
   }

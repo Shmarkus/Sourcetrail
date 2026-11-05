@@ -1721,6 +1721,8 @@ What is not covered:
   `find`, `callees` and `supers` leave them out without a warning (`supers` of a class deriving from
   `std::runtime_error` is empty), while `refs` answers for them (`st refs std::runtime_error`). They never count as
   unresolved, also in a project that declares something in namespace `std` (a `std::hash` specialization).
+  The same holds for a project function declared in an indexed header but defined in a file outside the compilation
+  database: `callees` of it is empty, with no warning.
 - The indexed headers are the whole project folder, so vendored libraries and generated headers in it are indexed too,
   which costs time on a large project; narrow the "Header Files & Directories to Index" or add an exclude in Edit
   Project.

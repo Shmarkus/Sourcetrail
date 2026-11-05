@@ -10,9 +10,10 @@ if(CLANG_TIDY_EXECUTABLE)
     "*.h"
     "*.hpp"
     "*.cpp")
-  # Create a custom target for clang-tidy
+  # Create a custom target for clang-tidy. Not named clang-tidy: Clang's CMake package (C/C++ indexer) exports a target
+  # of that name, and find_package(Clang) fails when one of its targets already exists.
   add_custom_target(
-    clang-tidy
+    clang-tidy-check
     COMMAND
       ${CLANG_TIDY_EXECUTABLE}
       # Use default .clang-tidy from project root

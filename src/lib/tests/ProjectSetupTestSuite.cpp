@@ -822,7 +822,41 @@ TEST_F(ProjectSetupTest, openOrCreateWithCMakeButNoCompilationDatabaseWritesNoth
   EXPECT_FALSE(asked);
   EXPECT_TRUE(choice.projectFile.empty());
   EXPECT_TRUE(choice.build.cmakeWithoutDatabase);
+  EXPECT_TRUE(choice.compilationDatabaseMissing);
   EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+
+// Only a CMake folder that gets nothing else asks for the compilation database; a project New Project creates or
+// opens for another build (pybind11, JNI) needs no question.
+TEST_F(ProjectSetupTest, onlyAFolderLeftWithoutAProjectAsksForTheCompilationDatabase) {
+  touch("CMakeLists.txt");
+  EXPECT_TRUE(openOrCreateProject(folder(), [] { return true; }).compilationDatabaseMissing);
+
+  touch("pyproject.toml");
+  const ProjectChoice created = openOrCreateProject(folder(), [] { return true; });
+  ASSERT_FALSE(created.projectFile.empty());
+  EXPECT_TRUE(created.created);
+  EXPECT_TRUE(created.build.cmakeWithoutDatabase);
+  EXPECT_FALSE(created.compilationDatabaseMissing);
+
+  const ProjectChoice opened = openOrCreateProject(folder(), [] { return true; });
+  EXPECT_EQ(created.projectFile, opened.projectFile);
+  EXPECT_FALSE(opened.compilationDatabaseMissing);
+}
+
+// A CMakeLists.txt without C/C++ sources next to it does not stop .py files from making a Python project.
+TEST_F(ProjectSetupTest, pythonSourcesNextToACMakeListsWithoutCxxSourcesArePython) {
+  touch("CMakeLists.txt");
+  touch("app/main.py");
+
+  const DetectedBuild build = detectBuild(folder());
+  EXPECT_TRUE(build.python);
+  EXPECT_TRUE(build.cmakeWithoutDatabase);
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [] { return false; });
+  EXPECT_TRUE(choice.created);
+  EXPECT_FALSE(choice.compilationDatabaseMissing);
+  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsPython>(onlySourceGroup(choice.projectFile)));
 }
 
 TEST_F(ProjectSetupTest, openOrCreateOffersCxxForAnExistingProjectWithoutIt) {

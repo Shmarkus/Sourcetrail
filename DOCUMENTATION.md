@@ -68,7 +68,7 @@ After launching Sourcetrail you will see the [Start Window](#start-window). From
 * A Gradle or Maven build creates a Java project with tests included. See [New Java projects](#new-java-projects).
 * A `tsconfig.json` adds TypeScript, or creates a TypeScript-only project if there is no Java build. See [TypeScript and the frontend–backend link](#typescript-and-the-frontendbackend-link).
 * A `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt` adds Python, as do `.py` files in a folder with no other build. See [Python projects](#python-projects).
-* A `compile_commands.json` at the top level or in a build folder (`build/`, `cmake-build-*/`, `out/build/*/`) adds C/C++. A `CMakeLists.txt` without one gets a message with the `cmake` command that writes it. See [C and C++ projects](#c-and-c-projects).
+* A `compile_commands.json` at the top level or in a build folder (`build/`, `cmake-build-*/`, `out/build/*/`) adds C/C++. A folder with only a `CMakeLists.txt` and no database gets a message with the `cmake` command that writes it; next to another build, the project is created and the status bar names that command. See [C and C++ projects](#c-and-c-projects).
 * With none of these, Sourcetrail offers a plain Java project and opens the project settings so that you can fill in the class path.
 
 For Custom Command source groups, manual Java source groups or several groups in one project, use **Project > New Custom Project...**, which opens the [Project Setup Wizard](#project-setup).
@@ -1614,7 +1614,8 @@ A folder with a `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements*.txt`
 indexed into the same index as its Java and TypeScript: packages, modules, classes, functions, methods, fields (class
 attributes and dataclass fields) and module variables, with their calls, usages, type uses, inheritance, overrides,
 imports and decorators. Loose `.py` files without such a file count only in a folder with no Gradle or Maven build, no
-`tsconfig.json` and no `.java` file, so the scripts of a Java or TypeScript project do not make it a Python project. On
+`tsconfig.json`, no `.java` file and no compilation database (nor C/C++ files next to a `CMakeLists.txt`), so the
+scripts of a Java, TypeScript or C/C++ project do not make it a Python project. On
 a folder whose existing project has no Python yet, New Project offers to add it; New Custom Project and Edit Project
 have a "Python" source group type.
 
@@ -1684,9 +1685,11 @@ folder, except for `_deps/` (CMake's FetchContent downloads) in the database's b
 C/C++ yet, New Project offers to add it; New Custom Project and Edit Project have the "C/C++ from Compilation
 Database" and "Empty C/C++" types.
 
-A folder with a `CMakeLists.txt` and no database gets a message with the command that writes one,
+A folder with a `CMakeLists.txt`, no database and no other build gets a message with the command that writes one,
 `cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (or `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)` in the
-`CMakeLists.txt`), and no project; run it and pick the folder again. Other builds can produce the database with
+`CMakeLists.txt`), and no project; run it and pick the folder again. Next to a Java, TypeScript or Python build (a
+pybind11 or JNI layout) the project is created for that build without the C/C++ part, and the status bar names the
+command; once the database exists, New Project on the folder offers to add C/C++. Other builds can produce the database with
 [Bear](https://github.com/rizsotto/Bear) (`bear -- make`); Meson writes one into its build folder, and Ninja prints one
 with `ninja -t compdb`.
 
@@ -1715,6 +1718,8 @@ refreshed the 31 source files including it in 10 s, after an edit to `src/os.cc`
 
 What is not covered:
 - Linux only (the package is Linux); no Visual Studio solution import; no link between C/C++ and the other languages.
+- Clang's builtin headers ship without compiler-rt's `sanitizer/` and `fuzzer/` headers: an
+  `#include <sanitizer/asan_interface.h>` or `<fuzzer/FuzzedDataProvider.h>` is a missing-header error of that file.
 - Functions of the same name in different programs, such as the `main()` of an app and of its tests, have the same
   key, and `st` cannot tell them apart (exit 2 lists both as `main()`).
 - Symbols from headers outside the project (the standard library, installed libraries) are parsed but not indexed:

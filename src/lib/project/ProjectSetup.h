@@ -22,8 +22,9 @@ struct DetectedBuild {
   JavaBuildKind java = JavaBuildKind::None;
   bool typeScript = false;    // a tsconfig.json at the folder's top level
   // A pyproject.toml, setup.py, setup.cfg or requirements*.txt at the folder's top level; without a Gradle or Maven
-  // build, a tsconfig.json and a C/C++ build, also .py files anywhere below it and no .java file (outside the folders
-  // the Python indexer skips). A few Python scripts in a Java, TypeScript or C/C++ project make no Python project.
+  // build, a tsconfig.json and a compilation database, also .py files anywhere below it and no .java file, nor a C/C++
+  // file next to a CMakeLists.txt (outside the folders the Python indexer skips). A few Python scripts in a Java,
+  // TypeScript or C/C++ project make no Python project.
   bool python = false;
   // With C/C++ support: the compile_commands.json at the folder's top level, else in build/, else in the first
   // cmake-build-*/ or out/build/*/ folder by name; empty when there is none.
@@ -88,6 +89,9 @@ struct ProjectChoice {
   // The existing project has no compilation database source group, but the folder has a compilation database: see
   // addCxxGroup.
   bool canAddCxx = false;
+  // Nothing is opened because the folder is a CMake project without a compilation database: tell the user the command
+  // that writes one (compilationDatabaseCommand). A project created or opened for another build leaves it false.
+  bool compilationDatabaseMissing = false;
   DetectedBuild build;
 };
 

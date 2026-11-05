@@ -109,12 +109,12 @@ The release package is now built from `fork_release_cxx`, the preset CI configur
 `.github/workflows/build.yml` adds an "Install LLVM 19" step (the apt.llvm.org key into `/usr/share/keyrings`, the
 `llvm-toolchain-jammy-19` source, `clang-19 llvm-19-dev libclang-19-dev libclang-cpp19-dev`), switches configure,
 build and test to `fork_release_cxx` (ctest stays serial), packages `build/fork-release-cxx`, checks that the package
-holds `libclang-cpp.so.19*` and `libLLVM.so.19*` (the smoke test skips C/C++ for an `st` built without it), and names
-C/C++ in the release notes.
+holds `libclang-cpp.so.19*` and `libLLVM.so.19*`, runs the smoke test with `ST_SMOKE_REQUIRE_CXX=1` (a skipped
+C/C++ section fails), and names C/C++ in the release notes.
 
 Checked: that step, run verbatim in a clean `ubuntu:22.04` (plus `sudo`, `curl`, `gpg`), installs LLVM 19.1.7, and
 `find_package(Clang CONFIG)` with the preset's `Clang_DIR` finds it (LLVM 19.1.7, `clang-cpp` dylib); its resource
-headers are identical to the ones committed. The build, the tests (`ctest --preset fork_release_cxx`, 1,444 of 1,444
-serially), packaging and the smoke test ran in `st-ci-2204-cxx`, which is the CI steps up to that one plus it.
+headers are identical to the ones committed. The build, the tests (`ctest --preset fork_release_cxx`, serially: 1,444 of
+1,444 at first, 1,447 of 1,447 after the review fixes), packaging and the smoke test ran in `st-ci-2204-cxx`, which is the CI steps up to that one plus it.
 Not checked: a run on GitHub's runner itself (its disk space with LLVM and the larger build, its preinstalled clang
 versions next to apt.llvm.org's).

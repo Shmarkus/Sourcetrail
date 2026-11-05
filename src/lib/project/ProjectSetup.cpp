@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <set>
 #include <sstream>
 
 #include <system_error>
@@ -312,9 +313,14 @@ bool hasPythonProjectFile(const fs::path& folder) {
   return false;
 }
 
-// .py files below the folder, outside the folders the Python indexer skips, and no .java file there: the sources of a
-// folder without a build are Python.
-bool hasOnlyPythonSources(const fs::path& folder) {
+bool isCxxSource(const fs::path& path) {
+  static const std::set<std::wstring> extensions = {L".c", L".cc", L".cpp", L".cxx", L".h", L".hh", L".hpp", L".hxx"};
+  return extensions.contains(path.extension().wstring());
+}
+
+// .py files below the folder, outside the folders the Python indexer skips, and no .java file there (nor a C/C++ source
+// or header when `cxxSourcesCount`): the sources of a folder without a build are Python.
+bool hasOnlyPythonSources(const fs::path& folder, bool cxxSourcesCount) {
   bool python = false;
   std::error_code error;
   for(auto it = fs::recursive_directory_iterator{folder, fs::directory_options::skip_permission_denied, error};
@@ -326,7 +332,7 @@ bool hasOnlyPythonSources(const fs::path& folder) {
       if(SourceGroupSettingsPython::isUnwalkedDirectory(path.filename().wstring())) {
         it.disable_recursion_pending();
       }
-    } else if(path.extension() == ".java") {
+    } else if(path.extension() == ".java" || (cxxSourcesCount && isCxxSource(path))) {
       return false;
     } else if(path.extension() == ".py") {
       python = true;
@@ -354,9 +360,11 @@ DetectedBuild detectBuild(const FilePath& folder) {
   build.compilationDatabase = findCompilationDatabase(path);
   build.cmakeWithoutDatabase = build.compilationDatabase.empty() && isFile(path / "CMakeLists.txt");
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE
-  const bool cxx = !build.compilationDatabase.empty() || build.cmakeWithoutDatabase;
+  // Loose .py files next to a compilation database are its scripts; next to a CMakeLists.txt alone they are the project
+  // unless C/C++ sources are there too.
   build.python = hasPythonProjectFile(path) ||
-      (build.java == JavaBuildKind::None && !build.typeScript && !cxx && hasOnlyPythonSources(path));
+      (build.java == JavaBuildKind::None && !build.typeScript && build.compilationDatabase.empty() &&
+       hasOnlyPythonSources(path, build.cmakeWithoutDatabase));
   return build;
 }
 
@@ -538,7 +546,7 @@ ProjectChoice openOrCreateProject(const FilePath& folder, const std::function<bo
 
   if(build.java == JavaBuildKind::None && !build.typeScript && !build.python && build.compilationDatabase.empty()) {
     if(build.cmakeWithoutDatabase) {
-      return {.build = build};
+      return {.compilationDatabaseMissing = true, .build = build};
     }
     if(!acceptPlainJava()) {
       return {};

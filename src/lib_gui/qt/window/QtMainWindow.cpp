@@ -537,7 +537,8 @@ void QtMainWindow::newProject() {
     return !declined;
   });
 
-  if(choice.build.cmakeWithoutDatabase) {
+  // only when the folder got nothing: a project made or opened for another build (pybind11, JNI) is not held up
+  if(choice.compilationDatabaseMissing) {
     QMessageBox msgBox(this);
     msgBox.setText(tr("No compile_commands.json found"));
     msgBox.setInformativeText(
@@ -549,7 +550,7 @@ void QtMainWindow::newProject() {
   }
 
   if(choice.projectFile.empty()) {
-    if(!declined && !choice.build.cmakeWithoutDatabase) {
+    if(!declined && !choice.compilationDatabaseMissing) {
       QMessageBox::warning(this,
                            tr("Could not create Project"),
                            tr("Sourcetrail was unable to write the project into %1/.sourcetrail.").arg(folder.toHtmlEscaped()));
@@ -558,7 +559,11 @@ void QtMainWindow::newProject() {
   }
 
   if(choice.created) {
-    MessageStatus(L"Created project: " + choice.projectFile.wstr()).dispatch();
+    std::wstring status = L"Created project: " + choice.projectFile.wstr();
+    if(choice.build.cmakeWithoutDatabase) {
+      status += L". C/C++ not added: no compile_commands.json (" + compilationDatabaseCommand() + L" writes one)";
+    }
+    MessageStatus(status).dispatch();
   }
 
   if(choice.needsSetup) {

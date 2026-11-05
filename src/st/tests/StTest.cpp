@@ -2155,7 +2155,8 @@ public:
               qgetenv("JAVA_HOME") + "/lib/server/libjvm.so</java_path></java></indexing></config>\n");
   }
 
-  StRun st(const QStringList& arguments) const {
+  // The environment st runs in, with the copy's own HOME.
+  QProcessEnvironment environment() const {
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     if(!environment.contains("GRADLE_USER_HOME")) {
       environment.insert("GRADLE_USER_HOME", environment.value("HOME") + "/.gradle");
@@ -2163,8 +2164,12 @@ public:
     environment.insert("HOME", mHome);
     environment.insert("SOURCETRAIL_VIA_SCRIPT", "1");
     environment.remove("DISPLAY");
+    return environment;
+  }
+
+  StRun st(const QStringList& arguments) const {
     QProcess process;
-    process.setProcessEnvironment(environment);
+    process.setProcessEnvironment(environment());
     process.setWorkingDirectory(mRoot);
     process.start(ST_APP_PATH, QStringList(arguments) << "--no-server");
     StRun run;
@@ -2910,6 +2915,59 @@ TEST_F(StCxx, answersWithCxxKeys) {
   EXPECT_EQ(2, overloads.exitCode) << overloads.out << overloads.err;
 }
 
+// impls/supers follow C++ inheritance and overrides; refs, outline and impact answer on C++ symbols.
+TEST_F(StCxx, answersHierarchyRefsOutlineAndImpact) {
+  const std::vector<std::pair<QStringList, std::string>> answers = {
+      {{"impls", "shop::Item"},
+       "shop::Book\tclass\tinclude/shop/item.hpp:20\n"
+       "shop::Food\tclass\tinclude/shop/item.hpp:32\n"},
+      {{"impls", "shop::Item::price"},
+       "shop::Book::price()\tmethod\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\tmethod\tinclude/shop/item.hpp:36\n"
+       "shop::Book::price()\tmethod\tsrc/item.cpp:20\n"
+       "shop::Food::price()\tmethod\tsrc/item.cpp:30\n"},
+      {{"supers", "shop::Food"}, "shop::Item\tclass\tinclude/shop/item.hpp:7\n"},
+      {{"supers", "shop::Food::price()"}, "shop::Item::price()\tmethod\tinclude/shop/item.hpp:13\n"},
+      {{"refs", "shop::Item::price"},
+       "shop::Book::price()\toverride\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\toverride\tinclude/shop/item.hpp:36\n"
+       "shop::Book::price()\toverride\tsrc/item.cpp:20\n"
+       "shop::Food::price()\toverride\tsrc/item.cpp:30\n"
+       "shop::operator==(const shop::Item &, const shop::Item &)\tcall\tsrc/item.cpp:35\n"
+       "shop::Order::total()\tcall\tsrc/order.cpp:14\n"},
+      {{"outline", "shop::Book"},
+       "shop::Book::Book(std::string, double, std::string)\tpublic method\tinclude/shop/item.hpp:22\n"
+       "shop::Book::price()\tpublic method\tinclude/shop/item.hpp:24\n"
+       "shop::Book::describe()\tpublic method\tinclude/shop/item.hpp:25\n"
+       "shop::Book::m_price\tprivate field\tinclude/shop/item.hpp:28\n"
+       "shop::Book::m_author\tprivate field\tinclude/shop/item.hpp:29\n"
+       "shop::Book::Book(std::string, double, std::string)\tpublic method\tsrc/item.cpp:17-18\n"
+       "shop::Book::price()\tpublic method\tsrc/item.cpp:20-22\n"
+       "shop::Book::describe()\tpublic method\tsrc/item.cpp:24-26\n"},
+      {{"impact", "shop::Item::price"},
+       "main()\tfunction, depth 3\tapp/main.cpp:10\n"
+       "shop::Book::price()\tmethod, depth 0\tinclude/shop/item.hpp:24\n"
+       "shop::Food::price()\tmethod, depth 0\tinclude/shop/item.hpp:36\n"
+       "shop::operator==(const shop::Item &, const shop::Item &)\tfunction, depth 1\tsrc/item.cpp:35\n"
+       "shop::Order::total()\tmethod, depth 1\tsrc/order.cpp:14\n"
+       "shop::totalWithTax(const shop::Order &)\tfunction, depth 2\tsrc/pricing.cpp:18\n"
+       "main()\tfunction, depth 2\ttests/shop_tests.cpp:21\n"},
+  };
+  for(const auto& [arguments, out] : answers) {
+    const StRun run = st(QStringList(arguments) << "--no-source");
+    EXPECT_EQ(0, run.exitCode) << arguments.join(' ').toStdString() << '\n' << run.err;
+    EXPECT_EQ(out, run.out) << arguments.join(' ').toStdString() << '\n' << run.err;
+  }
+  const StRun file = st({"outline", "include/shop/item.hpp", "--no-source"});
+  EXPECT_EQ(0, file.exitCode) << file.err;
+  for(const char* line : {"shop::Item\tclass\tinclude/shop/item.hpp:7-18\n",
+                          "shop::Item::price()\tpublic method\tinclude/shop/item.hpp:13\n",
+                          "shop::Food\tclass\tinclude/shop/item.hpp:32-41\n",
+                          "shop::operator==(const shop::Item &, const shop::Item &)\tfunction\tinclude/shop/item.hpp:43\n"}) {
+    EXPECT_NE(std::string::npos, file.out.find(line)) << line << file.out;
+  }
+}
+
 // A header edit and a new compilation database make the index stale; the next query refreshes it.
 TEST_F(StCxx, headerAndDatabaseEditsAreStale) {
   QThread::sleep(2);
@@ -2932,6 +2990,61 @@ TEST_F(StCxx, headerAndDatabaseEditsAreStale) {
   database.close();
   EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t1\n"));
   EXPECT_EQ(0, st({"find", "boxCount"}).exitCode);
+  EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t0\n"));
+}
+
+// Under st serve, a compilation database edit that adds no source file (new flags) is refreshed once in the background
+// and leaves the index fresh: no refresh loop.
+TEST_F(StCxx, serverRefreshesADatabaseEditOnce) {
+  const QString log = sFixture->root() + "/../serve.err";
+  QProcess server;
+  server.setProcessEnvironment(sFixture->environment());
+  server.setWorkingDirectory(sFixture->root());
+  server.setStandardOutputFile(QProcess::nullDevice());
+  server.setStandardErrorFile(log);
+  server.start(ST_APP_PATH, {"serve"});
+  ASSERT_TRUE(server.waitForStarted());
+  const auto contents = [&log]() {
+    QFile file(log);
+    return file.open(QIODevice::ReadOnly) ? file.readAll().toStdString() : std::string();
+  };
+  const auto logged = [&contents](const char* text) { return static_cast<int>(QByteArray::fromStdString(contents()).count(text)); };
+  // waits up to 60 s for `count` lines holding `text`
+  const auto await = [&](const char* text, int count) {
+    for(int i = 0; i < 600 && logged(text) < count; i++) {
+      QThread::msleep(100);
+    }
+    return logged(text) >= count;
+  };
+  const auto stop = [&]() {
+    server.terminate();
+    if(!server.waitForFinished(10000)) {
+      server.kill();
+      server.waitForFinished();
+    }
+  };
+  if(!await("st: watching ", 1)) {
+    stop();
+    FAIL() << "the server does not watch";
+  }
+  // past the server's first look, which finds the index fresh
+  QThread::sleep(2);
+  const int before = logged("st: refreshing ");
+
+  QFile database(sFixture->root() + "/build/compile_commands.json");
+  ASSERT_TRUE(database.open(QIODevice::ReadWrite));
+  const QByteArray text = database.readAll();
+  database.resize(0);
+  database.write(QByteArray(text).replace("-std=gnu++17", "-std=gnu++17 -DSHOP_FLAG=1"));
+  database.close();
+
+  const bool refreshed = await("st: refreshing ", before + 1) && await("st: background refresh ", before + 1);
+  // a loop would start another refresh within the quiet period and the retry delay
+  QThread::sleep(5);
+  const int after = logged("st: refreshing ");
+  stop();
+  ASSERT_TRUE(refreshed) << contents();
+  EXPECT_EQ(before + 1, after) << contents();
   EXPECT_NE(std::string::npos, st({"status"}).out.find("stale_files\t0\n"));
 }
 #endif    // BUILD_CXX_LANGUAGE_PACKAGE

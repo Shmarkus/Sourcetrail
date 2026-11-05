@@ -374,12 +374,26 @@ std::vector<ResultLine> calls(PersistentStorage& storage,
   // Library methods are never callers.
   const bool library = options.library && direction == Direction::Outgoing;
   for(const Id id : symbols) {
-    const auto graph = direction == Direction::Incoming ?
-        storage.getGraphForTrail(0, id, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true) :
-        storage.getGraphForTrail(id, 0, ~NodeKindMask(0), CALL_EDGES, library, depth * 3, true);
-    for(const auto& [node, reached] : walkCalls(*graph, id, direction, depth, &expanded)) {
-      if(!inputs.count(node) && reached.cost < results[node].cost) {
-        results[node] = reached;
+    // The callers of a C++ template are those of its specializations, the code the calls are bound to.
+    std::vector<Id> starts = {id};
+    if(direction == Direction::Incoming && storage.getNameHierarchyForNodeId(id).getDelimiter() == L"::") {
+      for(const StorageEdge& edge : storage.getEdgesForTargetIds({id})) {
+        if(Edge::intToType(edge.type) == Edge::EDGE_TEMPLATE_SPECIALIZATION) {
+          starts.push_back(edge.sourceNodeId);
+        }
+      }
+    }
+    for(const Id start : starts) {
+      const auto graph = direction == Direction::Incoming ?
+          storage.getGraphForTrail(0, start, ~NodeKindMask(0), CALL_EDGES, false, depth * 3, true) :
+          storage.getGraphForTrail(start, 0, ~NodeKindMask(0), CALL_EDGES, library, depth * 3, true);
+      for(auto [node, reached] : walkCalls(*graph, start, direction, depth, &expanded)) {
+        if(start != id && !reached.via) {
+          reached.via = start;
+        }
+        if(!inputs.count(node) && node != start && reached.cost < results[node].cost) {
+          results[node] = reached;
+        }
       }
     }
   }

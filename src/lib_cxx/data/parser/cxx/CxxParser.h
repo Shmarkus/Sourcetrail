@@ -36,7 +36,9 @@ public:
                   const std::vector<std::wstring>& compilerFlags = {});
 
 private:
-  void runTool(clang::tooling::CompilationDatabase* pCompilationDatabase, const FilePath& sourceFilePath);
+  void runTool(clang::tooling::CompilationDatabase* pCompilationDatabase,
+               const FilePath& sourceFilePath,
+               const FilePath& workingDirectory);
 
   [[nodiscard]] std::shared_ptr<CxxDiagnosticConsumer> getDiagnostics(const FilePath& sourceFilePath,
                                                                       std::shared_ptr<CanonicalFilePathCache> canonicalFilePathCache,

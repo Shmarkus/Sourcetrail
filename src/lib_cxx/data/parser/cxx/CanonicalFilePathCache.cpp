@@ -27,7 +27,8 @@ std::wstring getFileNameOfFileEntry(const clang::FileEntry* entry, const clang::
 }    // namespace
 #endif
 
-CanonicalFilePathCache::CanonicalFilePathCache(std::shared_ptr<FileRegister> fileRegister) : m_fileRegister(fileRegister) {}
+CanonicalFilePathCache::CanonicalFilePathCache(std::shared_ptr<FileRegister> fileRegister, FilePath workingDirectory)
+    : m_fileRegister(fileRegister), m_workingDirectory(std::move(workingDirectory)) {}
 
 std::shared_ptr<FileRegister> CanonicalFilePathCache::getFileRegister() const {
   return m_fileRegister;
@@ -71,7 +72,11 @@ FilePath CanonicalFilePathCache::getCanonicalFilePath(const std::wstring& path) 
     return it->second;
   }
 
-  const FilePath canonicalPath = FilePath(path).makeCanonical();
+  FilePath filePath(path);
+  if(!filePath.isAbsolute() && !m_workingDirectory.empty()) {
+    filePath = m_workingDirectory.getConcatenated(filePath);
+  }
+  const FilePath canonicalPath = filePath.makeCanonical();
   const std::wstring lowercaseCanonicalPath = utility::toLowerCase(canonicalPath.wstr());
 
   m_fileStringMap.emplace(std::move(lowercasePath), canonicalPath);

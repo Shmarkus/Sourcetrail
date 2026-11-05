@@ -2,14 +2,15 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "FilePath.h"
 
 class ProjectSettings;
 
-// Creating a project from nothing but a source folder: its Java build, its TypeScript project, its Python project, or
-// any of them together. Everything Sourcetrail writes for the project goes into <folder>/.sourcetrail/, which ignores
-// itself in git.
+// Creating a project from nothing but a source folder: its Java build, its TypeScript project, its Python project, its
+// C/C++ compilation database, or any of them together. Everything Sourcetrail writes for the project goes into
+// <folder>/.sourcetrail/, which ignores itself in git.
 
 enum class JavaBuildKind { Gradle, Maven, None };
 
@@ -21,12 +22,21 @@ struct DetectedBuild {
   JavaBuildKind java = JavaBuildKind::None;
   bool typeScript = false;    // a tsconfig.json at the folder's top level
   // A pyproject.toml, setup.py, setup.cfg or requirements*.txt at the folder's top level; without a Gradle or Maven
-  // build and a tsconfig.json, also .py files anywhere below it and no .java file (outside the folders the Python
-  // indexer skips). A few Python scripts in a Java or TypeScript project make no Python project.
+  // build, a tsconfig.json and a C/C++ build, also .py files anywhere below it and no .java file (outside the folders
+  // the Python indexer skips). A few Python scripts in a Java, TypeScript or C/C++ project make no Python project.
   bool python = false;
+  // With C/C++ support: the compile_commands.json at the folder's top level, else in build/, else in the first
+  // cmake-build-*/ or out/build/*/ folder by name; empty when there is none.
+  FilePath compilationDatabase;
+  // With C/C++ support: a CMakeLists.txt at the folder's top level but no compilation database, which CMake writes when
+  // asked (compilationDatabaseCommand).
+  bool cmakeWithoutDatabase = false;
 };
 
 DetectedBuild detectBuild(const FilePath& folder);
+
+// The command, run in a CMake project's folder, that writes the compilation database detectBuild finds.
+std::wstring compilationDatabaseCommand();
 
 // <folder>/.sourcetrail/<folder name>.srctrlprj
 FilePath projectFileFor(const FilePath& folder);
@@ -39,8 +49,9 @@ FilePath existingProjectFile(const FilePath& folder);
 FilePath rootTsconfigFor(const FilePath& projectDirectory);
 
 // Writes projectFileFor(folder) with a source group for the Java build (tests indexed), one for the TypeScript
-// project and one for the Python project (the folder), and .sourcetrail/.gitignore; with none, a plain Java source
-// group over the folder with an empty classpath. Returns the project file, or an empty path when it could not be written.
+// project, one for the Python project (the folder) and one for the compilation database (the folder's headers
+// indexed), and .sourcetrail/.gitignore; with none, a plain Java source group over the folder with an empty classpath. Returns
+// the project file, or an empty path when it could not be written.
 FilePath createProject(const FilePath& folder, const DetectedBuild& build);
 
 // The settings createProject writes, in memory only; their file is projectFileFor(folder).
@@ -53,6 +64,10 @@ bool addTypeScriptGroup(const FilePath& projectFile, const FilePath& folder);
 // Appends a Python source group for <folder> to the project file and saves it; false when the project cannot be read
 // or written.
 bool addPythonGroup(const FilePath& projectFile, const FilePath& folder);
+
+// Appends a C/C++ source group for the compilation database detectBuild finds in <folder> to the project file and saves
+// it; false when there is none or the project cannot be read or written.
+bool addCxxGroup(const FilePath& projectFile, const FilePath& folder);
 
 // The project root a new Python source group of a project starts with: ".." for a project directory named
 // .sourcetrail, the folder it sits in; else empty, the project directory itself.
@@ -70,10 +85,14 @@ struct ProjectChoice {
   bool canAddTypeScript = false;
   // The existing project has no Python source group, but the folder has a Python project: see addPythonGroup.
   bool canAddPython = false;
+  // The existing project has no compilation database source group, but the folder has a compilation database: see
+  // addCxxGroup.
+  bool canAddCxx = false;
   DetectedBuild build;
 };
 
 // What New Project does with the picked folder: the project already in its .sourcetrail/, else a new one for the
-// detected Java build, TypeScript and Python project. With none, acceptPlainJava decides between a plain Java project (left
-// to set up) and nothing.
+// detected Java build, TypeScript project, Python project and compilation database. With none, a CMake project gets
+// nothing (build.cmakeWithoutDatabase says why), else acceptPlainJava decides between a plain Java project (left to
+// set up) and nothing.
 ProjectChoice openOrCreateProject(const FilePath& folder, const std::function<bool()>& acceptPlainJava);

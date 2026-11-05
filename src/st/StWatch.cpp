@@ -4,6 +4,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 
+#include "language_packages.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaGradle.h"
 #include "SourceGroupSettingsPython.h"
@@ -11,6 +12,9 @@
 #include "SourceGroupSettingsWithSourcePaths.h"
 #include "utilityGradleCache.h"
 #include "utilityString.h"
+#if BUILD_CXX_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsCxxCdb.h"
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 namespace st {
 namespace {
@@ -53,6 +57,13 @@ public:
 
   void file(const QString& path) {
     if(!excluded(path) && m_seen.insert(path).second) {
+      m_files.push_back(path);
+    }
+  }
+
+  // A file that is watched wherever it is, such as a compilation database in build/.
+  void buildFile(const QString& path) {
+    if(QFileInfo(path).isFile() && m_seen.insert(path).second) {
       m_files.push_back(path);
     }
   }
@@ -195,6 +206,13 @@ std::vector<QString> watchPaths(const ProjectSettings& settings, const std::vect
                            &SourceGroupSettingsPython::isTriggerFile);
       continue;
     }
+#if BUILD_CXX_LANGUAGE_PACKAGE
+    // its source files and headers are among the indexed files
+    if(const auto cdb = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(group)) {
+      paths.buildFile(toQString(cdb->getCompilationDatabasePathExpandedAndAbsolute()));
+      continue;
+    }
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
     const auto gradle = std::dynamic_pointer_cast<SourceGroupSettingsJavaGradle>(group);
     if(!gradle) {
       if(const auto sources = std::dynamic_pointer_cast<SourceGroupSettingsWithSourcePaths>(group)) {

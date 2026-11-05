@@ -9,6 +9,7 @@
 
 #include <system_error>
 
+#include "language_packages.h"
 #include "logging.h"
 #include "ProjectSettings.h"
 #include "SourceGroupSettingsJavaEmpty.h"
@@ -18,6 +19,9 @@
 #include "SourceGroupSettingsTypeScript.h"
 #include "utilityString.h"
 #include "utilityUuid.h"
+#if BUILD_CXX_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsCxxCdb.h"
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 namespace fs = std::filesystem;
 
@@ -25,6 +29,7 @@ namespace {
 
 constexpr auto ProjectFolderName = L".sourcetrail";
 constexpr auto TsconfigName = L"tsconfig.json";
+constexpr auto CompilationDatabaseName = L"compile_commands.json";
 
 // The Java standard of a project whose build names no Java version.
 constexpr auto DefaultJavaStandard = 21;
@@ -240,6 +245,52 @@ std::shared_ptr<SourceGroupSettings> createPythonSourceGroup(const fs::path& fol
   return settings;
 }
 
+#if BUILD_CXX_LANGUAGE_PACKAGE
+std::shared_ptr<SourceGroupSettings> createCxxSourceGroup(const fs::path& folder,
+                                                          const FilePath& compilationDatabase,
+                                                          const ProjectSettings* projectSettings) {
+  auto settings = std::make_shared<SourceGroupSettingsCxxCdb>(utility::getUuidString(), projectSettings);
+  settings->setName("C/C++");
+  const fs::path projectDirectory = folder / ProjectFolderName;
+  settings->setCompilationDatabasePath(relativeToProject(toPath(compilationDatabase), projectDirectory));
+  // Only the headers below an indexed header path are indexed; the folder's own are part of the project.
+  settings->setIndexedHeaderPaths({relativeToProject(folder, projectDirectory)});
+  return settings;
+}
+
+// The subfolders of a folder, by name.
+std::vector<fs::path> subfolders(const fs::path& folder) {
+  std::vector<fs::path> folders;
+  std::error_code error;
+  for(const auto& entry : fs::directory_iterator{folder, error}) {
+    std::error_code typeError;
+    if(entry.is_directory(typeError)) {
+      folders.push_back(entry.path());
+    }
+  }
+  std::ranges::sort(folders);
+  return folders;
+}
+
+FilePath findCompilationDatabase(const fs::path& folder) {
+  std::vector<fs::path> candidates = {folder, folder / "build"};
+  for(const fs::path& subfolder : subfolders(folder)) {
+    if(subfolder.filename().wstring().starts_with(L"cmake-build-")) {
+      candidates.push_back(subfolder);
+    }
+  }
+  for(const fs::path& subfolder : subfolders(folder / "out" / "build")) {
+    candidates.push_back(subfolder);
+  }
+  for(const fs::path& candidate : candidates) {
+    if(isFile(candidate / CompilationDatabaseName)) {
+      return FilePath{(candidate / CompilationDatabaseName).wstring()};
+    }
+  }
+  return {};
+}
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+
 // A pyproject.toml, setup.py, setup.cfg or requirements*.txt at the folder's top level.
 bool hasPythonProjectFile(const fs::path& folder) {
   for(const auto* name : {L"pyproject.toml", L"setup.py", L"setup.cfg"}) {
@@ -295,9 +346,18 @@ JavaBuildKind detectJavaBuild(const FilePath& folder) {
 DetectedBuild detectBuild(const FilePath& folder) {
   const fs::path path = folderPath(folder);
   DetectedBuild build{.java = detectJavaBuild(folder), .typeScript = isFile(path / TsconfigName)};
+#if BUILD_CXX_LANGUAGE_PACKAGE
+  build.compilationDatabase = findCompilationDatabase(path);
+  build.cmakeWithoutDatabase = build.compilationDatabase.empty() && isFile(path / "CMakeLists.txt");
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+  const bool cxx = !build.compilationDatabase.empty() || build.cmakeWithoutDatabase;
   build.python = hasPythonProjectFile(path) ||
-      (build.java == JavaBuildKind::None && !build.typeScript && hasOnlyPythonSources(path));
+      (build.java == JavaBuildKind::None && !build.typeScript && !cxx && hasOnlyPythonSources(path));
   return build;
+}
+
+std::wstring compilationDatabaseCommand() {
+  return L"cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
 }
 
 FilePath projectFileFor(const FilePath& folder) {
@@ -357,7 +417,7 @@ std::shared_ptr<ProjectSettings> projectSettingsFor(const FilePath& folder, cons
   settings->setVersion(ProjectSettings::VERSION);
 
   std::vector<std::shared_ptr<SourceGroupSettings>> groups;
-  if(build.java != JavaBuildKind::None || (!build.typeScript && !build.python)) {
+  if(build.java != JavaBuildKind::None || (!build.typeScript && !build.python && build.compilationDatabase.empty())) {
     groups.push_back(createJavaSourceGroup(path, build.java, settings.get()));
   }
   if(build.typeScript) {
@@ -366,6 +426,11 @@ std::shared_ptr<ProjectSettings> projectSettingsFor(const FilePath& folder, cons
   if(build.python) {
     groups.push_back(createPythonSourceGroup(path, settings.get()));
   }
+#if BUILD_CXX_LANGUAGE_PACKAGE
+  if(!build.compilationDatabase.empty()) {
+    groups.push_back(createCxxSourceGroup(path, build.compilationDatabase, settings.get()));
+  }
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
   settings->setAllSourceGroupSettings(groups);
   return settings;
 }
@@ -407,6 +472,22 @@ bool addPythonGroup(const FilePath& projectFile, const FilePath& folder) {
       projectFile, [&folder](const ProjectSettings* settings) { return createPythonSourceGroup(folderPath(folder), settings); });
 }
 
+bool addCxxGroup(const FilePath& projectFile, const FilePath& folder) {
+#if BUILD_CXX_LANGUAGE_PACKAGE
+  const FilePath compilationDatabase = findCompilationDatabase(folderPath(folder));
+  if(compilationDatabase.empty()) {
+    LOG_ERROR("No compilation database in {}", folder.str());
+    return false;
+  }
+  return addSourceGroup(projectFile, [&folder, &compilationDatabase](const ProjectSettings* settings) {
+    return createCxxSourceGroup(folderPath(folder), compilationDatabase, settings);
+  });
+#else
+  LOG_ERROR("Cannot add C/C++ to {}: built without C/C++ support", projectFile.str());
+  return false;
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+}
+
 FilePath pythonRootFor(const FilePath& projectDirectory) {
   if(projectDirectory.empty() || folderPath(projectDirectory).filename() != ProjectFolderName) {
     return {};
@@ -439,10 +520,22 @@ ProjectChoice openOrCreateProject(const FilePath& folder, const std::function<bo
   if(FilePath existing = existingProjectFile(folder); !existing.empty()) {
     const bool canAddTypeScript = build.typeScript && !hasSourceGroup(existing, SOURCE_GROUP_TYPESCRIPT);
     const bool canAddPython = build.python && !hasSourceGroup(existing, SOURCE_GROUP_PYTHON);
-    return {.projectFile = existing, .canAddTypeScript = canAddTypeScript, .canAddPython = canAddPython, .build = build};
+#if BUILD_CXX_LANGUAGE_PACKAGE
+    const bool canAddCxx = !build.compilationDatabase.empty() && !hasSourceGroup(existing, SOURCE_GROUP_CXX_CDB);
+#else
+    const bool canAddCxx = false;
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
+    return {.projectFile = existing,
+            .canAddTypeScript = canAddTypeScript,
+            .canAddPython = canAddPython,
+            .canAddCxx = canAddCxx,
+            .build = build};
   }
 
-  if(build.java == JavaBuildKind::None && !build.typeScript && !build.python) {
+  if(build.java == JavaBuildKind::None && !build.typeScript && !build.python && build.compilationDatabase.empty()) {
+    if(build.cmakeWithoutDatabase) {
+      return {.build = build};
+    }
     if(!acceptPlainJava()) {
       return {};
     }

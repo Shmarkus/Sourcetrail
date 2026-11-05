@@ -596,6 +596,9 @@ int status(const st::Io& io,
              << '\n';
     }
   }
+  for(const std::string& row : st::cxxStatusRows(settings)) {
+    io.out << row << '\n';
+  }
   return st::EXIT_RESULTS;
 }
 

@@ -27,8 +27,9 @@ GroupInputs storedGroupInputs(const ProjectSettings& settings, const PersistentS
 
 // Stale when a source file, source directory or Gradle build file changed at or after `indexedAt`, or when a
 // TypeScript or Python group's inputs (its trigger files) differ from the ones in `inputs`; such a group without a
-// stored record counts the trigger files changed at or after `indexedAt`. Other source groups without a Gradle preparation
-// cache fall back to the indexed files.
+// stored record counts the trigger files changed at or after `indexedAt`. C/C++ groups check the indexed files, their
+// headers included, and their compilation database. Other source groups without a Gradle preparation cache fall back to
+// the indexed files.
 Freshness checkFreshness(const ProjectSettings& settings,
                          const TimeStamp& indexedAt,
                          const std::vector<FilePath>& indexedFiles,
@@ -37,6 +38,10 @@ Freshness checkFreshness(const ProjectSettings& settings,
 // One "maven\t..." row per enabled Maven source group for `st status`: "ok", each warning of its last Maven run
 // (re-shown by every refresh that reuses it) or "not prepared; st index runs Maven".
 std::vector<std::string> mavenStatusRows(const ProjectSettings& settings);
+
+// One "cxx\t..." row per enabled C/C++ source group for `st status`: "indexed", or "broken: compilation database not
+// found: <path>". None without C/C++ support.
+std::vector<std::string> cxxStatusRows(const ProjectSettings& settings);
 
 // st's last successful refresh: when it started and the index time it left behind.
 struct RefreshRecord {

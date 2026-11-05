@@ -85,6 +85,7 @@ if(BUILD_CXX_LANGUAGE_PACKAGE)
             # MixedProjectTest's own SetUp, which this suite replaces, names the Angular + Spring fixture.
             TS_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/angular-spring"
             CPP_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/cpp"
+            PY_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/testing/cli/python"
             CMAKE_COMMAND_PATH="${CMAKE_COMMAND}"
             CMAKE_GENERATOR_NAME="${CMAKE_GENERATOR}"
             CMAKE_MAKE_PROGRAM_PATH="${CMAKE_MAKE_PROGRAM}")

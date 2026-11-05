@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include "language_packages.h"
 #include "ProjectSettings.h"
 #include "ProjectSetup.h"
 #include "SourceGroupSettingsJavaEmpty.h"
@@ -13,6 +14,9 @@
 #include "SourceGroupSettingsPython.h"
 #include "SourceGroupSettingsTypeScript.h"
 #include "SourceGroupSettingsWithJavaStandard.h"
+#if BUILD_CXX_LANGUAGE_PACKAGE
+#  include "SourceGroupSettingsCxxCdb.h"
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
 
 namespace fs = std::filesystem;
 
@@ -672,3 +676,157 @@ TEST_F(ProjectSetupTest, openOrCreateWithoutABuildWritesNothingWhenDeclined) {
   EXPECT_FALSE(choice.created);
   EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
 }
+
+#if BUILD_CXX_LANGUAGE_PACKAGE
+TEST_F(ProjectSetupTest, detectsACompilationDatabaseAtTheTopLevelOrInABuildFolder) {
+  for(const char* path : {"compile_commands.json",
+                          "build/compile_commands.json",
+                          "cmake-build-debug/compile_commands.json",
+                          "out/build/x64-debug/compile_commands.json"}) {
+    fs::remove_all(mRoot);
+    touch(path);
+    const DetectedBuild build = detectBuild(folder());
+    EXPECT_EQ(FilePath{(mRoot / path).wstring()}, build.compilationDatabase) << path;
+    EXPECT_FALSE(build.cmakeWithoutDatabase) << path;
+    EXPECT_EQ(JavaBuildKind::None, build.java) << path;
+    EXPECT_FALSE(build.python) << path;
+  }
+}
+
+TEST_F(ProjectSetupTest, theTopLevelCompilationDatabaseWinsThenBuildThenTheFirstByName) {
+  touch("out/build/a/compile_commands.json");
+  touch("cmake-build-release/compile_commands.json");
+  touch("cmake-build-debug/compile_commands.json");
+  EXPECT_EQ(FilePath{(mRoot / "cmake-build-debug/compile_commands.json").wstring()}, detectBuild(folder()).compilationDatabase);
+  touch("build/compile_commands.json");
+  EXPECT_EQ(FilePath{(mRoot / "build/compile_commands.json").wstring()}, detectBuild(folder()).compilationDatabase);
+  touch("compile_commands.json");
+  EXPECT_EQ(FilePath{(mRoot / "compile_commands.json").wstring()}, detectBuild(folder()).compilationDatabase);
+}
+
+TEST_F(ProjectSetupTest, aCompilationDatabaseDeeperDownOrADirectoryOfThatNameIsNone) {
+  touch("third_party/lib/build/compile_commands.json");
+  touch("build/debug/compile_commands.json");
+  fs::create_directories(mRoot / "compile_commands.json");
+
+  EXPECT_TRUE(detectBuild(folder()).compilationDatabase.empty());
+}
+
+TEST_F(ProjectSetupTest, cmakeWithoutACompilationDatabaseIsReported) {
+  touch("CMakeLists.txt");
+  touch("src/main.cpp");
+  touch("tools/gen.py");
+
+  const DetectedBuild build = detectBuild(folder());
+
+  EXPECT_TRUE(build.compilationDatabase.empty());
+  EXPECT_TRUE(build.cmakeWithoutDatabase);
+  // a C/C++ project with a few Python scripts is no Python project
+  EXPECT_FALSE(build.python);
+  EXPECT_NE(std::wstring::npos, compilationDatabaseCommand().find(L"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"));
+}
+
+TEST_F(ProjectSetupTest, loosePythonScriptsNextToACompilationDatabaseGiveNoPython) {
+  touch("build/compile_commands.json");
+  touch("scripts/release.py");
+  EXPECT_FALSE(detectBuild(folder()).python);
+
+  touch("pyproject.toml");
+  EXPECT_TRUE(detectBuild(folder()).python);
+}
+
+TEST_F(ProjectSetupTest, createWritesACompilationDatabaseGroupWithRelativePaths) {
+  touch("CMakeLists.txt");
+  touch("build/compile_commands.json");
+
+  const auto cdb = std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(
+      onlySourceGroup(createProject(folder(), detectBuild(folder()))));
+
+  ASSERT_TRUE(cdb);
+  EXPECT_EQ("C/C++", cdb->getName());
+  EXPECT_EQ(FilePath{(mRoot / "build/compile_commands.json").wstring()}, cdb->getCompilationDatabasePathExpandedAndAbsolute());
+  // relative, so the checkout can move
+  EXPECT_FALSE(cdb->getCompilationDatabasePath().isAbsolute());
+  // the folder's own headers are indexed, not only its source files
+  ASSERT_EQ(1U, cdb->getIndexedHeaderPaths().size());
+  EXPECT_FALSE(cdb->getIndexedHeaderPaths().front().isAbsolute());
+  EXPECT_EQ(folder(), cdb->getIndexedHeaderPathsExpandedAndAbsolute().front());
+}
+
+TEST_F(ProjectSetupTest, createWritesCxxNextToTheOtherGroups) {
+  touch("build.gradle");
+  touch("pyproject.toml");
+  touch("compile_commands.json");
+
+  const auto groups = sourceGroups(createProject(folder(), detectBuild(folder())));
+
+  ASSERT_EQ(3U, groups.size());
+  EXPECT_TRUE(groupOf<SourceGroupSettingsJavaGradle>(groups));
+  EXPECT_TRUE(groupOf<SourceGroupSettingsPython>(groups));
+  auto cdb = groupOf<SourceGroupSettingsCxxCdb>(groups);
+  ASSERT_TRUE(cdb);
+  EXPECT_EQ(FilePath{(mRoot / "compile_commands.json").wstring()}, cdb->getCompilationDatabasePathExpandedAndAbsolute());
+}
+
+TEST_F(ProjectSetupTest, openOrCreateCreatesACxxOnlyProjectWithoutAsking) {
+  touch("build/compile_commands.json");
+  bool asked = false;
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [&asked] { return asked = true; });
+
+  EXPECT_FALSE(asked);
+  EXPECT_TRUE(choice.created);
+  EXPECT_FALSE(choice.needsSetup);
+  EXPECT_FALSE(choice.canAddCxx);
+  EXPECT_TRUE(std::dynamic_pointer_cast<SourceGroupSettingsCxxCdb>(onlySourceGroup(choice.projectFile)));
+}
+
+// Without a compilation database a CMake project gets the command that writes one, not a plain Java project.
+TEST_F(ProjectSetupTest, openOrCreateWithCMakeButNoCompilationDatabaseWritesNothingAndAsksNothing) {
+  touch("CMakeLists.txt");
+  bool asked = false;
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [&asked] { return asked = true; });
+
+  EXPECT_FALSE(asked);
+  EXPECT_TRUE(choice.projectFile.empty());
+  EXPECT_TRUE(choice.build.cmakeWithoutDatabase);
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+
+TEST_F(ProjectSetupTest, openOrCreateOffersCxxForAnExistingProjectWithoutIt) {
+  touch("pyproject.toml");
+  touch("CMakeLists.txt");
+  const FilePath projectFile = createProject(folder(), detectBuild(folder()));
+  EXPECT_FALSE(openOrCreateProject(folder(), [] { return true; }).canAddCxx);
+  touch("build/compile_commands.json");
+
+  const ProjectChoice choice = openOrCreateProject(folder(), [] { return true; });
+
+  EXPECT_EQ(projectFile, choice.projectFile);
+  EXPECT_FALSE(choice.created);
+  EXPECT_TRUE(choice.canAddCxx);
+  EXPECT_FALSE(choice.canAddPython);
+
+  ASSERT_TRUE(addCxxGroup(projectFile, folder()));
+  const auto groups = sourceGroups(projectFile);
+  ASSERT_EQ(2U, groups.size());
+  EXPECT_TRUE(groupOf<SourceGroupSettingsPython>(groups));
+  auto cdb = groupOf<SourceGroupSettingsCxxCdb>(groups);
+  ASSERT_TRUE(cdb);
+  EXPECT_EQ(FilePath{(mRoot / "build/compile_commands.json").wstring()}, cdb->getCompilationDatabasePathExpandedAndAbsolute());
+  EXPECT_FALSE(openOrCreateProject(folder(), [] { return true; }).canAddCxx);
+}
+
+TEST_F(ProjectSetupTest, addCxxGroupFailsWithoutACompilationDatabaseOrAProject) {
+  touch("pyproject.toml");
+  const FilePath projectFile = createProject(folder(), detectBuild(folder()));
+  EXPECT_FALSE(addCxxGroup(projectFile, folder()));
+  EXPECT_EQ(1U, sourceGroups(projectFile).size());
+
+  fs::remove_all(mRoot);
+  touch("compile_commands.json");
+  EXPECT_FALSE(addCxxGroup(projectFileFor(folder()), folder()));
+  EXPECT_FALSE(fs::exists(mRoot / ".sourcetrail"));
+}
+#endif    // BUILD_CXX_LANGUAGE_PACKAGE
